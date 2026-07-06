@@ -1,12 +1,39 @@
 /* 电脑端控制台交互逻辑 console.js */
 
 let ws = null;
-let currentWsPort = 18081; // 默认探测起点端口
+const urlParams = new URLSearchParams(window.location.search);
+const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
+const hasPinnedWsPort = Number.isInteger(pinnedWsPort) && pinnedWsPort >= 1 && pinnedWsPort <= 65535;
+let currentWsPort = hasPinnedWsPort ? pinnedWsPort : 18081; // 默认探测起点端口
 const maxPortPortion = 10;  // 最大端口探测范围
 let triedPortsCount = 0;
 
 let appQR = null;
 let gameQR = null;
+
+function setText(id, value) {
+    const node = document.getElementById(id);
+    if (node) {
+        node.innerText = value;
+    }
+}
+
+function setConnectionHint(message) {
+    setText("game-url-text", message);
+}
+
+function renderQRCode(instance, text, targetName) {
+    if (!instance || !text) return false;
+
+    try {
+        instance.clear();
+        instance.makeCode(text);
+        return true;
+    } catch (error) {
+        console.error(`${targetName}二维码生成失败:`, error);
+        return false;
+    }
+}
 
 // 初始化二维码实例
 function initQRCodes() {
@@ -40,6 +67,7 @@ function connectWebSocket() {
     ws.onopen = () => {
         console.log(`控制台连接成功: ${targetUrl}`);
         triedPortsCount = 0;
+        setConnectionHint("后台通信已连接，正在等待二维码数据...");
     };
     
     ws.onmessage = (event) => {
@@ -55,6 +83,13 @@ function connectWebSocket() {
     };
     
     ws.onclose = () => {
+        setConnectionHint("后台通信离线：请确认 start.command 终端窗口仍在运行，然后刷新本页。");
+
+        if (hasPinnedWsPort) {
+            setTimeout(connectWebSocket, 2000);
+            return;
+        }
+
         // 如果未连上，自适应寻找下一个端口
         if (triedPortsCount < maxPortPortion) {
             triedPortsCount++;
@@ -89,16 +124,25 @@ function updateUI(data) {
 
     // 2. 更新 App 扫码绑定二维码
     if (data.app_qrcode_url) {
-        appQR.clear();
-        appQR.makeCode(data.app_qrcode_url);
+        const appRendered = renderQRCode(appQR, data.app_qrcode_url, "App 绑定");
+        setText(
+            "app-url-text",
+            appRendered
+                ? "绑定二维码已生成；如二维码未显示，请刷新本页。"
+                : `二维码生成失败，绑定数据：${data.app_qrcode_url}`
+        );
+    } else {
+        setText("app-url-text", "等待后台生成绑定二维码...");
     }
 
     // 3. 更新手机小游戏扫码和地址
     const gameToken = encodeURIComponent(data.game_token || "");
     const gameUrl = `http://${data.local_ip}:${data.http_port}/static/game.html?ws=${data.web_ws_port}&token=${gameToken}`;
-    document.getElementById("game-url-text").innerText = gameUrl;
-    gameQR.clear();
-    gameQR.makeCode(gameUrl);
+    setText("game-url-text", gameUrl);
+    const gameRendered = renderQRCode(gameQR, gameUrl, "游戏操纵端");
+    if (!gameRendered) {
+        setText("game-url-text", `二维码生成失败，可手动输入：${gameUrl}`);
+    }
 
     // 4. 更新技术状态表格
     document.getElementById("stat-ip").innerText = data.local_ip;

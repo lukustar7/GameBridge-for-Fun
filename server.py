@@ -478,7 +478,7 @@ async def main():
 
     # 4. 运行环境就绪后，在电脑端自动打开浏览器控制台
     print("服务已启动")
-    webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html")
+    webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
 
     # 5. 挂起主协程，保持服务持久运行
     await asyncio.Event().wait()

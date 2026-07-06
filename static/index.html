@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>DG-LAB 控制台</title>
     <link rel="stylesheet" href="style.css">
-    <script src="qrcode.min.js"></script>
+    <script src="qrcode.min.js?v=20260706"></script>
 </head>
 <body>
     <div class="container">
@@ -31,6 +31,7 @@
                 <div class="panel">
                     <h2>1. App 远控绑定</h2>
                     <p class="sub-text" style="margin-bottom: 15px;">使用 DG-LAB App 扫描下方二维码建立网关连接</p>
+                    <p id="app-url-text" style="font-family: monospace; font-size: 0.8rem; color: #666666; margin-bottom: 15px; word-break: break-all;">等待后台生成绑定二维码...</p>
                     <div class="qr-box">
                         <div id="app-qrcode"></div>
                     </div>
@@ -135,6 +136,6 @@
         </div>
     </div>
 
-    <script src="console.js"></script>
+    <script src="console.js?v=20260706-ws-fallback"></script>
 </body>
 </html>
