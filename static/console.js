@@ -37,6 +37,10 @@ function renderQRCode(instance, text, targetName) {
 
 // 初始化二维码实例
 function initQRCodes() {
+    if (typeof QRCode === "undefined") {
+        throw new Error("QRCode library is not loaded");
+    }
+
     const appBox = document.getElementById("app-qrcode");
     const gameBox = document.getElementById("game-qrcode");
     
@@ -61,6 +65,7 @@ function initQRCodes() {
 function connectWebSocket() {
     const host = window.location.hostname || "127.0.0.1";
     const targetUrl = `ws://${host}:${currentWsPort}/console`;
+    setConnectionHint(`正在连接后台通信: ${targetUrl}`);
     
     ws = new WebSocket(targetUrl);
     
@@ -243,7 +248,19 @@ function applyPorts() {
 }
 
 // 页面加载就绪后执行
-window.onload = () => {
-    initQRCodes();
+window.addEventListener("DOMContentLoaded", () => {
+    setConnectionHint("控制台脚本已启动，正在连接后台...");
+
+    /*
+       二维码库只负责“画图”，不能决定后台是否连接。
+       如果二维码库在某个浏览器里加载失败，仍然先连 WebSocket，把手动地址显示出来。
+    */
+    try {
+        initQRCodes();
+    } catch (error) {
+        console.error("二维码库初始化失败:", error);
+        setText("app-url-text", "二维码库加载失败；连接后台后会显示可手动复制的绑定数据。");
+    }
+
     connectWebSocket();
-};
+});
