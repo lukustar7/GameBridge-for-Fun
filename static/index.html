@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>DG-LAB 控制台</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>DG-LAB 控制台</h1>
+            <p class="sub-text">极简纯黑 OLED 桥接中心</p>
+        </header>
+
+        <!-- Tab 切换 -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('monitor')">状态监控</div>
+            <div class="tab" onclick="switchTab('settings')">参数设置</div>
+        </div>
+
+        <!-- 状态监控面版 -->
+        <div id="tab-monitor" class="tab-content active">
+            <div class="status-badge">
+                <div class="status-label">连接状态</div>
+                <span id="conn-status" style="color: #444444;">等待绑定</span>
+            </div>
+
+            <div class="grid">
+                <!-- App 绑定二维码区 -->
+                <div class="panel">
+                    <h2>1. App 远控绑定</h2>
+                    <p class="sub-text" style="margin-bottom: 15px;">使用 DG-LAB App 扫描下方二维码建立网关连接</p>
+                    <div class="qr-box">
+                        <div id="app-qrcode"></div>
+                    </div>
+                </div>
+
+                <!-- 游戏操纵端二维码区 -->
+                <div class="panel">
+                    <h2>2. 游戏操纵端</h2>
+                    <p class="sub-text" style="margin-bottom: 10px;">用手机浏览器扫描二维码，或在同一局域网下输入：</p>
+                    <p id="game-url-text" style="font-family: monospace; font-size: 0.9rem; color: #888888; margin-bottom: 15px;">等待本地服务获取 IP...</p>
+                    <div class="qr-box">
+                        <div id="game-qrcode"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 参数设置面版 -->
+        <div id="tab-settings" class="tab-content">
+            <div class="grid">
+                <!-- 技术参数配置 -->
+                <div class="panel">
+                    <h2>技术参数</h2>
+                    <table class="stats-table">
+                        <tr>
+                            <td>局域网 IP</td>
+                            <td id="stat-ip">-</td>
+                        </tr>
+                        <tr>
+                            <td>HTTP 静态网页端口</td>
+                            <td id="stat-http-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>网页通信 (WS) 端口</td>
+                            <td id="stat-web-ws-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>App 桥接 (WS) 端口</td>
+                            <td id="stat-app-ws-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>电脑 $\leftrightarrow$ 手机 App 延迟</td>
+                            <td id="stat-app-latency">-</td>
+                        </tr>
+                        <tr>
+                            <td>电脑 $\leftrightarrow$ 手机浏览器延迟</td>
+                            <td id="stat-game-latency">-</td>
+                        </tr>
+                        <tr>
+                            <td>硬件通道 A 强度</td>
+                            <td id="stat-strength-a">-</td>
+                        </tr>
+                        <tr>
+                            <td>硬件通道 B 强度</td>
+                            <td id="stat-strength-b">-</td>
+                        </tr>
+                        <tr>
+                            <td>通道 A 硬件限幅上限</td>
+                            <td id="stat-limit-a">-</td>
+                        </tr>
+                        <tr>
+                            <td>通道 B 硬件限幅上限</td>
+                            <td id="stat-limit-b">-</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- 端口管理 -->
+                <div class="panel" style="display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <h2>端口管理</h2>
+                        <p class="sub-text" style="margin-bottom: 20px;">更改端口需要重新访问网页。如发生占用，系统会自动递增分配。</p>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label class="slider-label" style="margin-bottom: 5px;">HTTP 端口</label>
+                            <input type="number" id="input-http-port" min="10000" max="65535">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label class="slider-label" style="margin-bottom: 5px;">网页 WS 端口</label>
+                            <input type="number" id="input-web-ws-port" min="10000" max="65535">
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <label class="slider-label" style="margin-bottom: 5px;">App WS 端口</label>
+                            <input type="number" id="input-app-ws-port" min="10000" max="65535">
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button style="flex: 1;" onclick="randomizePorts()">随机更换</button>
+                        <button style="flex: 1; border-color: #ffffff;" onclick="applyPorts()">保存配置</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="console.js"></script>
+</body>
+</html>
