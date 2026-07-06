@@ -24,7 +24,7 @@ GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
 
 # 游戏端惩罚的硬边界。前端也会限流，但后端必须自己兜底，不能相信局域网客户端。
 MIN_SHOCK_DURATION_MS = 100
-MAX_SHOCK_DURATION_MS = 10000
+MAX_SHOCK_DURATION_MS = 60000
 MIN_PULSE_INTERVAL_SECONDS = 0.22
 
 # 服务运行实例句柄 (用于端口热重启)
@@ -417,6 +417,7 @@ async def web_ws_handler(websocket, path):
             game_connections.discard(websocket)
             game_connection_last_pulse_at.pop(websocket, None)
             state["game_client_connected"] = len(game_connections) > 0
+            await stop_all_output()
             await broadcast_state()
     else:
         await websocket.close(code=1008, reason="unknown route")

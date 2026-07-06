@@ -76,6 +76,12 @@
             margin-top: 12px;
         }
 
+        .game-help {
+            color: #888888;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+
         .switch-row {
             display: flex;
             justify-content: space-between;
@@ -327,6 +333,14 @@
                             <input type="range" id="dice-shake-sensitivity" min="8" max="35" value="15" oninput="updateSettingValue('dice-shake-sensitivity')">
                         </div>
 
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>豹子每点时长</span>
+                                <span id="val-dice-leopard-seconds-per-point">5s</span>
+                            </div>
+                            <input type="range" id="dice-leopard-seconds-per-point" min="1" max="10" value="5" oninput="updateSettingValue('dice-leopard-seconds-per-point')">
+                        </div>
+
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">对手难度</label>
                             <select id="dice-opponent-difficulty" onchange="saveSelectedSettings(true)">
@@ -361,6 +375,7 @@
             <div class="grid">
                 <div class="panel">
                     <h2 id="game-title">游戏进行中</h2>
+                    <p id="game-help" class="game-help">-</p>
                     <p id="game-status" class="sub-text" style="margin-bottom: 15px;">-</p>
 
                     <div id="game-viewport" class="canvas-container">

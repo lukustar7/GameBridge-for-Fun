@@ -5,6 +5,7 @@
 let ws = null;
 let latencyTimer = null;
 let reconnectTimer = null;
+let suppressReconnect = false;
 
 const urlParams = new URLSearchParams(window.location.search);
 const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
@@ -45,7 +46,8 @@ const DEFAULT_SETTINGS = {
         timeMax: 4.0,
         shakeSensitivity: 15,
         opponentDifficulty: "normal",
-        manualRoll: true
+        manualRoll: true,
+        leopardSecondsPerPoint: 5
     }
 };
 
@@ -53,20 +55,23 @@ const GAME_META = {
     shake: {
         title: "手抖挑战",
         subtitle: "设置弹珠安全区、倾斜灵敏度和出界后的宽容时间。",
+        help: "保持弹珠停在安全区内。离开安全区超过宽容时间后，偏离越远，惩罚越强。",
         toleranceLabel: (cfg) => cfg.mode === "gap" ? `夹缝 ${cfg.gapInner}% / ${cfg.safeRadius}%` : `半径 ${cfg.safeRadius}%`,
         triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发`
     },
     angle: {
         title: "保持角度",
         subtitle: "以校准姿态为基准，设置目标角度、允许误差和持续偏离时间。",
+        help: "以开始时的握持姿态为基准。持续偏离目标角度才会触发，短暂晃动不会立刻结算。",
         toleranceLabel: (cfg) => `目标 ${cfg.targetOffset}° ± ${cfg.tolerance}°`,
         triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发`
     },
     dice: {
         title: "摇骰子对决",
         subtitle: "设置摇晃灵敏度、对手难度和失败后的惩罚区间。",
+        help: "摇晃越充分，玩家骰子越有优势。任意一方摇出豹子时直接触发豹子惩罚。",
         toleranceLabel: (cfg) => `灵敏度 ${cfg.shakeSensitivity}`,
-        triggerLabel: (cfg) => `${cfg.timeMin.toFixed(1)}s - ${cfg.timeMax.toFixed(1)}s`
+        triggerLabel: (cfg) => `失败 ${cfg.timeMin.toFixed(1)}s-${cfg.timeMax.toFixed(1)}s | 豹子 ${cfg.leopardSecondsPerPoint}s/点`
     }
 };
 
@@ -115,6 +120,7 @@ let lastShakeTime = 0;
 let diceShakeEnergy = 0;
 let shakeStopTimeout = null;
 let manualRollTimer = null;
+let wakeLock = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -166,6 +172,7 @@ function connectWebSocket() {
     const tokenQuery = gameToken ? `?token=${encodeURIComponent(gameToken)}` : "";
     const targetUrl = `ws://${host}:${currentWsPort}/game${tokenQuery}`;
 
+    suppressReconnect = false;
     clearTimeout(reconnectTimer);
     ws = new WebSocket(targetUrl);
 
@@ -211,6 +218,10 @@ function connectWebSocket() {
         clearInterval(latencyTimer);
         setText("ping-badge", "网速延迟: 离线");
 
+        if (suppressReconnect) {
+            return;
+        }
+
         if (hasPinnedWsPort) {
             reconnectTimer = setTimeout(connectWebSocket, 2000);
             return;
@@ -241,6 +252,83 @@ function sendGameMessage(payload) {
         return true;
     }
     return false;
+}
+
+function closeGameSocketForEmergency() {
+    suppressReconnect = true;
+    clearTimeout(reconnectTimer);
+    clearInterval(latencyTimer);
+
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        try {
+            ws.close(1000, "emergency stop");
+        } catch (error) {
+            console.warn("关闭游戏 WebSocket 失败:", error);
+        }
+    }
+}
+
+async function requestScreenWakeLock() {
+    if (!("wakeLock" in navigator) || wakeLock) return;
+
+    try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => {
+            wakeLock = null;
+        });
+    } catch (error) {
+        console.warn("屏幕常亮请求失败，当前浏览器可能不支持 Wake Lock:", error);
+    }
+}
+
+async function releaseScreenWakeLock() {
+    if (!wakeLock) return;
+
+    try {
+        await wakeLock.release();
+    } catch (error) {
+        console.warn("释放屏幕常亮锁失败:", error);
+    } finally {
+        wakeLock = null;
+    }
+}
+
+function emergencyStop(reason) {
+    if (!activeGame && !isDiceShaking) return;
+
+    stopRuntimeLoops();
+    activeGame = null;
+    isDiceShaking = false;
+    sendGameMessage({
+        type: "stop_shock",
+        reason
+    });
+    closeGameSocketForEmergency();
+    releaseScreenWakeLock();
+    setText("game-status", "已紧急停止");
+}
+
+function bindEmergencyStopEvents() {
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            emergencyStop("page_hidden");
+            return;
+        }
+
+        if (suppressReconnect) {
+            suppressReconnect = false;
+        }
+
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+            connectWebSocket();
+        }
+    });
+
+    window.addEventListener("pagehide", () => emergencyStop("page_hide"));
+    window.addEventListener("beforeunload", () => emergencyStop("before_unload"));
+
+    // Safari 和部分 Chromium 内核会在页面冻结前触发 freeze；能收到就直接停。
+    document.addEventListener("freeze", () => emergencyStop("page_freeze"));
 }
 
 // --- 4. 传感器授权、绑定与音频初始化 ---
@@ -404,6 +492,7 @@ function populateSettingsForm(gameName) {
         setRangeValue("dice-time-min", cfg.timeMin);
         setRangeValue("dice-time-max", cfg.timeMax);
         setRangeValue("dice-shake-sensitivity", cfg.shakeSensitivity);
+        setRangeValue("dice-leopard-seconds-per-point", cfg.leopardSecondsPerPoint);
         $("dice-opponent-difficulty").value = cfg.opponentDifficulty;
         $("dice-manual-roll").checked = cfg.manualRoll;
     }
@@ -422,6 +511,8 @@ function updateSettingValue(id, shouldSave = true) {
         label = `${rawValue}%`;
     } else if (id.endsWith("forgive-ms") || id.endsWith("trigger-ms")) {
         label = `${rawValue}ms`;
+    } else if (id.endsWith("seconds-per-point")) {
+        label = `${rawValue}s`;
     } else if (id.includes("time-")) {
         label = `${rawValue.toFixed(1)}s`;
     } else if (id.includes("angle-") || id.endsWith("ramp-degrees")) {
@@ -486,6 +577,7 @@ function collectSettingsFromForm(gameName) {
         timeMin: Math.min(timeMin, timeMax),
         timeMax: Math.max(timeMin, timeMax),
         shakeSensitivity: clamp(readNumber("dice-shake-sensitivity", 15), 8, 35),
+        leopardSecondsPerPoint: clamp(readNumber("dice-leopard-seconds-per-point", 5), 1, 10),
         opponentDifficulty: $("dice-opponent-difficulty").value,
         manualRoll: $("dice-manual-roll").checked
     };
@@ -521,6 +613,7 @@ async function startConfiguredGame() {
     if (selectedGame === "dice") {
         unlockAudio();
     }
+    requestScreenWakeLock();
 
     activeGame = selectedGame;
     gameStartedAt = Date.now();
@@ -543,6 +636,7 @@ async function startConfiguredGame() {
 function setupPlayScreen(gameName) {
     const cfg = gameSettings[gameName];
     setText("game-title", GAME_META[gameName].title);
+    setText("game-help", GAME_META[gameName].help);
     setText("summary-game", GAME_META[gameName].title);
     setText("summary-strength-min", cfg.strengthMin);
     setText("summary-strength-max", cfg.strengthMax);
@@ -591,6 +685,7 @@ function stopCurrentGame() {
     activeGame = null;
     isDiceShaking = false;
     sendGameMessage({ type: "stop_shock" });
+    releaseScreenWakeLock();
     const rollButton = $("btn-roll");
     if (rollButton) {
         rollButton.disabled = false;
@@ -953,6 +1048,10 @@ function rollOpponentDie(difficulty) {
     return value;
 }
 
+function getTripleFace(dices) {
+    return dices[0] === dices[1] && dices[1] === dices[2] ? dices[0] : 0;
+}
+
 function settleDiceGame() {
     if (!isDiceShaking) return;
     isDiceShaking = false;
@@ -979,6 +1078,27 @@ function settleDiceGame() {
     setText("dice-3", player[2]);
     setText("dice-scores", `玩家总分: ${pTotal} | 对手总分: ${oTotal}`);
     $("btn-roll").disabled = !cfg.manualRoll;
+
+    const playerTriple = getTripleFace(player);
+    const opponentTriple = getTripleFace(opponent);
+    const leopardFace = Math.max(playerTriple, opponentTriple);
+    if (leopardFace > 0) {
+        const owner = playerTriple && opponentTriple ? "双方豹子" : playerTriple ? "玩家豹子" : "对手豹子";
+        const punishDuration = leopardFace * cfg.leopardSecondsPerPoint * 1000;
+        setText("dice-instruction", `${owner} | ${leopardFace}点豹子`);
+        $("dice-instruction").style.color = "#ff3333";
+
+        sendGameMessage({
+            type: "game_shock_trigger",
+            strength: Math.round(cfg.strengthMax),
+            duration: Math.round(punishDuration)
+        });
+
+        if (navigator.vibrate) {
+            navigator.vibrate(Math.min(1200, Math.round(punishDuration)));
+        }
+        return;
+    }
 
     if (pTotal >= oTotal) {
         setText("dice-instruction", `挑战胜出 | 摇晃效率 ${Math.round(powerRatio * 100)}%`);
@@ -1011,5 +1131,6 @@ window.onload = () => {
     populateSettingsForm("shake");
     populateSettingsForm("angle");
     populateSettingsForm("dice");
+    bindEmergencyStopEvents();
     connectWebSocket();
 };
