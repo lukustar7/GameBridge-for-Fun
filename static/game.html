@@ -7,40 +7,96 @@
     <link rel="stylesheet" href="style.css">
     <style>
         body {
-            /* 手机端防抖、防选择、优化触摸体验 */
+            /* 手机端游戏需要稳定触摸输入，禁止页面滚动、缩放和误选中文字。 */
             touch-action: none;
             -webkit-user-select: none;
             user-select: none;
         }
-        .game-select-container {
+
+        .flex-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .game-select-container,
+        .settings-stack {
             display: flex;
             flex-direction: column;
             gap: 15px;
             margin-bottom: 25px;
         }
+
         .game-card {
             border: 1px solid #222222;
             padding: 20px;
             cursor: pointer;
         }
+
         .game-card:active {
             border-color: #ffffff;
         }
+
         .back-btn {
             margin-bottom: 20px;
         }
-        .flex-row {
+
+        .screen {
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        .setting-panel {
+            display: none;
+        }
+
+        .setting-panel.active {
+            display: block;
+        }
+
+        .settings-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .settings-actions.single {
+            grid-template-columns: 1fr;
+        }
+
+        .inline-note {
+            min-height: 22px;
+            color: #888888;
+            font-size: 0.85rem;
+            margin-top: 12px;
+        }
+
+        .switch-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 14px;
+            color: #888888;
+            font-size: 0.9rem;
+            margin: 15px 0;
         }
-        /* 摇骰子大屏显示 */
+
+        .switch-row input {
+            width: auto;
+        }
+
         .dice-area {
             display: flex;
             justify-content: center;
             gap: 20px;
             margin: 30px 0;
         }
+
         .dice-box {
             width: 70px;
             height: 70px;
@@ -52,55 +108,270 @@
             font-family: monospace;
             background-color: #000000;
         }
+
+        @media (max-width: 420px) {
+            .flex-row {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .settings-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .dice-area {
+                gap: 10px;
+            }
+
+            .dice-box {
+                width: 58px;
+                height: 58px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- 头部状态栏 -->
         <header class="flex-row">
             <h1>DG-LAB 小游戏</h1>
             <span id="ping-badge" class="sub-text">网速延迟: --ms</span>
         </header>
 
-        <!-- 1. 游戏选择列表首屏 -->
-        <div id="screen-select">
+        <!-- 游戏选择页只负责选择玩法，不直接启动，避免玩家没调好参数就开始受罚。 -->
+        <div id="screen-select" class="screen active">
             <h2 style="margin-bottom: 20px;">选择挑战游戏</h2>
             <div class="game-select-container">
-                <div class="game-card" onclick="startGame('shake')">
+                <div class="game-card" onclick="openGameSettings('shake')">
                     <h3>手抖挑战</h3>
-                    <p class="sub-text" style="margin-top: 5px;">端平手机，防止弹珠滑出安全区</p>
+                    <p class="sub-text" style="margin-top: 5px;">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</p>
                 </div>
-                <div class="game-card" onclick="startGame('angle')">
+                <div class="game-card" onclick="openGameSettings('angle')">
                     <h3>保持角度</h3>
-                    <p class="sub-text" style="margin-top: 5px;">使手机倾斜度维持在安全区间内</p>
+                    <p class="sub-text" style="margin-top: 5px;">以当前握持姿态为基准，持续偏离目标角度才触发惩罚</p>
                 </div>
-                <div class="game-card" onclick="startGame('dice')">
+                <div class="game-card" onclick="openGameSettings('dice')">
                     <h3>摇骰子对决</h3>
-                    <p class="sub-text" style="margin-top: 5px;">摇晃手机与对手比大小，输者遭受差额惩罚</p>
+                    <p class="sub-text" style="margin-top: 5px;">晃动越充分，玩家骰子越有优势，失败后按差额结算</p>
                 </div>
             </div>
         </div>
 
-        <!-- 2. 小游戏运行与配置区域 -->
-        <div id="screen-play" style="display: none;">
-            <button class="back-btn" onclick="exitGame()">返回列表</button>
-            
+        <!-- 独立设置页：每个游戏一套参数，保存后进入游玩页。 -->
+        <div id="screen-settings" class="screen">
+            <button class="back-btn" onclick="showSelectScreen()">返回列表</button>
+            <div class="panel">
+                <h2 id="settings-title">游戏设置</h2>
+                <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
+
+                <div id="settings-shake" class="setting-panel">
+                    <div class="settings-stack">
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">游戏模式</label>
+                            <select id="shake-mode" onchange="saveSelectedSettings(true)">
+                                <option value="radius">安全半径模式</option>
+                                <option value="gap">夹缝生存模式</option>
+                            </select>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>基础惩罚强度</span>
+                                <span id="val-shake-strength-min">20</span>
+                            </div>
+                            <input type="range" id="shake-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('shake-strength-min')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最大惩罚强度</span>
+                                <span id="val-shake-strength-max">60</span>
+                            </div>
+                            <input type="range" id="shake-strength-max" min="0" max="200" value="60" oninput="updateSettingValue('shake-strength-max')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>安全区半径</span>
+                                <span id="val-shake-safe-radius">26%</span>
+                            </div>
+                            <input type="range" id="shake-safe-radius" min="12" max="45" value="26" oninput="updateSettingValue('shake-safe-radius')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>夹缝内圈半径</span>
+                                <span id="val-shake-gap-inner">12%</span>
+                            </div>
+                            <input type="range" id="shake-gap-inner" min="6" max="28" value="12" oninput="updateSettingValue('shake-gap-inner')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>倾斜灵敏度</span>
+                                <span id="val-shake-sensitivity">55</span>
+                            </div>
+                            <input type="range" id="shake-sensitivity" min="20" max="100" value="55" oninput="updateSettingValue('shake-sensitivity')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>出界宽容时间</span>
+                                <span id="val-shake-forgive-ms">600ms</span>
+                            </div>
+                            <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button onclick="calibrateCurrentPose('shake')">校准当前姿态</button>
+                        <button onclick="startConfiguredGame()">开始游戏</button>
+                    </div>
+                </div>
+
+                <div id="settings-angle" class="setting-panel">
+                    <div class="settings-stack">
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>基础惩罚强度</span>
+                                <span id="val-angle-strength-min">15</span>
+                            </div>
+                            <input type="range" id="angle-strength-min" min="0" max="200" value="15" oninput="updateSettingValue('angle-strength-min')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最大惩罚强度</span>
+                                <span id="val-angle-strength-max">70</span>
+                            </div>
+                            <input type="range" id="angle-strength-max" min="0" max="200" value="70" oninput="updateSettingValue('angle-strength-max')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>目标偏移角度</span>
+                                <span id="val-angle-target-offset">0°</span>
+                            </div>
+                            <input type="range" id="angle-target-offset" min="-45" max="45" value="0" oninput="updateSettingValue('angle-target-offset')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>允许误差</span>
+                                <span id="val-angle-tolerance">8°</span>
+                            </div>
+                            <input type="range" id="angle-tolerance" min="2" max="30" value="8" oninput="updateSettingValue('angle-tolerance')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>持续偏离触发</span>
+                                <span id="val-angle-trigger-ms">800ms</span>
+                            </div>
+                            <input type="range" id="angle-trigger-ms" min="100" max="2500" step="100" value="800" oninput="updateSettingValue('angle-trigger-ms')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>强度递增跨度</span>
+                                <span id="val-angle-ramp-degrees">28°</span>
+                            </div>
+                            <input type="range" id="angle-ramp-degrees" min="5" max="60" value="28" oninput="updateSettingValue('angle-ramp-degrees')">
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button onclick="calibrateCurrentPose('angle')">校准当前姿态</button>
+                        <button onclick="startConfiguredGame()">开始游戏</button>
+                    </div>
+                </div>
+
+                <div id="settings-dice" class="setting-panel">
+                    <div class="settings-stack">
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>基础惩罚强度</span>
+                                <span id="val-dice-strength-min">20</span>
+                            </div>
+                            <input type="range" id="dice-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength-min')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最大惩罚强度</span>
+                                <span id="val-dice-strength-max">80</span>
+                            </div>
+                            <input type="range" id="dice-strength-max" min="0" max="200" value="80" oninput="updateSettingValue('dice-strength-max')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最小持续时间</span>
+                                <span id="val-dice-time-min">1.0s</span>
+                            </div>
+                            <input type="range" id="dice-time-min" min="0.5" max="5.0" step="0.5" value="1.0" oninput="updateSettingValue('dice-time-min')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最大持续时间</span>
+                                <span id="val-dice-time-max">4.0s</span>
+                            </div>
+                            <input type="range" id="dice-time-max" min="0.5" max="10.0" step="0.5" value="4.0" oninput="updateSettingValue('dice-time-max')">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>摇晃灵敏度</span>
+                                <span id="val-dice-shake-sensitivity">15</span>
+                            </div>
+                            <input type="range" id="dice-shake-sensitivity" min="8" max="35" value="15" oninput="updateSettingValue('dice-shake-sensitivity')">
+                        </div>
+
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">对手难度</label>
+                            <select id="dice-opponent-difficulty" onchange="saveSelectedSettings(true)">
+                                <option value="easy">较弱</option>
+                                <option value="normal">标准</option>
+                                <option value="hard">较强</option>
+                            </select>
+                        </div>
+
+                        <label class="switch-row">
+                            <span>允许手动摇号</span>
+                            <input type="checkbox" id="dice-manual-roll" onchange="saveSelectedSettings(true)">
+                        </label>
+                    </div>
+
+                    <div class="settings-actions single">
+                        <button onclick="startConfiguredGame()">开始游戏</button>
+                    </div>
+                </div>
+
+                <div id="settings-message" class="inline-note"></div>
+            </div>
+        </div>
+
+        <!-- 游玩页只展示当前玩法和必要控制，避免设置变更和惩罚判定混在一起。 -->
+        <div id="screen-play" class="screen">
+            <div class="flex-row" style="margin-bottom: 20px;">
+                <button onclick="exitGame()">返回列表</button>
+                <button onclick="stopCurrentGame()">停止输出</button>
+            </div>
+
             <div class="grid">
-                <!-- 游戏渲染视窗 -->
                 <div class="panel">
                     <h2 id="game-title">游戏进行中</h2>
-                    
-                    <!-- 游戏 1 & 2 的 Canvas 容器 -->
+                    <p id="game-status" class="sub-text" style="margin-bottom: 15px;">-</p>
+
                     <div id="game-viewport" class="canvas-container">
                         <canvas id="game-canvas"></canvas>
                     </div>
 
-                    <!-- 游戏 3 摇骰子交互区 -->
                     <div id="dice-viewport" style="display: none; text-align: center; padding: 20px 0;">
                         <div id="dice-instruction" class="sub-text" style="font-size: 1rem; margin-bottom: 20px;">
                             摇晃手机 或 点击下方按钮开始摇号
                         </div>
-                        
+
                         <div class="dice-area">
                             <div class="dice-box" id="dice-1">-</div>
                             <div class="dice-box" id="dice-2">-</div>
@@ -115,85 +386,30 @@
                     </div>
                 </div>
 
-                <!-- 游戏专属自定义配置 -->
                 <div class="panel">
-                    <h2>游戏设置</h2>
-
-                    <!-- 惩罚力度滑块 (公共设置) -->
-                    <div class="slider-container">
-                        <div class="slider-label">
-                            <span>基础惩罚强度</span>
-                            <span id="val-base-strength">20</span>
-                        </div>
-                        <input type="range" id="base-strength" min="0" max="200" value="20" oninput="updateVal('base-strength')">
-                    </div>
-
-                    <div class="slider-container">
-                        <div class="slider-label">
-                            <span>最大惩罚强度</span>
-                            <span id="val-max-strength">60</span>
-                        </div>
-                        <input type="range" id="max-strength" min="0" max="200" value="60" oninput="updateVal('max-strength')">
-                    </div>
-
-                    <hr style="border-color: #222222; margin: 20px 0;">
-
-                    <!-- 游戏 1 手抖配置 -->
-                    <div id="settings-shake" class="game-settings" style="display: none;">
-                        <div style="margin-bottom: 15px;">
-                            <label class="slider-label" style="margin-bottom: 5px;">游戏模式</label>
-                            <select id="shake-mode" onchange="initShakeGame()">
-                                <option value="radius">安全半径模式</option>
-                                <option value="gap">夹缝生存模式</option>
-                            </select>
-                        </div>
-
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>安全区大小 (像素)</span>
-                                <span id="val-shake-radius">50</span>
-                            </div>
-                            <input type="range" id="shake-radius" min="15" max="120" value="50" oninput="updateVal('shake-radius')">
-                        </div>
-                    </div>
-
-                    <!-- 游戏 2 保持角度配置 -->
-                    <div id="settings-angle" class="game-settings" style="display: none;">
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>安全角度上限 (度)</span>
-                                <span id="val-angle-max">50</span>
-                            </div>
-                            <input type="range" id="angle-max" min="0" max="90" value="50" oninput="updateVal('angle-max')">
-                        </div>
-
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>安全角度下限 (度)</span>
-                                <span id="val-angle-min">30</span>
-                            </div>
-                            <input type="range" id="angle-min" min="0" max="90" value="30" oninput="updateVal('angle-min')">
-                        </div>
-                    </div>
-
-                    <!-- 游戏 3 摇骰子配置 -->
-                    <div id="settings-dice" class="game-settings" style="display: none;">
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>最小持续时间 (秒)</span>
-                                <span id="val-dice-time-min">1.0</span>
-                            </div>
-                            <input type="range" id="dice-time-min" min="0.5" max="5.0" step="0.5" value="1.0" oninput="updateVal('dice-time-min')">
-                        </div>
-
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>最大持续时间 (秒)</span>
-                                <span id="val-dice-time-max">4.0</span>
-                            </div>
-                            <input type="range" id="dice-time-max" min="0.5" max="10.0" step="0.5" value="4.0" oninput="updateVal('dice-time-max')">
-                        </div>
-                    </div>
+                    <h2>当前参数</h2>
+                    <table class="stats-table">
+                        <tr>
+                            <td>玩法</td>
+                            <td id="summary-game">-</td>
+                        </tr>
+                        <tr>
+                            <td>基础强度</td>
+                            <td id="summary-strength-min">-</td>
+                        </tr>
+                        <tr>
+                            <td>最大强度</td>
+                            <td id="summary-strength-max">-</td>
+                        </tr>
+                        <tr>
+                            <td>关键容错</td>
+                            <td id="summary-tolerance">-</td>
+                        </tr>
+                        <tr>
+                            <td>触发策略</td>
+                            <td id="summary-trigger">-</td>
+                        </tr>
+                    </table>
                 </div>
             </div>
         </div>

@@ -4,12 +4,14 @@ DG-LAB 郊狼小游戏选择器中转系统 - 后端核心服务端 (重构适�
 """
 import asyncio
 import json
+import secrets
 import socket
 import threading
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 import websockets
-from pydglab_ws import Channel, StrengthOperationType, DGLabWSConnect, DGLabWSServer
+from pydglab_ws import Channel, RetCode, StrengthOperationType, DGLabWSConnect, DGLabWSServer
 
 # --- 全局状态与配置 ---
 LOCAL_IP = "127.0.0.1"
@@ -18,10 +20,17 @@ LOCAL_IP = "127.0.0.1"
 HTTP_PORT = 18080
 WEB_WS_PORT = 18081
 APP_WS_PORT = 15678
+GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
+
+# 游戏端惩罚的硬边界。前端也会限流，但后端必须自己兜底，不能相信局域网客户端。
+MIN_SHOCK_DURATION_MS = 100
+MAX_SHOCK_DURATION_MS = 10000
+MIN_PULSE_INTERVAL_SECONDS = 0.22
 
 # 服务运行实例句柄 (用于端口热重启)
 http_server_instance = None
 web_ws_server_instance = None
+http_server_ready = threading.Event()
 
 # app_client 缓存
 dg_app_client = None
@@ -44,6 +53,11 @@ game_connections = set()
 
 # 锁机制，防止异步状态冲突
 state_lock = asyncio.Lock()
+shock_lock = asyncio.Lock()
+
+# 记录每个游戏 WebSocket 最近一次惩罚请求时间，用于抑制疯狂点击或恶意刷包。
+game_connection_last_pulse_at = {}
+shock_generation = 0
 
 
 # --- 工具函数：网络与端口探测 ---
@@ -93,6 +107,7 @@ def run_http_server():
     
     # 打印冷峻格式启动日志
     print(f"HTTP 服务已启动: 端口 {HTTP_PORT}")
+    http_server_ready.set()
     http_server_instance.serve_forever()
 
 
@@ -107,6 +122,7 @@ async def broadcast_state():
             "http_port": HTTP_PORT,
             "web_ws_port": WEB_WS_PORT,
             "app_ws_port": APP_WS_PORT,
+            "game_token": GAME_ACCESS_TOKEN,
             "app_connected": state["app_connected"],
             "app_latency": state["app_latency"],
             "app_qrcode_url": state["app_qrcode_url"],
@@ -146,6 +162,15 @@ async def read_app_data_stream(client):
     global state
     try:
         async for data in client.data_generator():
+            if data == RetCode.CLIENT_DISCONNECTED:
+                print("手机 App 已断开绑定")
+                state["app_connected"] = False
+                state["app_latency"] = -1
+                state["client_strength_a"] = 0
+                state["client_strength_b"] = 0
+                await broadcast_state()
+                return
+
             # 一旦收到数据包，说明 App 已扫码连接并成功绑定
             if not state["app_connected"]:
                 state["app_connected"] = True
@@ -177,67 +202,119 @@ async def read_app_data_stream(client):
 
 
 async def app_bridge_runner():
-    """异步长久运行 App 服务端和控制客户端 (基于上下文管理器)"""
+    """异步长久运行 App 服务端和控制客户端，断线后自动重建绑定入口"""
     global dg_app_client, state, APP_WS_PORT
-    APP_WS_PORT = find_free_port(APP_WS_PORT)
 
-    # 1. 启动远控网关
-    async with DGLabWSServer("0.0.0.0", APP_WS_PORT) as server:
-        print(f"App 远控网关已启动: 端口 {APP_WS_PORT}")
-        
-        # 2. 启动控制客户端并连入本地网关
-        async with DGLabWSConnect(f"ws://127.0.0.1:{APP_WS_PORT}") as client:
-            dg_app_client = client
-            
-            # 3. 提取绑定二维码
-            client_id = client.client_id
-            state["app_qrcode_url"] = f"https://www.dungeon-lab.com/app-client.html?target=ws://{LOCAL_IP}:{APP_WS_PORT}/{client_id}"
+    while True:
+        APP_WS_PORT = find_free_port(APP_WS_PORT)
+
+        try:
+            # 启动远控网关，并在 App 掉线后退出上下文释放端口，下一轮重新生成二维码。
+            async with DGLabWSServer("0.0.0.0", APP_WS_PORT) as server:
+                print(f"App 远控网关已启动: 端口 {APP_WS_PORT}")
+
+                async with DGLabWSConnect(f"ws://127.0.0.1:{APP_WS_PORT}") as client:
+                    dg_app_client = client
+                    state["app_qrcode_url"] = client.get_qrcode(f"ws://{LOCAL_IP}:{APP_WS_PORT}")
+                    await broadcast_state()
+
+                    read_task = asyncio.create_task(read_app_data_stream(client))
+                    latency_task = asyncio.create_task(monitor_app_latency(client))
+                    done, pending = await asyncio.wait(
+                        {read_task, latency_task},
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    for task in done:
+                        task.result()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"App 桥接运行异常: {e}")
+        finally:
+            state["app_connected"] = False
+            state["app_latency"] = -1
+            state["client_strength_a"] = 0
+            state["client_strength_b"] = 0
+            dg_app_client = None
             await broadcast_state()
-            
-            # 4. 并发跑监听 App 消息和延迟的任务
-            try:
-                await asyncio.gather(
-                    read_app_data_stream(client),
-                    monitor_app_latency(client)
-                )
-            except Exception as e:
-                print(f"App 桥接运行异常: {e}")
-            finally:
-                state["app_connected"] = False
-                state["app_latency"] = -1
-                dg_app_client = None
-                await broadcast_state()
+
+        await asyncio.sleep(1)
 
 
 # --- 4. 网页端控制台与手机小游戏 WebSocket 服务 (8081端口) ---
 
+def clamp_int(value, minimum, maximum, fallback=0):
+    """把外部输入压成安全整数，防止字符串、空值、超大值直接进入硬件控制逻辑"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = fallback
+    return max(minimum, min(maximum, number))
+
+
+def build_pulse_operation(channel_strength):
+    """构造 pydglab-ws 需要的 V3 单组 100ms 波形数据"""
+    # pydglab-ws 的 PulseOperation 是 ((4 个频率值), (4 个波形强度值))，
+    # 不是旧代码里误写的 4 元组。波形强度上限是 100，通道强度上限是 200。
+    wave_strength = clamp_int(round(channel_strength / 2), 1, 100, fallback=1)
+    return ((100, 100, 100, 100), (wave_strength, wave_strength, wave_strength, wave_strength))
+
+
+async def stop_all_output():
+    """尽量清空 A 通道输出，用于返回列表、断线或用户点击停止输出"""
+    global dg_app_client, shock_generation
+    shock_generation += 1
+    if not dg_app_client:
+        return
+
+    try:
+        await dg_app_client.clear_pulses(Channel.A)
+        await dg_app_client.set_strength(Channel.A, StrengthOperationType.SET_TO, 0)
+    except Exception as e:
+        print(f"停止输出失败: {e}")
+
+
 async def handle_game_shock(strength, duration_ms):
     """向 App 客户端下发电击脉冲任务的公共逻辑"""
-    global dg_app_client, state
+    global dg_app_client, state, shock_generation
     if not state["app_connected"] or not dg_app_client:
         return
     
     try:
-        # 电击强度安全过滤与限幅 (不超过 App 中设置的硬件上限)
+        # 通道强度遵循 0-200，且不能超过 App/设备端软上限。
         limit_a = state["limit_a"] if state["limit_a"] > 0 else 200
-        safe_strength = min(int(strength), limit_a)
+        safe_strength = min(clamp_int(strength, 0, 200, fallback=0), limit_a)
+        safe_duration = clamp_int(
+            duration_ms,
+            MIN_SHOCK_DURATION_MS,
+            MAX_SHOCK_DURATION_MS,
+            fallback=MIN_SHOCK_DURATION_MS
+        )
+        if safe_strength <= 0:
+            return
 
-        # 构造波形数据
-        # 10Hz 电击 (体感强烈)，对应 V3 频率输入值 100
-        # 每组元组代表一个 25ms 区间的 (波形频率, 波形强度, 频率平衡参数1, 频率平衡参数2)
-        # 一次发送 100ms 数据，即 4 组 (100, safe_strength, 0, 0)
-        pulse_unit = [(100, safe_strength, 0, 0)] * 4
-        
-        # 连续发送以维持对应持续时间
-        loops = int(duration_ms / 100)
-        if loops <= 0:
-            loops = 1
-            
-        for _ in range(loops):
-            if not state["app_connected"]:
-                break
-            await dg_app_client.add_pulses(Channel.A, *pulse_unit)
-            await asyncio.sleep(0.1) # 100ms 周期
+        pulse_unit = build_pulse_operation(safe_strength)
+        loops = max(1, int(safe_duration / 100))
+        generation = shock_generation
+
+        async with shock_lock:
+            if not state["app_connected"] or generation != shock_generation:
+                return
+            await dg_app_client.set_strength(Channel.A, StrengthOperationType.SET_TO, safe_strength)
+
+            for _ in range(loops):
+                if not state["app_connected"] or generation != shock_generation:
+                    break
+                await dg_app_client.add_pulses(Channel.A, pulse_unit)
+                await asyncio.sleep(0.1)
+
+            # 单次长惩罚结束后主动清空，避免设备端队列里残留后续波形。
+            if safe_duration >= 500:
+                await stop_all_output()
     except Exception as e:
         print(f"脉冲下发失败: {e}")
 
@@ -245,33 +322,51 @@ async def handle_game_shock(strength, duration_ms):
 async def web_ws_handler(websocket, path):
     """处理来自电脑控制台网页 (/console) 与手机小游戏网页 (/game) 的连接"""
     global state
-    
-    if path == "/console":
+
+    parsed_path = urlparse(path or "/")
+    route = parsed_path.path
+
+    if route == "/console":
         console_connections.add(websocket)
         # 连入后立即同步一次最新状态
         await broadcast_state()
         try:
             async for message in websocket:
-                data = json.loads(message)
+                try:
+                    data = json.loads(message)
+                except json.JSONDecodeError:
+                    continue
                 
                 # 如果收到端口更改命令，提示重载 (由于是在后台修改，我们输出指令)
                 if data.get("type") == "change_ports":
                     print(f"收到端口更改请求: WebWS={data.get('web_ws_port')}")
-                    # 此处为示意，若用户随机更换或重新设置，我们直接自适应修改并断开以强迫网页重连
+                    await websocket.send(json.dumps({
+                        "type": "port_change_unsupported",
+                        "message": "当前版本不支持运行中热切端口"
+                    }))
                     
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            console_connections.remove(websocket)
+            console_connections.discard(websocket)
             
-    elif path == "/game":
+    elif route == "/game":
+        query = parse_qs(parsed_path.query)
+        token = query.get("token", [""])[0]
+        if token != GAME_ACCESS_TOKEN:
+            await websocket.close(code=1008, reason="invalid game token")
+            return
+
         game_connections.add(websocket)
         state["game_client_connected"] = True
         await broadcast_state()
         
         try:
             async for message in websocket:
-                data = json.loads(message)
+                try:
+                    data = json.loads(message)
+                except json.JSONDecodeError:
+                    continue
                 
                 # 网页自定义应用层 Ping 延迟包，原样回复
                 if data.get("type") == "ping":
@@ -289,24 +384,42 @@ async def web_ws_handler(websocket, path):
                 
                 # 游戏 1 / 游戏 2 的持续线性惩罚数据上报 (每 100ms 触发一次)
                 elif data.get("type") == "game_pulse":
-                    strength = data.get("strength", 0)
+                    now = asyncio.get_running_loop().time()
+                    last_pulse_at = game_connection_last_pulse_at.get(websocket, 0)
+                    if now - last_pulse_at < MIN_PULSE_INTERVAL_SECONDS:
+                        continue
+                    game_connection_last_pulse_at[websocket] = now
+
+                    strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
+                    duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
-                        asyncio.create_task(handle_game_shock(strength, 100))
+                        asyncio.create_task(handle_game_shock(strength, duration))
                         
                 # 游戏 3 摇骰子结算惩罚上报 (单次触发具有一定持续时间)
                 elif data.get("type") == "game_shock_trigger":
-                    strength = data.get("strength", 0)
-                    duration = data.get("duration", 1000)
+                    strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
+                    duration = clamp_int(
+                        data.get("duration", 1000),
+                        MIN_SHOCK_DURATION_MS,
+                        MAX_SHOCK_DURATION_MS,
+                        fallback=1000
+                    )
                     if strength > 0:
                         # 开启一个后台异步任务执行指定时长的电击
                         asyncio.create_task(handle_game_shock(strength, duration))
+
+                elif data.get("type") == "stop_shock":
+                    await stop_all_output()
                         
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            game_connections.remove(websocket)
-            state["game_client_connected"] = False
+            game_connections.discard(websocket)
+            game_connection_last_pulse_at.pop(websocket, None)
+            state["game_client_connected"] = len(game_connections) > 0
             await broadcast_state()
+    else:
+        await websocket.close(code=1008, reason="unknown route")
 
 
 async def run_web_ws_server():
@@ -333,6 +446,7 @@ async def main():
     # 1. 启动 HTTP 托管线程
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
+    await asyncio.get_running_loop().run_in_executor(None, http_server_ready.wait)
 
     # 2. 启动网页 WebSocket 交互服务
     await run_web_ws_server()

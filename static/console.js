@@ -94,7 +94,8 @@ function updateUI(data) {
     }
 
     // 3. 更新手机小游戏扫码和地址
-    const gameUrl = `http://${data.local_ip}:${data.http_port}/static/game.html`;
+    const gameToken = encodeURIComponent(data.game_token || "");
+    const gameUrl = `http://${data.local_ip}:${data.http_port}/static/game.html?ws=${data.web_ws_port}&token=${gameToken}`;
     document.getElementById("game-url-text").innerText = gameUrl;
     gameQR.clear();
     gameQR.makeCode(gameUrl);
@@ -175,13 +176,13 @@ function applyPorts() {
     const appWSPort = parseInt(document.getElementById("input-app-ws-port").value);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(jsonStr = JSON.stringify({
+        ws.send(JSON.stringify({
             "type": "change_ports",
             "http_port": httpPort,
             "web_ws_port": webWSPort,
             "app_ws_port": appWSPort
         }));
-        alert("设置已保存，服务后台重载中，请通过新端口重新访问。");
+        alert("当前版本不支持运行中热切端口，请重启服务后再使用新端口。");
     }
 }
 

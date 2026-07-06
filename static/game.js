@@ -1,94 +1,298 @@
 /* 手机小游戏端交互逻辑 game.js */
 
-let ws = null;
-let currentWsPort = 18081;
-let latencyTimer = null;
-let gameLoopTimer = null;
+// --- 1. 全局连接与页面状态 ---
 
-// 当前选择的游戏名称: 'shake' (手抖), 'angle' (保持角度), 'dice' (摇骰子)
+let ws = null;
+let latencyTimer = null;
+let reconnectTimer = null;
+
+const urlParams = new URLSearchParams(window.location.search);
+const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
+const hasPinnedWsPort = Number.isInteger(pinnedWsPort) && pinnedWsPort >= 1 && pinnedWsPort <= 65535;
+const gameToken = urlParams.get("token") || "";
+let currentWsPort = hasPinnedWsPort ? pinnedWsPort : 18081;
+let triedPortsCount = 0;
+const maxPortPortion = 10;
+
+// selectedGame 是设置页当前选中的游戏；activeGame 是已经真正开始运行的游戏。
+let selectedGame = null;
 let activeGame = null;
 
-// 游戏运行标志与传感器状态
-let sensorsAllowed = false;
-let phoneBeta = 0;   // 前后倾斜 (-180 ~ 180 度)
-let phoneGamma = 0;  // 左右倾斜 (-90 ~ 90 度)
-let shakeAcc = 0;    // 当前晃动总加速度
+// 统一保存三套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
+const SETTINGS_STORAGE_KEY = "dg_lab_game_settings_v2";
+const DEFAULT_SETTINGS = {
+    shake: {
+        strengthMin: 20,
+        strengthMax: 60,
+        mode: "radius",
+        safeRadius: 26,
+        gapInner: 12,
+        sensitivity: 55,
+        forgiveMs: 600
+    },
+    angle: {
+        strengthMin: 15,
+        strengthMax: 70,
+        targetOffset: 0,
+        tolerance: 8,
+        triggerMs: 800,
+        rampDegrees: 28
+    },
+    dice: {
+        strengthMin: 20,
+        strengthMax: 80,
+        timeMin: 1.0,
+        timeMax: 4.0,
+        shakeSensitivity: 15,
+        opponentDifficulty: "normal",
+        manualRoll: true
+    }
+};
 
-// Canvas 与 绘图上下文
+const GAME_META = {
+    shake: {
+        title: "手抖挑战",
+        subtitle: "设置弹珠安全区、倾斜灵敏度和出界后的宽容时间。",
+        toleranceLabel: (cfg) => cfg.mode === "gap" ? `夹缝 ${cfg.gapInner}% / ${cfg.safeRadius}%` : `半径 ${cfg.safeRadius}%`,
+        triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发`
+    },
+    angle: {
+        title: "保持角度",
+        subtitle: "以校准姿态为基准，设置目标角度、允许误差和持续偏离时间。",
+        toleranceLabel: (cfg) => `目标 ${cfg.targetOffset}° ± ${cfg.tolerance}°`,
+        triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发`
+    },
+    dice: {
+        title: "摇骰子对决",
+        subtitle: "设置摇晃灵敏度、对手难度和失败后的惩罚区间。",
+        toleranceLabel: (cfg) => `灵敏度 ${cfg.shakeSensitivity}`,
+        triggerLabel: (cfg) => `${cfg.timeMin.toFixed(1)}s - ${cfg.timeMax.toFixed(1)}s`
+    }
+};
+
+let gameSettings = loadSettings();
+
+// --- 2. 传感器、画布与游戏运行状态 ---
+
+let sensorsAllowed = false;
+let sensorsBound = false;
+let orientationReady = false;
+let motionReady = false;
+let phoneBeta = 0;   // 前后倾斜，单位为度。
+let phoneGamma = 0;  // 左右倾斜，单位为度。
+let shakeAcc = 0;    // 三轴加速度合成值，摇骰子时用于判断晃动强度。
+
 let canvas = null;
 let ctx = null;
 let animationFrameId = null;
+let gameLoopTimer = null;
+let gameStartedAt = 0;
+let lastPulseAt = 0;
+let lastVibrateAt = 0;
 
-// Web Audio API 上下文 (用于代码合成摇骰子碰撞音效)
-let audioCtx = null;
+// 校准值只保存当前会话。玩家每次开始游戏时也会自动用当前姿态兜底校准。
+const calibration = {
+    shakeBeta: 0,
+    shakeGamma: 0,
+    angleBeta: 0
+};
 
-// --- 游戏 1：手抖挑战状态 ---
+// 手抖挑战状态。
 let ballX = 0;
 let ballY = 0;
 let ballVx = 0;
 let ballVy = 0;
+let shakeOutSince = null;
 const ballRadius = 8;
-const friction = 0.98; // 摩擦力阻尼
 
-// --- 游戏 3：摇骰子状态 ---
+// 保持角度状态。
+let angleBadSince = null;
+
+// 摇骰子状态。
+let audioCtx = null;
 let isDiceShaking = false;
 let lastShakeTime = 0;
-let lastVibrateTime = 0;
+let diceShakeEnergy = 0;
 let shakeStopTimeout = null;
+let manualRollTimer = null;
 
-// --- 1. 设备传感器授权申请 (针对 iOS 13+) ---
+function $(id) {
+    return document.getElementById(id);
+}
 
-async function requestSensorPermission() {
-    if (sensorsAllowed) return true;
-    
-    // 检查是否在 iOS 上需要特权申请
-    if (typeof DeviceOrientationEvent !== 'undefined' && 
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-        try {
-            const permissionState = await DeviceOrientationEvent.requestPermission();
-            if (permissionState === 'granted') {
-                sensorsAllowed = true;
-                return true;
-            }
-        } catch (error) {
-            console.error("传感器授权失败:", error);
-        }
-        return false;
-    } else {
-        // 安卓或非 iOS 设备默认允许
-        sensorsAllowed = true;
-        return true;
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function readNumber(id, fallback = 0) {
+    const value = parseFloat($(id).value);
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function setText(id, value) {
+    const node = $(id);
+    if (node) {
+        node.innerText = value;
     }
 }
 
-// 绑定传感器监听
-function bindSensors() {
-    // 监听倾斜角 (用于游戏 1 & 游戏 2)
-    window.addEventListener('deviceorientation', (event) => {
-        phoneBeta = event.beta || 0;
-        phoneGamma = event.gamma || 0;
-    });
-
-    // 监听加速度 (用于游戏 3 摇骰子检测)
-    window.addEventListener('devicemotion', (event) => {
-        const acc = event.acceleration || event.accelerationIncludingGravity;
-        if (acc) {
-            const x = acc.x || 0;
-            const y = acc.y || 0;
-            const z = acc.z || 0;
-            // 计算三轴总合成加速度 (刨去重力影响基准)
-            shakeAcc = Math.sqrt(x*x + y*y + z*z);
-            
-            // 如果加速度大于 15，视为在晃动手机
-            if (shakeAcc > 15 && activeGame === 'dice') {
-                triggerDiceShake();
-            }
-        }
-    });
+function loadSettings() {
+    try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return {
+            shake: { ...DEFAULT_SETTINGS.shake, ...(parsed.shake || {}) },
+            angle: { ...DEFAULT_SETTINGS.angle, ...(parsed.angle || {}) },
+            dice: { ...DEFAULT_SETTINGS.dice, ...(parsed.dice || {}) }
+        };
+    } catch (error) {
+        console.warn("读取本地游戏设置失败，已回退默认值:", error);
+        return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    }
 }
 
+function persistSettings() {
+    try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(gameSettings));
+    } catch (error) {
+        console.warn("保存本地游戏设置失败:", error);
+    }
+}
 
-// --- 2. Web Audio API 音效合成器 ---
+// --- 3. WebSocket 网络连接与心跳延迟监控 ---
+
+function connectWebSocket() {
+    const host = window.location.hostname || "127.0.0.1";
+    const tokenQuery = gameToken ? `?token=${encodeURIComponent(gameToken)}` : "";
+    const targetUrl = `ws://${host}:${currentWsPort}/game${tokenQuery}`;
+
+    clearTimeout(reconnectTimer);
+    ws = new WebSocket(targetUrl);
+
+    ws.onopen = () => {
+        console.log(`游戏端连接成功: ${targetUrl}`);
+        triedPortsCount = 0;
+        setText("ping-badge", "网速延迟: --ms");
+
+        clearInterval(latencyTimer);
+        latencyTimer = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "ping",
+                    time: Date.now()
+                }));
+            }
+        }, 1000);
+    };
+
+    ws.onmessage = (event) => {
+        let data = null;
+        try {
+            data = JSON.parse(event.data);
+        } catch (error) {
+            console.warn("收到无法解析的服务端消息:", event.data);
+            return;
+        }
+
+        if (data.type === "pong") {
+            const rtt = Date.now() - data.time;
+            setText("ping-badge", `网速延迟: ${rtt}ms`);
+
+            sendGameMessage({
+                type: "latency_report",
+                rtt
+            });
+        } else if (data.type === "button_feedback") {
+            vibrateBriefly(20);
+        }
+    };
+
+    ws.onclose = () => {
+        clearInterval(latencyTimer);
+        setText("ping-badge", "网速延迟: 离线");
+
+        if (hasPinnedWsPort) {
+            reconnectTimer = setTimeout(connectWebSocket, 2000);
+            return;
+        }
+
+        // 没有从二维码拿到明确 WS 端口时，保留 10 个端口的自动探测兜底。
+        if (triedPortsCount < maxPortPortion) {
+            triedPortsCount++;
+            currentWsPort = 18081 + (triedPortsCount % maxPortPortion);
+            reconnectTimer = setTimeout(connectWebSocket, 120);
+        } else {
+            reconnectTimer = setTimeout(() => {
+                triedPortsCount = 0;
+                currentWsPort = 18081;
+                connectWebSocket();
+            }, 2000);
+        }
+    };
+
+    ws.onerror = () => {
+        ws.close();
+    };
+}
+
+function sendGameMessage(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+        return true;
+    }
+    return false;
+}
+
+// --- 4. 传感器授权、绑定与音频初始化 ---
+
+async function requestSensorPermission() {
+    if (sensorsAllowed) return true;
+
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function") {
+        try {
+            const permissionState = await DeviceOrientationEvent.requestPermission();
+            sensorsAllowed = permissionState === "granted";
+            return sensorsAllowed;
+        } catch (error) {
+            console.error("传感器授权失败:", error);
+            return false;
+        }
+    }
+
+    sensorsAllowed = true;
+    return true;
+}
+
+function bindSensors() {
+    if (sensorsBound) return;
+    sensorsBound = true;
+
+    window.addEventListener("deviceorientation", handleOrientation);
+    window.addEventListener("devicemotion", handleMotion);
+}
+
+function handleOrientation(event) {
+    phoneBeta = Number.isFinite(event.beta) ? event.beta : 0;
+    phoneGamma = Number.isFinite(event.gamma) ? event.gamma : 0;
+    orientationReady = true;
+}
+
+function handleMotion(event) {
+    const acc = event.acceleration || event.accelerationIncludingGravity;
+    if (!acc) return;
+
+    const x = acc.x || 0;
+    const y = acc.y || 0;
+    const z = acc.z || 0;
+    shakeAcc = Math.sqrt(x * x + y * y + z * z);
+    motionReady = true;
+
+    const cfg = gameSettings.dice;
+    if (activeGame === "dice" && shakeAcc > cfg.shakeSensitivity) {
+        triggerDiceShake(shakeAcc);
+    }
+}
 
 function initAudio() {
     if (!audioCtx) {
@@ -96,248 +300,390 @@ function initAudio() {
     }
 }
 
+function unlockAudio() {
+    initAudio();
+    if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+    }
+}
+
 function playDiceCollisionSound() {
-    /* 
-       利用 Web Audio API 纯代码实时合成骰子物理撞击音效。
-       由两部分声音组成: 1. 类似摩擦的白噪声(沙沙声) 2. 具有衰减的谐振正弦波(啪嗒清脆碰撞声)
+    /*
+       使用 Web Audio API 即时合成短促碰撞音。这样不依赖外部音频文件，
+       手机弱网或离线时也不会出现资源加载失败导致的静音。
     */
     if (!audioCtx) return;
-    
+
     const now = audioCtx.currentTime;
-    
-    // 1. 声音一：白噪声 (杯壁摩擦声)
-    const bufferSize = audioCtx.sampleRate * 0.08; // 80毫秒的微短噪声
+    const bufferSize = audioCtx.sampleRate * 0.08;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
         data[i] = Math.random() * 2 - 1;
     }
-    
+
     const noiseNode = audioCtx.createBufferSource();
-    noiseNode.buffer = buffer;
-    
-    // 用 Bandpass 带通滤波器过滤噪声，使其听起来像塑料/骨质摩擦
     const filter = audioCtx.createBiquadFilter();
+    const noiseGain = audioCtx.createGain();
+    noiseNode.buffer = buffer;
     filter.type = "bandpass";
     filter.frequency.setValueAtTime(1000, now);
     filter.Q.setValueAtTime(3.0, now);
-    
-    const noiseGain = audioCtx.createGain();
     noiseGain.gain.setValueAtTime(0.05, now);
     noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-    
     noiseNode.connect(filter);
     filter.connect(noiseGain);
     noiseGain.connect(audioCtx.destination);
     noiseNode.start(now);
 
-    // 2. 声音二：正弦振荡波 (骰子撞击骨质“啪嗒”声)
     const osc = audioCtx.createOscillator();
     const oscGain = audioCtx.createGain();
-    
     osc.type = "sine";
-    osc.frequency.setValueAtTime(150 + Math.random() * 80, now); // 撞击频率
-    
-    oscGain.gain.setValueAtTime(0.3, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05); // 快速衰减阻尼
-    
+    osc.frequency.setValueAtTime(150 + Math.random() * 80, now);
+    oscGain.gain.setValueAtTime(0.22, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     osc.connect(oscGain);
     oscGain.connect(audioCtx.destination);
     osc.start(now);
     osc.stop(now + 0.06);
 }
 
+// --- 5. 设置页流程 ---
 
-// --- 3. WebSocket 网络连接与心跳延迟监控 ---
-
-function connectWebSocket() {
-    const host = window.location.hostname || "127.0.0.1";
-    const targetUrl = `ws://${host}:${currentWsPort}/game`;
-    
-    ws = new WebSocket(targetUrl);
-    
-    ws.onopen = () => {
-        console.log("游戏端连接成功");
-        
-        // 开启每 1 秒一次的应用层延迟心跳探测
-        latencyTimer = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    "type": "ping",
-                    "time": Date.now()
-                }));
-            }
-        }, 1000);
-    };
-    
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "pong") {
-            const rtt = Date.now() - data.time;
-            document.getElementById("ping-badge").innerText = `网速延迟: ${rtt}ms`;
-            
-            // 向服务器回报延迟，让电脑端控制台 Settings 也能同步看到
-            ws.send(JSON.stringify({
-                "type": "latency_report",
-                "rtt": rtt
-            }));
-        } else if (data.type === "button_feedback") {
-            // 被迫接收设备按键回调 (通常忽略，可添加物理震动好玩一下)
-            navigator.vibrate && navigator.vibrate(20);
-        }
-    };
-    
-    ws.onclose = () => {
-        clearInterval(latencyTimer);
-        setTimeout(connectWebSocket, 2000);
-    };
-    
-    ws.onerror = () => {
-        ws.close();
-    };
+function showScreen(screenId) {
+    document.querySelectorAll(".screen").forEach((node) => {
+        node.classList.remove("active");
+    });
+    $(screenId).classList.add("active");
 }
 
-
-// --- 4. 游戏框架交互控制 ---
-
-function getSliderVal(id) {
-    return parseFloat(document.getElementById(id).value);
+function showSelectScreen() {
+    selectedGame = null;
+    stopRuntimeLoops();
+    showScreen("screen-select");
 }
 
-function updateVal(id) {
-    let val = document.getElementById(id).value;
-    if (id === 'dice-time-min' || id === 'dice-time-max') {
-        val = parseFloat(val).toFixed(1);
+function openGameSettings(gameName) {
+    selectedGame = gameName;
+    activeGame = null;
+    stopRuntimeLoops();
+
+    document.querySelectorAll(".setting-panel").forEach((node) => {
+        node.classList.remove("active");
+    });
+    $(`settings-${gameName}`).classList.add("active");
+
+    setText("settings-title", GAME_META[gameName].title);
+    setText("settings-subtitle", GAME_META[gameName].subtitle);
+    setText("settings-message", "");
+    populateSettingsForm(gameName);
+    showScreen("screen-settings");
+}
+
+function populateSettingsForm(gameName) {
+    const cfg = gameSettings[gameName];
+
+    if (gameName === "shake") {
+        $("shake-mode").value = cfg.mode;
+        setRangeValue("shake-strength-min", cfg.strengthMin);
+        setRangeValue("shake-strength-max", cfg.strengthMax);
+        setRangeValue("shake-safe-radius", cfg.safeRadius);
+        setRangeValue("shake-gap-inner", cfg.gapInner);
+        setRangeValue("shake-sensitivity", cfg.sensitivity);
+        setRangeValue("shake-forgive-ms", cfg.forgiveMs);
+    } else if (gameName === "angle") {
+        setRangeValue("angle-strength-min", cfg.strengthMin);
+        setRangeValue("angle-strength-max", cfg.strengthMax);
+        setRangeValue("angle-target-offset", cfg.targetOffset);
+        setRangeValue("angle-tolerance", cfg.tolerance);
+        setRangeValue("angle-trigger-ms", cfg.triggerMs);
+        setRangeValue("angle-ramp-degrees", cfg.rampDegrees);
+    } else if (gameName === "dice") {
+        setRangeValue("dice-strength-min", cfg.strengthMin);
+        setRangeValue("dice-strength-max", cfg.strengthMax);
+        setRangeValue("dice-time-min", cfg.timeMin);
+        setRangeValue("dice-time-max", cfg.timeMax);
+        setRangeValue("dice-shake-sensitivity", cfg.shakeSensitivity);
+        $("dice-opponent-difficulty").value = cfg.opponentDifficulty;
+        $("dice-manual-roll").checked = cfg.manualRoll;
     }
-    document.getElementById(`val-${id}`).innerText = val;
 }
 
-async function startGame(gameName) {
-    // 1. 激活传感器授权与音频上下文
-    const allowed = await requestSensorPermission();
-    if (!allowed) {
-        alert("提示: 需要允许访问运动与方向感应权限以玩游戏。");
+function setRangeValue(id, value) {
+    $(id).value = value;
+    updateSettingValue(id, false);
+}
+
+function updateSettingValue(id, shouldSave = true) {
+    const rawValue = readNumber(id, 0);
+    let label = String(rawValue);
+
+    if (id.endsWith("safe-radius") || id.endsWith("gap-inner")) {
+        label = `${rawValue}%`;
+    } else if (id.endsWith("forgive-ms") || id.endsWith("trigger-ms")) {
+        label = `${rawValue}ms`;
+    } else if (id.includes("time-")) {
+        label = `${rawValue.toFixed(1)}s`;
+    } else if (id.includes("angle-") || id.endsWith("ramp-degrees")) {
+        label = `${rawValue}°`;
+    }
+
+    setText(`val-${id}`, label);
+
+    if (shouldSave) {
+        saveSelectedSettings(true);
+    }
+}
+
+function saveSelectedSettings(silent = false) {
+    if (!selectedGame) return;
+
+    const cfg = collectSettingsFromForm(selectedGame);
+    gameSettings[selectedGame] = cfg;
+    persistSettings();
+    populateSettingsForm(selectedGame);
+
+    if (!silent) {
+        setText("settings-message", "设置已保存");
+    }
+}
+
+function collectSettingsFromForm(gameName) {
+    if (gameName === "shake") {
+        const minStrength = clamp(readNumber("shake-strength-min", 20), 0, 200);
+        const maxStrength = clamp(readNumber("shake-strength-max", 60), 0, 200);
+        return {
+            strengthMin: Math.min(minStrength, maxStrength),
+            strengthMax: Math.max(minStrength, maxStrength),
+            mode: $("shake-mode").value,
+            safeRadius: clamp(readNumber("shake-safe-radius", 26), 12, 45),
+            gapInner: clamp(readNumber("shake-gap-inner", 12), 6, 28),
+            sensitivity: clamp(readNumber("shake-sensitivity", 55), 20, 100),
+            forgiveMs: clamp(readNumber("shake-forgive-ms", 600), 0, 2000)
+        };
+    }
+
+    if (gameName === "angle") {
+        const minStrength = clamp(readNumber("angle-strength-min", 15), 0, 200);
+        const maxStrength = clamp(readNumber("angle-strength-max", 70), 0, 200);
+        return {
+            strengthMin: Math.min(minStrength, maxStrength),
+            strengthMax: Math.max(minStrength, maxStrength),
+            targetOffset: clamp(readNumber("angle-target-offset", 0), -45, 45),
+            tolerance: clamp(readNumber("angle-tolerance", 8), 2, 30),
+            triggerMs: clamp(readNumber("angle-trigger-ms", 800), 100, 2500),
+            rampDegrees: clamp(readNumber("angle-ramp-degrees", 28), 5, 60)
+        };
+    }
+
+    const minStrength = clamp(readNumber("dice-strength-min", 20), 0, 200);
+    const maxStrength = clamp(readNumber("dice-strength-max", 80), 0, 200);
+    const timeMin = clamp(readNumber("dice-time-min", 1), 0.5, 10);
+    const timeMax = clamp(readNumber("dice-time-max", 4), 0.5, 10);
+    return {
+        strengthMin: Math.min(minStrength, maxStrength),
+        strengthMax: Math.max(minStrength, maxStrength),
+        timeMin: Math.min(timeMin, timeMax),
+        timeMax: Math.max(timeMin, timeMax),
+        shakeSensitivity: clamp(readNumber("dice-shake-sensitivity", 15), 8, 35),
+        opponentDifficulty: $("dice-opponent-difficulty").value,
+        manualRoll: $("dice-manual-roll").checked
+    };
+}
+
+function calibrateCurrentPose(gameName) {
+    if (!orientationReady) {
+        setText("settings-message", "传感器尚未回传姿态，开始游戏时会自动校准");
         return;
     }
-    
+
+    if (gameName === "shake") {
+        calibration.shakeBeta = phoneBeta;
+        calibration.shakeGamma = phoneGamma;
+    } else if (gameName === "angle") {
+        calibration.angleBeta = phoneBeta;
+    }
+
+    setText("settings-message", "已使用当前握持姿态作为基准");
+}
+
+async function startConfiguredGame() {
+    if (!selectedGame) return;
+
+    saveSelectedSettings(true);
+    const allowed = await requestSensorPermission();
+    if (!allowed) {
+        setText("settings-message", "需要允许运动与方向感应权限");
+        return;
+    }
+
     bindSensors();
-    initAudio();
-    
-    // 解锁音频上下文安全锁
-    if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
+    if (selectedGame === "dice") {
+        unlockAudio();
     }
 
-    activeGame = gameName;
-    
-    // 2. 面板切换
-    document.getElementById("screen-select").style.display = "none";
-    document.getElementById("screen-play").style.display = "block";
-    
-    // 隐藏所有特定游戏设置面板
-    document.querySelectorAll(".game-settings").forEach(s => s.style.display = "none");
-    document.getElementById("game-viewport").style.display = "none";
-    document.getElementById("dice-viewport").style.display = "none";
+    activeGame = selectedGame;
+    gameStartedAt = Date.now();
+    lastPulseAt = 0;
+    shakeOutSince = null;
+    angleBadSince = null;
 
-    // 停止上一次运行的帧渲染循环
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
+    // 每次开始时自动用当前姿态兜底校准，避免玩家刚进入就因为初始握法被误罚。
+    if (activeGame === "shake") {
+        calibration.shakeBeta = phoneBeta;
+        calibration.shakeGamma = phoneGamma;
+    } else if (activeGame === "angle") {
+        calibration.angleBeta = phoneBeta;
     }
-    clearInterval(gameLoopTimer);
 
-    // 3. 运行对应游戏初始化
-    const title = document.getElementById("game-title");
-    
-    if (gameName === 'shake') {
-        title.innerText = "手抖挑战";
-        document.getElementById("settings-shake").style.display = "block";
-        document.getElementById("game-viewport").style.display = "block";
+    setupPlayScreen(activeGame);
+    showScreen("screen-play");
+}
+
+function setupPlayScreen(gameName) {
+    const cfg = gameSettings[gameName];
+    setText("game-title", GAME_META[gameName].title);
+    setText("summary-game", GAME_META[gameName].title);
+    setText("summary-strength-min", cfg.strengthMin);
+    setText("summary-strength-max", cfg.strengthMax);
+    setText("summary-tolerance", GAME_META[gameName].toleranceLabel(cfg));
+    setText("summary-trigger", GAME_META[gameName].triggerLabel(cfg));
+
+    $("game-viewport").style.display = gameName === "dice" ? "none" : "block";
+    $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
+
+    stopRuntimeLoops();
+
+    if (gameName === "shake") {
+        setText("game-status", "保持弹珠停留在安全区内");
         initShakeGame();
-    } else if (gameName === 'angle') {
-        title.innerText = "保持角度";
-        document.getElementById("settings-angle").style.display = "block";
-        document.getElementById("game-viewport").style.display = "block";
+    } else if (gameName === "angle") {
+        setText("game-status", "保持当前姿态附近的目标角度");
         initAngleGame();
-    } else if (gameName === 'dice') {
-        title.innerText = "摇骰子对决";
-        document.getElementById("settings-dice").style.display = "block";
-        document.getElementById("dice-viewport").style.display = "block";
+    } else if (gameName === "dice") {
+        setText("game-status", motionReady ? "摇晃手机开始对决" : "等待加速度传感器回传");
         initDiceGame();
     }
 }
 
-function exitGame() {
-    activeGame = null;
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+function stopRuntimeLoops() {
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
     clearInterval(gameLoopTimer);
-    
-    document.getElementById("screen-play").style.display = "none";
-    document.getElementById("screen-select").style.display = "block";
+    gameLoopTimer = null;
+    clearTimeout(shakeStopTimeout);
+    shakeStopTimeout = null;
+    clearInterval(manualRollTimer);
+    manualRollTimer = null;
 }
 
+function exitGame() {
+    stopCurrentGame();
+    activeGame = null;
+    selectedGame = null;
+    showScreen("screen-select");
+}
 
-// --- 5. 游戏 1: 手抖挑战运行逻辑 ---
+function stopCurrentGame() {
+    stopRuntimeLoops();
+    activeGame = null;
+    isDiceShaking = false;
+    sendGameMessage({ type: "stop_shock" });
+    const rollButton = $("btn-roll");
+    if (rollButton) {
+        rollButton.disabled = false;
+    }
+    setText("game-status", "已停止输出");
+}
+
+// --- 6. 统一惩罚发送与本机震动 ---
+
+function canPunish(requiresOrientation = true) {
+    if (!activeGame) return false;
+    if (requiresOrientation && !orientationReady) return false;
+    if (Date.now() - gameStartedAt < 1200) return false;
+    return ws && ws.readyState === WebSocket.OPEN;
+}
+
+function sendPulse(strength, duration = 100) {
+    const now = Date.now();
+    if (now - lastPulseAt < 250) return;
+
+    const safeStrength = clamp(Math.round(strength), 0, 200);
+    if (safeStrength <= 0) return;
+
+    lastPulseAt = now;
+    sendGameMessage({
+        type: "game_pulse",
+        strength: safeStrength,
+        duration
+    });
+    vibrateBriefly(40);
+}
+
+function vibrateBriefly(duration) {
+    if (!navigator.vibrate) return;
+    const now = Date.now();
+    if (now - lastVibrateAt < 180) return;
+    lastVibrateAt = now;
+    navigator.vibrate(Math.round(duration));
+}
+
+// --- 7. 游戏 1：手抖挑战 ---
+
+function prepareCanvas() {
+    canvas = $("game-canvas");
+    ctx = canvas.getContext("2d");
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 320;
+    const height = canvas.clientHeight || 320;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { width, height };
+}
 
 function initShakeGame() {
-    canvas = document.getElementById("game-canvas");
-    ctx = canvas.getContext("2d");
-    
-    // 适配物理屏幕像素比
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
-    ctx.scale(dpr, dpr);
-    
-    // 将小球置于中心点
-    const width = canvas.width / dpr;
-    const height = canvas.height / dpr;
+    const { width, height } = prepareCanvas();
     ballX = width / 2;
     ballY = height / 2;
     ballVx = 0;
     ballVy = 0;
-    
-    // 开启物理位置渲染循环
+    shakeOutSince = null;
+
     runShakeLoop();
-    
-    // 开启 100ms 惩罚数据检测上报定时器
-    clearInterval(gameLoopTimer);
     gameLoopTimer = setInterval(checkShakePunish, 100);
 }
 
 function runShakeLoop() {
-    if (activeGame !== 'shake') return;
-    
+    if (activeGame !== "shake") return;
+
+    const cfg = gameSettings.shake;
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
+    const minSide = Math.min(width, height);
     const centerX = width / 2;
     const centerY = height / 2;
 
-    // 清屏全黑
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
 
-    // 1. 获取配置数据
-    const mode = document.getElementById("shake-mode").value;
-    const radius = getSliderVal("shake-radius");
+    const relativeBeta = clamp(phoneBeta - calibration.shakeBeta, -45, 45);
+    const relativeGamma = clamp(phoneGamma - calibration.shakeGamma, -45, 45);
+    const sensitivity = cfg.sensitivity / 100;
 
-    // 2. 根据手机偏角注入重力加速度 (限制极值)
-    // 偏角转为重力分量加速度
-    const limitBeta = Math.max(-45, Math.min(45, phoneBeta));
-    const limitGamma = Math.max(-45, Math.min(45, phoneGamma));
-    
-    // 施加力
-    ballVx += limitGamma * 0.05;
-    ballVy += limitBeta * 0.05;
-    
-    // 摩擦力衰减
-    ballVx *= friction;
-    ballVy *= friction;
-    
+    // 倾斜量转换成弹珠速度，灵敏度越高，玩家轻微移动也会产生更明显的位移。
+    ballVx += relativeGamma * 0.07 * sensitivity;
+    ballVy += relativeBeta * 0.07 * sensitivity;
+    ballVx *= 0.982;
+    ballVy *= 0.982;
     ballX += ballVx;
     ballY += ballVy;
 
-    // 3. 边界碰撞检测物理弹回
     if (ballX - ballRadius < 0) {
         ballX = ballRadius;
         ballVx = -ballVx * 0.5;
@@ -345,7 +691,7 @@ function runShakeLoop() {
         ballX = width - ballRadius;
         ballVx = -ballVx * 0.5;
     }
-    
+
     if (ballY - ballRadius < 0) {
         ballY = ballRadius;
         ballVy = -ballVy * 0.5;
@@ -354,11 +700,8 @@ function runShakeLoop() {
         ballVy = -ballVy * 0.5;
     }
 
-    // 4. 画辅助纯白线条
     ctx.strokeStyle = "#222222";
     ctx.lineWidth = 1;
-    
-    // 绘制十字准心
     ctx.beginPath();
     ctx.moveTo(centerX - 15, centerY);
     ctx.lineTo(centerX + 15, centerY);
@@ -366,21 +709,18 @@ function runShakeLoop() {
     ctx.lineTo(centerX, centerY + 15);
     ctx.stroke();
 
-    // 绘制安全范围
     ctx.strokeStyle = "#ffffff";
     ctx.beginPath();
-    if (mode === "radius") {
-        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    if (cfg.mode === "radius") {
+        ctx.arc(centerX, centerY, minSide * cfg.safeRadius / 100, 0, Math.PI * 2);
     } else {
-        // 夹缝生存模式：内圈 30px，外圈根据设定
-        ctx.arc(centerX, centerY, 30, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, minSide * cfg.gapInner / 100, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(centerX, centerY, radius + 30, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, minSide * cfg.safeRadius / 100, 0, Math.PI * 2);
     }
     ctx.stroke();
 
-    // 5. 绘制弹珠
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
@@ -390,286 +730,286 @@ function runShakeLoop() {
 }
 
 function checkShakePunish() {
-    if (activeGame !== 'shake' || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (activeGame !== "shake" || !canPunish(true)) return;
 
+    const cfg = gameSettings.shake;
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
+    const minSide = Math.min(width, height);
     const centerX = width / 2;
     const centerY = height / 2;
-
-    const dx = ballX - centerX;
-    const dy = ballY - centerY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-
-    const mode = document.getElementById("shake-mode").value;
-    const radius = getSliderVal("shake-radius");
-    const baseStrength = getSliderVal("base-strength");
-    const maxStrength = getSliderVal("max-strength");
+    const dist = Math.hypot(ballX - centerX, ballY - centerY);
 
     let err = 0;
-    let maxErr = 100; // 预估的最大偏离上限，用以线性计算
-
-    if (mode === "radius") {
-        if (dist > radius) {
-            err = dist - radius;
-        }
+    if (cfg.mode === "radius") {
+        const radius = minSide * cfg.safeRadius / 100;
+        err = Math.max(0, dist - radius);
     } else {
-        // 夹缝生存模式：内圈 30px，外圈 (radius + 30)px 为安全带
-        const inner = 30;
-        const outer = radius + 30;
-        if (dist < inner) {
-            err = inner - dist;
-        } else if (dist > outer) {
-            err = dist - outer;
-        }
+        const inner = minSide * cfg.gapInner / 100;
+        const outer = minSide * cfg.safeRadius / 100;
+        err = dist < inner ? inner - dist : Math.max(0, dist - outer);
     }
 
-    if (err > 0) {
-        // 偏移量线性惩罚力度映射
-        const ratio = Math.min(1.0, err / maxErr);
-        const strength = baseStrength + (maxStrength - baseStrength) * ratio;
-        
-        ws.send(JSON.stringify({
-            "type": "game_pulse",
-            "strength": Math.round(strength)
-        }));
-        
-        // 玩家触觉惩罚振动同步
-        navigator.vibrate && navigator.vibrate(50);
+    if (err <= 0) {
+        shakeOutSince = null;
+        setText("game-status", "安全区内");
+        return;
     }
+
+    if (shakeOutSince === null) {
+        shakeOutSince = Date.now();
+        setText("game-status", "已出界，宽容计时中");
+        return;
+    }
+
+    if (Date.now() - shakeOutSince < cfg.forgiveMs) return;
+
+    const ratio = clamp(err / (minSide * 0.22), 0, 1);
+    const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
+    setText("game-status", `出界惩罚: ${Math.round(strength)}`);
+    sendPulse(strength, 120);
 }
 
-
-// --- 6. 游戏 2: 保持角度运行逻辑 ---
+// --- 8. 游戏 2：保持角度 ---
 
 function initAngleGame() {
-    canvas = document.getElementById("game-canvas");
-    ctx = canvas.getContext("2d");
-    
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
-    ctx.scale(dpr, dpr);
-
+    prepareCanvas();
+    angleBadSince = null;
     runAngleLoop();
-
-    clearInterval(gameLoopTimer);
     gameLoopTimer = setInterval(checkAnglePunish, 100);
 }
 
-function runAngleLoop() {
-    if (activeGame !== 'angle') return;
+function getCurrentAngleOffset() {
+    return clamp(phoneBeta - calibration.angleBeta, -90, 90);
+}
 
+function runAngleLoop() {
+    if (activeGame !== "angle") return;
+
+    const cfg = gameSettings.angle;
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
-    const centerX = width / 2;
-    const centerY = height - 30; // 表盘底部中心
-    const radius = Math.min(width, height) - 50;
+    const centerY = height / 2;
+    const pad = 26;
+    const gaugeWidth = width - pad * 2;
+    const targetX = pad + ((cfg.targetOffset + 90) / 180) * gaugeWidth;
+    const tolerancePx = (cfg.tolerance / 180) * gaugeWidth;
+    const currentX = pad + ((getCurrentAngleOffset() + 90) / 180) * gaugeWidth;
 
-    // 清屏
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
 
-    // 获取配置安全弧度区间
-    const angleMin = getSliderVal("angle-min");
-    const angleMax = getSliderVal("angle-max");
-
-    // 绘制半圆表盘
     ctx.strokeStyle = "#222222";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, Math.PI, 0);
+    ctx.moveTo(pad, centerY);
+    ctx.lineTo(width - pad, centerY);
     ctx.stroke();
 
-    // 绘制安全区弧段 (极细白虚线)
     ctx.strokeStyle = "#ffffff";
-    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    // 0度在水平右侧，90度直立。转换：
-    const startRad = Math.PI - (angleMax * Math.PI / 180);
-    const endRad = Math.PI - (angleMin * Math.PI / 180);
-    ctx.arc(centerX, centerY, radius, startRad, endRad);
+    ctx.moveTo(targetX - tolerancePx, centerY);
+    ctx.lineTo(targetX + tolerancePx, centerY);
     ctx.stroke();
-    ctx.setLineDash([]); // 还原实线
 
-    // 绘制指针 (代表手机前后倾斜角度 phoneBeta)
-    // phoneBeta 通常倾斜手持在 0~90度
-    const currentAngle = Math.max(0, Math.min(90, phoneBeta));
-    const pointerRad = Math.PI - (currentAngle * Math.PI / 180);
-    const px = centerX + radius * Math.cos(pointerRad);
-    const py = centerY + radius * Math.sin(pointerRad);
+    ctx.strokeStyle = "#888888";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(targetX, centerY - 42);
+    ctx.lineTo(targetX, centerY + 42);
+    ctx.stroke();
 
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(px, py);
+    ctx.moveTo(currentX, centerY - 60);
+    ctx.lineTo(currentX, centerY + 60);
     ctx.stroke();
 
-    // 绘制中心螺丝点
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
+    ctx.arc(currentX, centerY, 5, 0, Math.PI * 2);
     ctx.fill();
 
     animationFrameId = requestAnimationFrame(runAngleLoop);
 }
 
 function checkAnglePunish() {
-    if (activeGame !== 'angle' || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (activeGame !== "angle" || !canPunish(true)) return;
 
-    const angleMin = getSliderVal("angle-min");
-    const angleMax = getSliderVal("angle-max");
-    const baseStrength = getSliderVal("base-strength");
-    const maxStrength = getSliderVal("max-strength");
+    const cfg = gameSettings.angle;
+    const err = Math.abs(getCurrentAngleOffset() - cfg.targetOffset) - cfg.tolerance;
 
-    const currentAngle = Math.max(0, Math.min(90, phoneBeta));
-    let err = 0;
-
-    if (currentAngle < angleMin) {
-        err = angleMin - currentAngle;
-    } else if (currentAngle > angleMax) {
-        err = currentAngle - angleMax;
+    if (err <= 0) {
+        angleBadSince = null;
+        setText("game-status", "角度稳定");
+        return;
     }
 
-    if (err > 0) {
-        // 最大差值假定为 45 度
-        const ratio = Math.min(1.0, err / 45);
-        const strength = baseStrength + (maxStrength - baseStrength) * ratio;
-
-        ws.send(JSON.stringify({
-            "type": "game_pulse",
-            "strength": Math.round(strength)
-        }));
-
-        navigator.vibrate && navigator.vibrate(50);
+    if (angleBadSince === null) {
+        angleBadSince = Date.now();
+        setText("game-status", "角度偏离，等待持续判定");
+        return;
     }
+
+    if (Date.now() - angleBadSince < cfg.triggerMs) return;
+
+    const ratio = clamp(err / cfg.rampDegrees, 0, 1);
+    const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
+    setText("game-status", `角度惩罚: ${Math.round(strength)}`);
+    sendPulse(strength, 120);
 }
 
-
-// --- 7. 游戏 3: 摇骰子对决运行逻辑 ---
+// --- 9. 游戏 3：摇骰子对决 ---
 
 function initDiceGame() {
     isDiceShaking = false;
-    document.getElementById("dice-1").innerText = "-";
-    document.getElementById("dice-2").innerText = "-";
-    document.getElementById("dice-3").innerText = "-";
-    document.getElementById("dice-scores").innerText = "玩家总分: - | 对手总分: -";
-    document.getElementById("dice-instruction").innerText = "摇晃手机 或 点击下方按钮开始摇号";
+    diceShakeEnergy = 0;
+    setText("dice-1", "-");
+    setText("dice-2", "-");
+    setText("dice-3", "-");
+    setText("dice-scores", "玩家总分: - | 对手总分: -");
+    setText("dice-instruction", "摇晃手机 或 点击下方按钮开始摇号");
+    $("dice-instruction").style.color = "#888888";
+    $("btn-roll").disabled = !gameSettings.dice.manualRoll;
 }
 
-function triggerDiceShake() {
+function triggerDiceShake(force) {
+    const cfg = gameSettings.dice;
     const now = Date.now();
+
     if (!isDiceShaking) {
-        // 开启摇晃
         isDiceShaking = true;
-        document.getElementById("dice-instruction").innerText = "正在摇号...";
-        document.getElementById("dice-1").innerText = "?";
-        document.getElementById("dice-2").innerText = "?";
-        document.getElementById("dice-3").innerText = "?";
+        diceShakeEnergy = 0;
+        setText("dice-instruction", "正在摇号...");
+        $("dice-instruction").style.color = "#888888";
+        setText("dice-1", "?");
+        setText("dice-2", "?");
+        setText("dice-3", "?");
+        $("btn-roll").disabled = true;
     }
 
-    // 1. 每 80ms 播放一次实时撞击摩擦音效，控制好音效频次
+    // 晃动越明显，能量越高；后续结算会把这个能量转成玩家骰子的轻微优势。
+    diceShakeEnergy = clamp(diceShakeEnergy + Math.max(1, force - cfg.shakeSensitivity), 0, 120);
+
     if (now - lastShakeTime > 80) {
         playDiceCollisionSound();
         lastShakeTime = now;
     }
 
-    // 2. 摇晃物理振动反馈
-    if (now - lastVibrateTime > 120) {
-        navigator.vibrate && navigator.vibrate(60);
-        lastVibrateTime = now;
-    }
-
-    // 3. 摇晃静止超时防抖 (连续 800ms 没有剧烈晃动，视作摇晃结束)
+    vibrateBriefly(50);
     clearTimeout(shakeStopTimeout);
     shakeStopTimeout = setTimeout(settleDiceGame, 800);
 }
 
 function rollDicesManual() {
-    // 解锁音频
-    initAudio();
-    if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
-    }
+    const cfg = gameSettings.dice;
+    if (!cfg.manualRoll || isDiceShaking) return;
 
-    // 模拟一段连续摇晃效果
+    unlockAudio();
     isDiceShaking = true;
+    diceShakeEnergy = 30;
+    $("btn-roll").disabled = true;
+    setText("dice-instruction", "正在摇号...");
+    setText("dice-1", "?");
+    setText("dice-2", "?");
+    setText("dice-3", "?");
+
     let count = 0;
-    const interval = setInterval(() => {
+    manualRollTimer = setInterval(() => {
+        diceShakeEnergy = clamp(diceShakeEnergy + 7, 0, 90);
         playDiceCollisionSound();
-        navigator.vibrate && navigator.vibrate(40);
+        vibrateBriefly(35);
         count++;
         if (count >= 10) {
-            clearInterval(interval);
+            clearInterval(manualRollTimer);
+            manualRollTimer = null;
             settleDiceGame();
         }
     }, 100);
 }
 
+function rollWeightedDie(powerRatio) {
+    let value = Math.floor(Math.random() * 6) + 1;
+    if (Math.random() < powerRatio * 0.45) {
+        value = Math.min(6, value + 1);
+    }
+    if (powerRatio > 0.78 && Math.random() < 0.2) {
+        value = Math.min(6, value + 1);
+    }
+    return value;
+}
+
+function rollOpponentDie(difficulty) {
+    let value = Math.floor(Math.random() * 6) + 1;
+    if (difficulty === "easy" && Math.random() < 0.28) {
+        value = Math.max(1, value - 1);
+    } else if (difficulty === "hard" && Math.random() < 0.28) {
+        value = Math.min(6, value + 1);
+    }
+    return value;
+}
+
 function settleDiceGame() {
     if (!isDiceShaking) return;
     isDiceShaking = false;
+    clearTimeout(shakeStopTimeout);
+    shakeStopTimeout = null;
 
-    // 1. 生成 3 个随机骰子点数
-    const p1 = Math.floor(Math.random() * 6) + 1;
-    const p2 = Math.floor(Math.random() * 6) + 1;
-    const p3 = Math.floor(Math.random() * 6) + 1;
-    const pTotal = p1 + p2 + p3;
+    const cfg = gameSettings.dice;
+    const powerRatio = clamp(diceShakeEnergy / 90, 0, 1);
+    const player = [
+        rollWeightedDie(powerRatio),
+        rollWeightedDie(powerRatio),
+        rollWeightedDie(powerRatio)
+    ];
+    const opponent = [
+        rollOpponentDie(cfg.opponentDifficulty),
+        rollOpponentDie(cfg.opponentDifficulty),
+        rollOpponentDie(cfg.opponentDifficulty)
+    ];
+    const pTotal = player.reduce((sum, value) => sum + value, 0);
+    const oTotal = opponent.reduce((sum, value) => sum + value, 0);
 
-    // 对手点数 (虚拟对手)
-    const o1 = Math.floor(Math.random() * 6) + 1;
-    const o2 = Math.floor(Math.random() * 6) + 1;
-    const o3 = Math.floor(Math.random() * 6) + 1;
-    const oTotal = o1 + o2 + o3;
+    setText("dice-1", player[0]);
+    setText("dice-2", player[1]);
+    setText("dice-3", player[2]);
+    setText("dice-scores", `玩家总分: ${pTotal} | 对手总分: ${oTotal}`);
+    $("btn-roll").disabled = !cfg.manualRoll;
 
-    // 2. 展示 UI 读数
-    document.getElementById("dice-1").innerText = p1;
-    document.getElementById("dice-2").innerText = p2;
-    document.getElementById("dice-3").innerText = p3;
-
-    const scoresDiv = document.getElementById("dice-scores");
-    scoresDiv.innerText = `玩家总分: ${pTotal} | 对手总分: ${oTotal}`;
-
-    // 3. 计算对决结果
-    const instructionDiv = document.getElementById("dice-instruction");
     if (pTotal >= oTotal) {
-        instructionDiv.innerText = "挑战胜出 | 免于惩罚";
-        instructionDiv.style.color = "#ffffff";
-    } else {
-        const diff = oTotal - pTotal; // 差额区间 1 - 15
-        instructionDiv.innerText = `挑战失败 | 差额: ${diff}`;
-        instructionDiv.style.color = "#ff3333";
+        setText("dice-instruction", `挑战胜出 | 摇晃效率 ${Math.round(powerRatio * 100)}%`);
+        $("dice-instruction").style.color = "#ffffff";
+        return;
+    }
 
-        // 惩罚数据映射
-        const baseStrength = getSliderVal("base-strength");
-        const maxStrength = getSliderVal("max-strength");
-        const timeMin = getSliderVal("dice-time-min");
-        const timeMax = getSliderVal("dice-time-max");
+    const diff = oTotal - pTotal;
+    const ratio = clamp(diff / 15, 0, 1);
+    const punishStrength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
+    const punishDuration = (cfg.timeMin + (cfg.timeMax - cfg.timeMin) * ratio) * 1000;
 
-        // 根据点数差值计算惩罚电击强度和时间
-        const ratio = diff / 15.0; // 点数相差最多为 15 点 (如玩家 3 点, 对手 18 点)
-        const punishStrength = baseStrength + (maxStrength - baseStrength) * ratio;
-        const punishDuration = (timeMin + (timeMax - timeMin) * ratio) * 1000; // 转为毫秒
+    setText("dice-instruction", `挑战失败 | 差额: ${diff}`);
+    $("dice-instruction").style.color = "#ff3333";
 
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-                "type": "game_shock_trigger",
-                "strength": Math.round(punishStrength),
-                "duration": Math.round(punishDuration)
-            }));
-        }
+    sendGameMessage({
+        type: "game_shock_trigger",
+        strength: Math.round(punishStrength),
+        duration: Math.round(punishDuration)
+    });
 
-        // 手机端同步产生持续震动反馈
-        navigator.vibrate && navigator.vibrate(punishDuration);
+    if (navigator.vibrate) {
+        navigator.vibrate(Math.min(1200, Math.round(punishDuration)));
     }
 }
 
-
-// --- 8. 初始化入口 ---
+// --- 10. 初始化入口 ---
 
 window.onload = () => {
+    populateSettingsForm("shake");
+    populateSettingsForm("angle");
+    populateSettingsForm("dice");
     connectWebSocket();
 };

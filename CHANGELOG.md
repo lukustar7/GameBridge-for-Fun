@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 新增手机端三段式游戏流程：选择游戏、独立设置、开始游玩，三个游戏的强度、容错、灵敏度和时长参数互不污染。
+- 新增游戏参数本地持久化，刷新页面后仍保留每个游戏的独立配置，减少重复调参成本。
+- 新增手抖挑战与保持角度的姿态校准入口，并在开始游戏时自动兜底校准，降低初始握持角度导致的误触发。
+- 新增游戏端 WebSocket 运行 token，手机二维码携带 `ws` 端口和 token，端口自动递增后仍可正确连接。
+
+### Changed
+- 重构摇骰子对决结算逻辑，摇晃能量会影响玩家骰子优势，对手难度可配置，玩法从纯随机惩罚改为可感知操作结果。
+- 将 `pydglab-ws` 依赖锁定到已验证的 `1.1.0`，降低上游接口变更导致运行结果漂移的风险。
+
+### Fixed
+- 修复 V3 脉冲数据结构错误，将无效四元组改为 `pydglab-ws` 接受的双四元组波形，恢复实际脉冲下发链路。
+- 修复 App 绑定二维码格式，改为使用库内 `get_qrcode` 生成，避免扫码入口与当前库协议不一致。
+- 修复保持角度游戏启动即惩罚的问题，加入传感器就绪判断、启动缓冲和持续偏离判定。
+- 修复传感器监听重复绑定、骰子手动摇号可连点、停止输出后仍可被运动传感器触发的问题。
+- 修复 README 指向已删除硬件协议目录的问题，使项目说明与当前仓库结构一致。
+
+### Security
+- 后端新增强度 0-200、单次时长 100-10000ms、连续惩罚 0.22s 间隔的硬限制，降低局域网刷包导致的过量输出风险。
+- 新增 `stop_shock` 停止输出路径，返回列表或点击停止输出时会清空 A 通道波形并尝试将强度归零。
+
 ## [1.0.0] - 2026-07-06
 
 ### Added
@@ -17,4 +40,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - 删除了与郊狼脉冲主机无关的其他硬件协议文档（爪印无线按钮传感器、灵猫边缘控制传感器、负鼠振动控制器）。
-
