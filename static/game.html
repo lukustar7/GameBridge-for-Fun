@@ -145,6 +145,13 @@
             width: auto;
         }
 
+        .common-settings {
+            border: 1px solid #222222;
+            padding: 16px;
+            margin-bottom: 20px;
+            background-color: #000000;
+        }
+
         .dice-area {
             display: flex;
             justify-content: center;
@@ -274,16 +281,16 @@
                     <h2>安全与紧急停止</h2>
                     <ul class="info-list">
                         <li>游玩页右上方有“停止输出”，点击后会立即请求清空输出。</li>
-                        <li>手机上滑回桌面、锁屏、切后台、刷新或关闭网页时，页面会请求紧急停止；服务端在游戏连接断开时也会兜底清空 A 通道。</li>
+                        <li>手机上滑回桌面、锁屏、切后台、刷新或关闭网页时，页面会请求紧急停止；服务端在游戏连接断开时也会兜底清空 A/B 两路。</li>
                         <li>开始游戏后会请求手机屏幕常亮；如果浏览器不支持，仍建议保持网页在前台。</li>
                         <li>电脑和手机必须处于同一局域网，二维码中的端口和 token 由电脑后台自动生成。</li>
                     </ul>
                 </div>
 
                 <div class="notice-panel">
-                    <h2>可调参数边界</h2>
+                    <h2>关于 A/B 通道</h2>
                     <p class="sub-text">
-                        官方 V3 文档包含 A/B 通道强度、波形频率、波形强度、通道软上限、频率平衡和强度平衡等硬件参数。当前小游戏只开放与玩法直接相关的强度区间、容错、灵敏度、时长和难度；软上限、平衡参数和 B 通道暂不在游戏页直接修改。
+                        设备有 A、B 两路输出。每个游戏默认只用 A；想玩 B 时，可以在游戏设置里改成“只用 B”或“A+B 同时”。B 通道可以跟 A 一样强，也可以按比例降低。
                     </p>
                 </div>
 
@@ -317,7 +324,7 @@
                 </div>
                 <div class="game-card" onclick="openGameSettings('dice')">
                     <h3>摇骰子对决</h3>
-                    <p class="sub-text" style="margin-top: 5px;">晃动越充分，玩家骰子越有优势，失败后按差额结算</p>
+                    <p class="sub-text" style="margin-top: 5px;">你和对手比总点数，输几点就电几下，自己豹子按倍率结算</p>
                 </div>
                 <div class="game-card" onclick="openGameSettings('slot')">
                     <h3>极速角子机</h3>
@@ -333,6 +340,41 @@
                 <h2 id="settings-title">游戏设置</h2>
                 <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
 
+                <div id="common-output-settings" class="common-settings">
+                    <h3 style="margin-bottom: 12px;">输出位置</h3>
+                    <div class="settings-stack" style="margin-bottom: 0;">
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
+                            <select id="common-output-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
+                                <option value="a">只用 A</option>
+                                <option value="b">只用 B</option>
+                                <option value="ab">A+B 同时</option>
+                            </select>
+                            <p class="field-help">默认只用 A。选择 B 或 A+B 前，请确认 B 通道确实接好了，并且强度是你能接受的。</p>
+                        </div>
+
+                        <div id="common-b-settings">
+                            <div style="margin-bottom: 15px;">
+                                <label class="slider-label" style="margin-bottom: 5px;">B 通道强度</label>
+                                <select id="common-b-strength-mode" onchange="saveSelectedSettings(true)">
+                                    <option value="percent">按比例降低</option>
+                                    <option value="same">跟 A 一样</option>
+                                </select>
+                                <p class="field-help">选“按比例降低”更稳；选“跟 A 一样”时，A 多少强度，B 就多少强度。</p>
+                            </div>
+
+                            <div class="slider-container">
+                                <div class="slider-label">
+                                    <span>B 强度比例</span>
+                                    <span id="val-common-b-strength-percent">50%</span>
+                                </div>
+                                <input type="range" id="common-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('common-b-strength-percent')">
+                                <p class="field-help">只有选择“按比例降低”时使用。比如 A 是 40、比例 50%，B 就是 20。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="settings-shake" class="setting-panel">
                     <div class="settings-stack">
                         <div>
@@ -346,20 +388,20 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>基础惩罚强度</span>
+                                <span>开始电的强度</span>
                                 <span id="val-shake-strength-min">20</span>
                             </div>
                             <input type="range" id="shake-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('shake-strength-min')">
-                            <p class="field-help">刚越界并触发时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
+                            <p class="field-help">刚刚出界并触发时用这个强度。数值越高，开始就越明显。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最大惩罚强度</span>
+                                <span>最强电到多少</span>
                                 <span id="val-shake-strength-max">60</span>
                             </div>
                             <input type="range" id="shake-strength-max" min="0" max="200" value="60" oninput="updateSettingValue('shake-strength-max')">
-                            <p class="field-help">偏离越远时可升到的最高强度，后端仍会按硬件限幅和安全上限再次截断。</p>
+                            <p class="field-help">弹珠离安全区越远，强度越接近这里；后端仍会按设备上限保护。</p>
                         </div>
 
                         <div class="slider-container">
@@ -391,11 +433,11 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>出界宽容时间</span>
+                                <span>出界多久才电</span>
                                 <span id="val-shake-forgive-ms">600ms</span>
                             </div>
                             <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
-                            <p class="field-help">离开安全区后等待多久才开始输出，给短暂误触和传感器抖动留缓冲。</p>
+                            <p class="field-help">离开安全区后先等多久。给手抖和手机误差留一点反应时间。</p>
                         </div>
                     </div>
 
@@ -409,20 +451,20 @@
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>基础惩罚强度</span>
+                                <span>开始电的强度</span>
                                 <span id="val-angle-strength-min">15</span>
                             </div>
                             <input type="range" id="angle-strength-min" min="0" max="200" value="15" oninput="updateSettingValue('angle-strength-min')">
-                            <p class="field-help">持续偏离刚触发时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
+                            <p class="field-help">偏离角度太久后，刚开始用这个强度。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最大惩罚强度</span>
+                                <span>最强电到多少</span>
                                 <span id="val-angle-strength-max">70</span>
                             </div>
                             <input type="range" id="angle-strength-max" min="0" max="200" value="70" oninput="updateSettingValue('angle-strength-max')">
-                            <p class="field-help">偏离角度很大时可升到的最高强度，后端会继续受硬件限幅保护。</p>
+                            <p class="field-help">偏离越大，强度越接近这里；后端仍会按设备上限保护。</p>
                         </div>
 
                         <div class="slider-container">
@@ -445,20 +487,20 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>持续偏离触发</span>
+                                <span>偏多久才电</span>
                                 <span id="val-angle-trigger-ms">800ms</span>
                             </div>
                             <input type="range" id="angle-trigger-ms" min="100" max="2500" step="100" value="800" oninput="updateSettingValue('angle-trigger-ms')">
-                            <p class="field-help">偏离超过允许误差后必须持续多久才输出，避免一瞬间晃动就误判。</p>
+                            <p class="field-help">超过允许误差后先等多久，避免一瞬间晃动就触发。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>强度递增跨度</span>
+                                <span>偏多少算拉满</span>
                                 <span id="val-angle-ramp-degrees">28°</span>
                             </div>
                             <input type="range" id="angle-ramp-degrees" min="5" max="60" value="28" oninput="updateSettingValue('angle-ramp-degrees')">
-                            <p class="field-help">超过误差后，偏离多少度会从基础强度逐步爬到最大强度。</p>
+                            <p class="field-help">超过允许误差后，再偏多少度会从开始强度升到最高强度。</p>
                         </div>
                     </div>
 
@@ -472,38 +514,38 @@
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>基础惩罚强度</span>
-                                <span id="val-dice-strength-min">20</span>
+                                <span>每下强度</span>
+                                <span id="val-dice-strength">20</span>
                             </div>
-                            <input type="range" id="dice-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength-min')">
-                            <p class="field-help">普通失败且点差较小时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
+                            <input type="range" id="dice-strength" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength')">
+                            <p class="field-help">每一次电击使用的强度。比如设 20，输 5 点就是 20 强度电 5 下。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最大惩罚强度</span>
-                                <span id="val-dice-strength-max">80</span>
+                                <span>每下多久</span>
+                                <span id="val-dice-single-seconds">2.0s</span>
                             </div>
-                            <input type="range" id="dice-strength-max" min="0" max="200" value="80" oninput="updateSettingValue('dice-strength-max')">
-                            <p class="field-help">普通失败点差很大时可升到的最高强度，豹子也使用这个强度结算。</p>
+                            <input type="range" id="dice-single-seconds" min="0.5" max="5.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
+                            <p class="field-help">每一下持续多久。输几下就按这个时间排队执行几下。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最小持续时间</span>
-                                <span id="val-dice-time-min">1.0s</span>
+                                <span>豹子倍率</span>
+                                <span id="val-dice-leopard-multiplier">3</span>
                             </div>
-                            <input type="range" id="dice-time-min" min="0.5" max="5.0" step="0.5" value="1.0" oninput="updateSettingValue('dice-time-min')">
-                            <p class="field-help">普通失败点差较小时的最短输出时间，避免小输也直接拉满。</p>
+                            <input type="range" id="dice-leopard-multiplier" min="1" max="6" value="3" oninput="updateSettingValue('dice-leopard-multiplier')">
+                            <p class="field-help">你自己摇出三个一样时使用。比如三个 5，倍率 3，就是 5 × 3 = 15 下。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最大持续时间</span>
-                                <span id="val-dice-time-max">4.0s</span>
+                                <span>单局最多电几下</span>
+                                <span id="val-dice-max-punish-count">30</span>
                             </div>
-                            <input type="range" id="dice-time-max" min="0.5" max="10.0" step="0.5" value="4.0" oninput="updateSettingValue('dice-time-max')">
-                            <p class="field-help">普通失败点差很大时的最长输出时间，后端单次任务仍有 60 秒硬上限。</p>
+                            <input type="range" id="dice-max-punish-count" min="1" max="60" value="30" oninput="updateSettingValue('dice-max-punish-count')">
+                            <p class="field-help">安全上限。即使豹子算出来更多，也会截到这里，避免一局拖太久。</p>
                         </div>
 
                         <div class="slider-container">
@@ -515,15 +557,6 @@
                             <p class="field-help">数值越低越容易识别为摇骰子；数值越高，需要更明显的晃动才结算。</p>
                         </div>
 
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>豹子每点时长</span>
-                                <span id="val-dice-leopard-seconds-per-point">5s</span>
-                            </div>
-                            <input type="range" id="dice-leopard-seconds-per-point" min="1" max="10" value="5" oninput="updateSettingValue('dice-leopard-seconds-per-point')">
-                            <p class="field-help">任意一方摇出三个相同点数会直接触发；三个 6 时长就是 6 乘以这里的秒数。</p>
-                        </div>
-
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">对手难度</label>
                             <select id="dice-opponent-difficulty" onchange="saveSelectedSettings(true)">
@@ -531,7 +564,7 @@
                                 <option value="normal">标准</option>
                                 <option value="hard">较强</option>
                             </select>
-                            <p class="field-help">影响对手摇出高点数的概率，难度越高，玩家普通失败的概率越高。</p>
+                            <p class="field-help">对手越强，越容易摇出高点数。你输了几点，就电几下。</p>
                         </div>
 
                         <div>
@@ -539,7 +572,7 @@
                                 <span>允许手动摇号</span>
                                 <input type="checkbox" id="dice-manual-roll" onchange="saveSelectedSettings(true)">
                             </label>
-                            <p class="field-help">开启后可以点击按钮摇号；关闭后只能靠手机加速度传感器触发摇骰子。</p>
+                            <p class="field-help">开启后可以点按钮开局；关闭后只能靠手机摇晃开局。</p>
                         </div>
                     </div>
 
@@ -552,34 +585,51 @@
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>基础惩罚强度</span>
+                                <span>没中奖轻电强度</span>
                                 <span id="val-slot-strength-min">20</span>
                             </div>
                             <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
-                            <p class="field-help">压力条刚满时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
+                            <p class="field-help">只有打开“没中奖轻电”后才会用。每次三个图案全不同时，按这个强度轻电一下。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>最大惩罚强度</span>
+                                <span>满槽电击强度</span>
                                 <span id="val-slot-strength-max">85</span>
                             </div>
                             <input type="range" id="slot-strength-max" min="0" max="200" value="85" oninput="updateSettingValue('slot-strength-max')">
-                            <p class="field-help">连空越多、压力越高时可升到的最高强度，后端仍会做硬件安全截断。</p>
+                            <p class="field-help">压力条满格时使用的强度。后端仍会按设备限幅再截断。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>满槽持续时间</span>
+                                <span>满槽电多久</span>
                                 <span id="val-slot-shock-seconds">2.0s</span>
                             </div>
                             <input type="range" id="slot-shock-seconds" min="0.5" max="8.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
                             <p class="field-help">压力条满格后单次输出多久；触发后会进入短冷却，避免自动连转叠得太密。</p>
                         </div>
 
+                        <div>
+                            <label class="switch-row">
+                                <span>没中奖轻电</span>
+                                <input type="checkbox" id="slot-light-punish-enabled" onchange="saveSelectedSettings(true)">
+                            </label>
+                            <p class="field-help">开启后，三个图案全不同时会轻轻电一下，同时压力条照常上涨。</p>
+                        </div>
+
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>开奖时长</span>
+                                <span>轻电多久</span>
+                                <span id="val-slot-light-shock-seconds">0.4s</span>
+                            </div>
+                            <input type="range" id="slot-light-shock-seconds" min="0.1" max="2.0" step="0.1" value="0.4" oninput="updateSettingValue('slot-light-shock-seconds')">
+                            <p class="field-help">每次没中奖轻电的持续时间。上一下还没结束时，不会叠新的轻电。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>转多久开奖</span>
                                 <span id="val-slot-spin-ms">700ms</span>
                             </div>
                             <input type="range" id="slot-spin-ms" min="450" max="1400" step="50" value="700" oninput="updateSettingValue('slot-spin-ms')">
@@ -605,7 +655,7 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>空转压力增加</span>
+                                <span>没中奖涨多少压力</span>
                                 <span id="val-slot-miss-gain">24%</span>
                             </div>
                             <input type="range" id="slot-miss-gain" min="8" max="45" value="24" oninput="updateSettingValue('slot-miss-gain')">
@@ -614,7 +664,7 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>连空递增</span>
+                                <span>连续没中奖加码</span>
                                 <span id="val-slot-streak-bonus">6%</span>
                             </div>
                             <input type="range" id="slot-streak-bonus" min="0" max="15" value="6" oninput="updateSettingValue('slot-streak-bonus')">
@@ -623,7 +673,7 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>小奖压力减少</span>
+                                <span>小奖降多少压力</span>
                                 <span id="val-slot-small-win-drop">14%</span>
                             </div>
                             <input type="range" id="slot-small-win-drop" min="0" max="35" value="14" oninput="updateSettingValue('slot-small-win-drop')">
@@ -632,7 +682,7 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>大奖压力减少</span>
+                                <span>大奖降多少压力</span>
                                 <span id="val-slot-jackpot-drop">70%</span>
                             </div>
                             <input type="range" id="slot-jackpot-drop" min="20" max="100" value="70" oninput="updateSettingValue('slot-jackpot-drop')">
@@ -739,20 +789,24 @@
                             <td id="summary-game">-</td>
                         </tr>
                         <tr>
-                            <td>基础强度</td>
+                            <td id="summary-primary-label">基础强度</td>
                             <td id="summary-strength-min">-</td>
                         </tr>
                         <tr>
-                            <td>最大强度</td>
+                            <td id="summary-secondary-label">最大强度</td>
                             <td id="summary-strength-max">-</td>
                         </tr>
                         <tr>
-                            <td>关键容错</td>
+                            <td>关键规则</td>
                             <td id="summary-tolerance">-</td>
                         </tr>
                         <tr>
-                            <td>触发策略</td>
+                            <td>触发方式</td>
                             <td id="summary-trigger">-</td>
+                        </tr>
+                        <tr>
+                            <td>输出位置</td>
+                            <td id="summary-output">-</td>
                         </tr>
                     </table>
                 </div>
@@ -760,6 +814,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260706-slot-machine"></script>
+    <script src="game.js?v=20260706-dice-channel-slot"></script>
 </body>
 </html>

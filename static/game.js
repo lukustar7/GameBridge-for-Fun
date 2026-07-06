@@ -21,8 +21,14 @@ let activeGame = null;
 
 // 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "dg_lab_game_settings_v2";
+const DEFAULT_OUTPUT_SETTINGS = {
+    outputMode: "a",
+    bStrengthMode: "percent",
+    bStrengthPercent: 50
+};
 const DEFAULT_SETTINGS = {
     shake: {
+        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 20,
         strengthMax: 60,
         mode: "radius",
@@ -32,6 +38,7 @@ const DEFAULT_SETTINGS = {
         forgiveMs: 600
     },
     angle: {
+        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 15,
         strengthMax: 70,
         targetOffset: 0,
@@ -40,19 +47,22 @@ const DEFAULT_SETTINGS = {
         rampDegrees: 28
     },
     dice: {
-        strengthMin: 20,
-        strengthMax: 80,
-        timeMin: 1.0,
-        timeMax: 4.0,
+        ...DEFAULT_OUTPUT_SETTINGS,
+        strength: 20,
+        singleSeconds: 2.0,
+        leopardMultiplier: 3,
+        maxPunishCount: 30,
         shakeSensitivity: 15,
         opponentDifficulty: "normal",
-        manualRoll: true,
-        leopardSecondsPerPoint: 5
+        manualRoll: true
     },
     slot: {
+        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 20,
         strengthMax: 85,
         shockSeconds: 2.0,
+        lightPunishEnabled: false,
+        lightShockSeconds: 0.4,
         spinMs: 700,
         autoSpin: false,
         autoIntervalMs: 650,
@@ -68,30 +78,46 @@ const DEFAULT_SETTINGS = {
 const GAME_META = {
     shake: {
         title: "手抖挑战",
-        subtitle: "设置弹珠安全区、倾斜灵敏度和出界后的宽容时间。",
-        help: "保持弹珠停在安全区内。离开安全区超过宽容时间后，偏离越远，惩罚越强。",
+        subtitle: "调安全区大小、手机灵敏度和出界后多久开始电。",
+        help: "让弹珠留在安全区里。出界太久就会开始电，离得越远越强。",
+        primaryLabel: "开始强度",
+        secondaryLabel: "最高强度",
+        primaryValue: (cfg) => cfg.strengthMin,
+        secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => cfg.mode === "gap" ? `夹缝 ${cfg.gapInner}% / ${cfg.safeRadius}%` : `半径 ${cfg.safeRadius}%`,
         triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发`
     },
     angle: {
         title: "保持角度",
-        subtitle: "以校准姿态为基准，设置目标角度、允许误差和持续偏离时间。",
-        help: "以开始时的握持姿态为基准。持续偏离目标角度才会触发，短暂晃动不会立刻结算。",
+        subtitle: "调目标角度、允许误差和偏多久才开始电。",
+        help: "按开始时的握法当基准。偏离目标角度太久才会电，短暂晃一下不会马上触发。",
+        primaryLabel: "开始强度",
+        secondaryLabel: "最高强度",
+        primaryValue: (cfg) => cfg.strengthMin,
+        secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => `目标 ${cfg.targetOffset}° ± ${cfg.tolerance}°`,
         triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发`
     },
     dice: {
         title: "摇骰子对决",
-        subtitle: "设置摇晃灵敏度、对手难度和失败后的惩罚区间。",
-        help: "摇晃越充分，玩家骰子越有优势。任意一方摇出豹子时直接触发豹子惩罚。",
+        subtitle: "输几点就电几下；你自己摇出豹子时，点数乘倍率就是次数。",
+        help: "你和对手各摇 3 颗骰子。你输了几点就电几下；你自己摇出豹子时，按豹子点数乘倍率来算次数。",
+        primaryLabel: "每下强度",
+        secondaryLabel: "最多次数",
+        primaryValue: (cfg) => cfg.strength,
+        secondaryValue: (cfg) => `${cfg.maxPunishCount} 下`,
         toleranceLabel: (cfg) => `灵敏度 ${cfg.shakeSensitivity}`,
-        triggerLabel: (cfg) => `失败 ${cfg.timeMin.toFixed(1)}s-${cfg.timeMax.toFixed(1)}s | 豹子 ${cfg.leopardSecondsPerPoint}s/点`
+        triggerLabel: (cfg) => `每下 ${cfg.singleSeconds.toFixed(1)}s | 豹子 x${cfg.leopardMultiplier}`
     },
     slot: {
         title: "极速角子机",
-        subtitle: "设置开奖速度、中奖概率、压力进度和满槽惩罚。",
-        help: "三格 Emoji 高频开奖。全不同会增加压力，两个或三个相同会回落；压力条满格后立即触发惩罚。",
-        toleranceLabel: (cfg) => `空转 +${cfg.missGain}% | 小奖 -${cfg.smallWinDrop}%`,
+        subtitle: "调开奖速度、没中奖是否轻电、压力条涨跌和满槽电击。",
+        help: "三个图案全不同时压力会上涨；中奖会降压力。压力满了就电一下，开启轻电后没中奖也会轻轻电一下。",
+        primaryLabel: "轻电强度",
+        secondaryLabel: "满槽强度",
+        primaryValue: (cfg) => cfg.lightPunishEnabled ? cfg.strengthMin : "关闭",
+        secondaryValue: (cfg) => cfg.strengthMax,
+        toleranceLabel: (cfg) => `没中 +${cfg.missGain}% | 小奖 -${cfg.smallWinDrop}%`,
         triggerLabel: (cfg) => `${cfg.spinMs}ms 开奖 | 满槽 ${cfg.shockSeconds.toFixed(1)}s`
     }
 };
@@ -154,6 +180,12 @@ let slotSpinFinishTimer = null;
 let slotAutoTimer = null;
 let slotCooldownTimer = null;
 let slotCooldownUntil = 0;
+let slotLightCooldownUntil = 0;
+
+// 连续惩罚队列用于骰子这种“输几点就电几下”的玩法，停止输出时必须能立即清掉。
+let dicePunishTimer = null;
+let dicePunishRemaining = 0;
+let dicePunishGeneration = 0;
 
 function $(id) {
     return document.getElementById(id);
@@ -384,8 +416,11 @@ function emergencyStop(reason) {
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
+    dicePunishRemaining = 0;
+    dicePunishGeneration++;
     slotIsSpinning = false;
     slotCooldownUntil = 0;
+    slotLightCooldownUntil = 0;
     sendGameMessage({
         type: "stop_shock",
         reason
@@ -575,27 +610,47 @@ function populateSettingsForm(gameName) {
         setRangeValue("angle-trigger-ms", cfg.triggerMs);
         setRangeValue("angle-ramp-degrees", cfg.rampDegrees);
     } else if (gameName === "dice") {
-        setRangeValue("dice-strength-min", cfg.strengthMin);
-        setRangeValue("dice-strength-max", cfg.strengthMax);
-        setRangeValue("dice-time-min", cfg.timeMin);
-        setRangeValue("dice-time-max", cfg.timeMax);
+        setRangeValue("dice-strength", cfg.strength);
+        setRangeValue("dice-single-seconds", cfg.singleSeconds);
+        setRangeValue("dice-leopard-multiplier", cfg.leopardMultiplier);
+        setRangeValue("dice-max-punish-count", cfg.maxPunishCount);
         setRangeValue("dice-shake-sensitivity", cfg.shakeSensitivity);
-        setRangeValue("dice-leopard-seconds-per-point", cfg.leopardSecondsPerPoint);
         $("dice-opponent-difficulty").value = cfg.opponentDifficulty;
         $("dice-manual-roll").checked = cfg.manualRoll;
     } else if (gameName === "slot") {
         setRangeValue("slot-strength-min", cfg.strengthMin);
         setRangeValue("slot-strength-max", cfg.strengthMax);
         setRangeValue("slot-shock-seconds", cfg.shockSeconds);
+        setRangeValue("slot-light-shock-seconds", cfg.lightShockSeconds);
         setRangeValue("slot-spin-ms", cfg.spinMs);
         setRangeValue("slot-auto-interval-ms", cfg.autoIntervalMs);
         setRangeValue("slot-miss-gain", cfg.missGain);
         setRangeValue("slot-streak-bonus", cfg.streakBonus);
         setRangeValue("slot-small-win-drop", cfg.smallWinDrop);
         setRangeValue("slot-jackpot-drop", cfg.jackpotDrop);
+        $("slot-light-punish-enabled").checked = cfg.lightPunishEnabled;
         $("slot-auto-spin").checked = cfg.autoSpin;
         $("slot-win-rate").value = cfg.winRate;
         $("slot-seven-rule").value = cfg.sevenRule;
+    }
+
+    populateOutputSettings(cfg);
+}
+
+function populateOutputSettings(cfg) {
+    if (!$("common-output-mode")) return;
+
+    $("common-output-mode").value = cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
+    $("common-b-strength-mode").value = cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
+    setRangeValue("common-b-strength-percent", cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
+    updateBChannelSettingsVisibility();
+}
+
+function updateBChannelSettingsVisibility() {
+    const mode = $("common-output-mode") ? $("common-output-mode").value : "a";
+    const bGroup = $("common-b-settings");
+    if (bGroup) {
+        bGroup.style.display = mode === "a" ? "none" : "block";
     }
 }
 
@@ -610,14 +665,15 @@ function updateSettingValue(id, shouldSave = true) {
 
     if (id.endsWith("safe-radius") || id.endsWith("gap-inner") ||
         id.endsWith("miss-gain") || id.endsWith("streak-bonus") ||
-        id.endsWith("small-win-drop") || id.endsWith("jackpot-drop")) {
+        id.endsWith("small-win-drop") || id.endsWith("jackpot-drop") ||
+        id.endsWith("b-strength-percent")) {
         label = `${rawValue}%`;
     } else if (id.endsWith("forgive-ms") || id.endsWith("trigger-ms") ||
         id.endsWith("spin-ms") || id.endsWith("auto-interval-ms")) {
         label = `${rawValue}ms`;
     } else if (id.endsWith("seconds-per-point")) {
         label = `${rawValue}s`;
-    } else if (id.endsWith("shock-seconds")) {
+    } else if (id.endsWith("shock-seconds") || id.endsWith("single-seconds")) {
         label = `${rawValue.toFixed(1)}s`;
     } else if (id.includes("time-")) {
         label = `${rawValue.toFixed(1)}s`;
@@ -630,6 +686,21 @@ function updateSettingValue(id, shouldSave = true) {
     if (shouldSave) {
         saveSelectedSettings(true);
     }
+}
+
+function collectOutputSettings() {
+    const outputMode = ["a", "b", "ab"].includes($("common-output-mode").value)
+        ? $("common-output-mode").value
+        : DEFAULT_OUTPUT_SETTINGS.outputMode;
+    const bStrengthMode = ["same", "percent"].includes($("common-b-strength-mode").value)
+        ? $("common-b-strength-mode").value
+        : DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
+
+    return {
+        outputMode,
+        bStrengthMode,
+        bStrengthPercent: clamp(readNumber("common-b-strength-percent", 50), 10, 100)
+    };
 }
 
 function saveSelectedSettings(silent = false) {
@@ -650,6 +721,7 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("shake-strength-min", 20), 0, 200);
         const maxStrength = clamp(readNumber("shake-strength-max", 60), 0, 200);
         return {
+            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             mode: $("shake-mode").value,
@@ -664,6 +736,7 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("angle-strength-min", 15), 0, 200);
         const maxStrength = clamp(readNumber("angle-strength-max", 70), 0, 200);
         return {
+            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             targetOffset: clamp(readNumber("angle-target-offset", 0), -45, 45),
@@ -674,17 +747,13 @@ function collectSettingsFromForm(gameName) {
     }
 
     if (gameName === "dice") {
-        const minStrength = clamp(readNumber("dice-strength-min", 20), 0, 200);
-        const maxStrength = clamp(readNumber("dice-strength-max", 80), 0, 200);
-        const timeMin = clamp(readNumber("dice-time-min", 1), 0.5, 10);
-        const timeMax = clamp(readNumber("dice-time-max", 4), 0.5, 10);
         return {
-            strengthMin: Math.min(minStrength, maxStrength),
-            strengthMax: Math.max(minStrength, maxStrength),
-            timeMin: Math.min(timeMin, timeMax),
-            timeMax: Math.max(timeMin, timeMax),
+            ...collectOutputSettings(),
+            strength: clamp(readNumber("dice-strength", 20), 0, 200),
+            singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 0.5, 5.0),
+            leopardMultiplier: clamp(readNumber("dice-leopard-multiplier", 3), 1, 6),
+            maxPunishCount: clamp(readNumber("dice-max-punish-count", 30), 1, 60),
             shakeSensitivity: clamp(readNumber("dice-shake-sensitivity", 15), 8, 35),
-            leopardSecondsPerPoint: clamp(readNumber("dice-leopard-seconds-per-point", 5), 1, 10),
             opponentDifficulty: $("dice-opponent-difficulty").value,
             manualRoll: $("dice-manual-roll").checked
         };
@@ -694,9 +763,12 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("slot-strength-min", 20), 0, 200);
         const maxStrength = clamp(readNumber("slot-strength-max", 85), 0, 200);
         return {
+            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 0.5, 8.0),
+            lightPunishEnabled: $("slot-light-punish-enabled").checked,
+            lightShockSeconds: clamp(readNumber("slot-light-shock-seconds", 0.4), 0.1, 2.0),
             spinMs: clamp(readNumber("slot-spin-ms", 700), 450, 1400),
             autoSpin: $("slot-auto-spin").checked,
             autoIntervalMs: clamp(readNumber("slot-auto-interval-ms", 650), 300, 1800),
@@ -771,10 +843,13 @@ function setupPlayScreen(gameName) {
     setText("game-title", GAME_META[gameName].title);
     setText("game-help", GAME_META[gameName].help);
     setText("summary-game", GAME_META[gameName].title);
-    setText("summary-strength-min", cfg.strengthMin);
-    setText("summary-strength-max", cfg.strengthMax);
+    setText("summary-primary-label", GAME_META[gameName].primaryLabel);
+    setText("summary-secondary-label", GAME_META[gameName].secondaryLabel);
+    setText("summary-strength-min", GAME_META[gameName].primaryValue(cfg));
+    setText("summary-strength-max", GAME_META[gameName].secondaryValue(cfg));
     setText("summary-tolerance", GAME_META[gameName].toleranceLabel(cfg));
     setText("summary-trigger", GAME_META[gameName].triggerLabel(cfg));
+    setText("summary-output", formatOutputLabel(cfg));
 
     $("game-viewport").style.display = gameName === "dice" || gameName === "slot" ? "none" : "block";
     $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
@@ -808,6 +883,10 @@ function stopRuntimeLoops() {
     shakeStopTimeout = null;
     clearInterval(manualRollTimer);
     manualRollTimer = null;
+    clearTimeout(dicePunishTimer);
+    dicePunishTimer = null;
+    dicePunishRemaining = 0;
+    dicePunishGeneration++;
     clearInterval(slotSpinAnimationTimer);
     slotSpinAnimationTimer = null;
     clearTimeout(slotSpinFinishTimer);
@@ -829,8 +908,11 @@ function stopCurrentGame() {
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
+    dicePunishRemaining = 0;
+    dicePunishGeneration++;
     slotIsSpinning = false;
     slotCooldownUntil = 0;
+    slotLightCooldownUntil = 0;
     sendGameMessage({ type: "stop_shock" });
     releaseScreenWakeLock();
     const rollButton = $("btn-roll");
@@ -864,9 +946,46 @@ function sendPulse(strength, duration = 100) {
     sendGameMessage({
         type: "game_pulse",
         strength: safeStrength,
-        duration
+        duration,
+        ...getOutputPayload()
     });
     vibrateBriefly(40);
+}
+
+function getOutputPayload() {
+    const cfg = gameSettings[activeGame] || DEFAULT_OUTPUT_SETTINGS;
+    return {
+        outputMode: cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode,
+        bStrengthMode: cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode,
+        bStrengthPercent: cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent
+    };
+}
+
+function sendConfiguredShock(strength, duration) {
+    const safeStrength = clamp(Math.round(strength), 0, 200);
+    if (safeStrength <= 0) return false;
+
+    return sendGameMessage({
+        type: "game_shock_trigger",
+        strength: safeStrength,
+        duration: Math.round(duration),
+        ...getOutputPayload()
+    });
+}
+
+function formatOutputLabel(cfg) {
+    const mode = cfg.outputMode || "a";
+    const bText = cfg.bStrengthMode === "same" ? "B 同强度" : `B ${cfg.bStrengthPercent}%`;
+
+    if (mode === "b") {
+        return `只用 B | ${bText}`;
+    }
+
+    if (mode === "ab") {
+        return `A+B | ${bText}`;
+    }
+
+    return "只用 A";
 }
 
 function vibrateBriefly(duration) {
@@ -1114,11 +1233,13 @@ function checkAnglePunish() {
 function initDiceGame() {
     isDiceShaking = false;
     diceShakeEnergy = 0;
+    dicePunishRemaining = 0;
+    dicePunishGeneration++;
     setText("dice-1", "-");
     setText("dice-2", "-");
     setText("dice-3", "-");
     setText("dice-scores", "玩家总分: - | 对手总分: -");
-    setText("dice-instruction", "摇晃手机 或 点击下方按钮开始摇号");
+    setText("dice-instruction", "摇晃手机，或点击按钮开一局");
     $("dice-instruction").style.color = "#888888";
     $("btn-roll").disabled = !gameSettings.dice.manualRoll;
 }
@@ -1138,7 +1259,7 @@ function triggerDiceShake(force) {
         $("btn-roll").disabled = true;
     }
 
-    // 晃动越明显，能量越高；后续结算会把这个能量转成玩家骰子的轻微优势。
+    // 晃动只负责触发开局；骰子本身保持简单随机，避免玩家还要理解隐藏加成。
     diceShakeEnergy = clamp(diceShakeEnergy + Math.max(1, force - cfg.shakeSensitivity), 0, 120);
 
     if (now - lastShakeTime > 80) {
@@ -1178,17 +1299,6 @@ function rollDicesManual() {
     }, 100);
 }
 
-function rollWeightedDie(powerRatio) {
-    let value = Math.floor(Math.random() * 6) + 1;
-    if (Math.random() < powerRatio * 0.45) {
-        value = Math.min(6, value + 1);
-    }
-    if (powerRatio > 0.78 && Math.random() < 0.2) {
-        value = Math.min(6, value + 1);
-    }
-    return value;
-}
-
 function rollOpponentDie(difficulty) {
     let value = Math.floor(Math.random() * 6) + 1;
     if (difficulty === "easy" && Math.random() < 0.28) {
@@ -1210,11 +1320,10 @@ function settleDiceGame() {
     shakeStopTimeout = null;
 
     const cfg = gameSettings.dice;
-    const powerRatio = clamp(diceShakeEnergy / 90, 0, 1);
     const player = [
-        rollWeightedDie(powerRatio),
-        rollWeightedDie(powerRatio),
-        rollWeightedDie(powerRatio)
+        rollPlayerDie(),
+        rollPlayerDie(),
+        rollPlayerDie()
     ];
     const opponent = [
         rollOpponentDie(cfg.opponentDifficulty),
@@ -1231,49 +1340,81 @@ function settleDiceGame() {
     $("btn-roll").disabled = !cfg.manualRoll;
 
     const playerTriple = getTripleFace(player);
-    const opponentTriple = getTripleFace(opponent);
-    const leopardFace = Math.max(playerTriple, opponentTriple);
-    if (leopardFace > 0) {
-        const owner = playerTriple && opponentTriple ? "双方豹子" : playerTriple ? "玩家豹子" : "对手豹子";
-        const punishDuration = leopardFace * cfg.leopardSecondsPerPoint * 1000;
-        setText("dice-instruction", `${owner} | ${leopardFace}点豹子`);
-        $("dice-instruction").style.color = "#ff3333";
-
-        sendGameMessage({
-            type: "game_shock_trigger",
-            strength: Math.round(cfg.strengthMax),
-            duration: Math.round(punishDuration)
-        });
-
-        if (navigator.vibrate) {
-            navigator.vibrate(Math.min(1200, Math.round(punishDuration)));
-        }
+    if (playerTriple > 0) {
+        const count = playerTriple * cfg.leopardMultiplier;
+        startDicePunishQueue(count, `${playerTriple} 点豹子`);
         return;
     }
 
     if (pTotal >= oTotal) {
-        setText("dice-instruction", `挑战胜出 | 摇晃效率 ${Math.round(powerRatio * 100)}%`);
+        setText("dice-instruction", `你赢了 | ${pTotal} : ${oTotal}`);
         $("dice-instruction").style.color = "#ffffff";
         return;
     }
 
     const diff = oTotal - pTotal;
-    const ratio = clamp(diff / 15, 0, 1);
-    const punishStrength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
-    const punishDuration = (cfg.timeMin + (cfg.timeMax - cfg.timeMin) * ratio) * 1000;
+    startDicePunishQueue(diff, `输了 ${diff} 点`);
+}
 
-    setText("dice-instruction", `挑战失败 | 差额: ${diff}`);
+function rollPlayerDie() {
+    return Math.floor(Math.random() * 6) + 1;
+}
+
+function startDicePunishQueue(rawCount, reason) {
+    const cfg = gameSettings.dice;
+    const cappedCount = Math.min(Math.max(0, Math.round(rawCount)), cfg.maxPunishCount);
+
+    if (cappedCount <= 0) {
+        setText("dice-instruction", "没有惩罚");
+        $("dice-instruction").style.color = "#ffffff";
+        return;
+    }
+
+    dicePunishGeneration++;
+    dicePunishRemaining = cappedCount;
+    const cappedText = rawCount > cappedCount ? `，已按上限截到 ${cappedCount} 下` : "";
+    setText("dice-instruction", `${reason} | 准备电 ${cappedCount} 下${cappedText}`);
+    $("dice-instruction").style.color = "#ff3333";
+    $("btn-roll").disabled = true;
+    runNextDicePunish(dicePunishGeneration);
+}
+
+function runNextDicePunish(generation) {
+    if (activeGame !== "dice" || generation !== dicePunishGeneration || dicePunishRemaining <= 0) {
+        return;
+    }
+
+    const cfg = gameSettings.dice;
+    const totalDuration = Math.round(cfg.singleSeconds * 1000);
+    const currentIndex = dicePunishRemaining;
+    const sent = sendConfiguredShock(cfg.strength, totalDuration);
+    setText(
+        "dice-instruction",
+        sent
+            ? `正在电 | 剩余 ${currentIndex} 下，每下 ${cfg.singleSeconds.toFixed(1)}s`
+            : `后台未连接 | 剩余 ${currentIndex} 下`
+    );
     $("dice-instruction").style.color = "#ff3333";
 
-    sendGameMessage({
-        type: "game_shock_trigger",
-        strength: Math.round(punishStrength),
-        duration: Math.round(punishDuration)
-    });
-
     if (navigator.vibrate) {
-        navigator.vibrate(Math.min(1200, Math.round(punishDuration)));
+        navigator.vibrate(Math.min(900, totalDuration));
     }
+
+    dicePunishRemaining -= 1;
+    dicePunishTimer = setTimeout(() => {
+        if (activeGame !== "dice" || generation !== dicePunishGeneration) {
+            return;
+        }
+
+        if (dicePunishRemaining <= 0) {
+            setText("dice-instruction", "本局惩罚结束");
+            $("dice-instruction").style.color = "#888888";
+            $("btn-roll").disabled = !gameSettings.dice.manualRoll;
+            return;
+        }
+
+        runNextDicePunish(generation);
+    }, totalDuration + 250);
 }
 
 // --- 10. 游戏 4：极速角子机 ---
@@ -1283,10 +1424,11 @@ function initSlotGame() {
     slotMissStreak = 0;
     slotIsSpinning = false;
     slotCooldownUntil = 0;
+    slotLightCooldownUntil = 0;
     setText("slot-reel-1", "🍒");
     setText("slot-reel-2", "🔔");
     setText("slot-reel-3", "💎");
-    setText("slot-result", "点击开转，连续空转会把压力推向满格。");
+    setText("slot-result", "点击开转。没中奖会涨压力，压力满了就电。");
     updateSlotView();
 
     const button = $("btn-slot-spin");
@@ -1474,7 +1616,7 @@ function applySlotResult(resultType, reels) {
         slotMissStreak += 1;
         const gain = cfg.missGain + Math.max(0, slotMissStreak - 1) * cfg.streakBonus;
         slotPressure = clamp(slotPressure + gain, 0, 100);
-        message = `${display} | 空转，压力 +${gain}%`;
+        message = `${display} | 没中奖，压力 +${gain}%`;
     } else if (resultType === "small") {
         slotMissStreak = Math.max(0, slotMissStreak - 1);
         slotPressure = clamp(slotPressure - cfg.smallWinDrop, 0, 100);
@@ -1507,8 +1649,21 @@ function applySlotResult(resultType, reels) {
         return true;
     }
 
-    setText("game-status", `压力 ${Math.round(slotPressure)}%`);
+    const lightText = resultType === "miss" && cfg.lightPunishEnabled ? triggerSlotLightPunish() : "";
+    setText("game-status", lightText ? `${lightText} | 压力 ${Math.round(slotPressure)}%` : `压力 ${Math.round(slotPressure)}%`);
     return false;
+}
+
+function triggerSlotLightPunish() {
+    const cfg = gameSettings.slot;
+    const now = Date.now();
+    if (now < slotLightCooldownUntil) return "轻电冷却中";
+
+    const duration = Math.round(cfg.lightShockSeconds * 1000);
+    const sent = sendConfiguredShock(cfg.strengthMin, duration);
+    slotLightCooldownUntil = now + duration + 150;
+
+    return sent ? `没中奖轻电 ${cfg.strengthMin}` : "没中奖，但后台未连接";
 }
 
 function triggerSlotPunish(reason, forceMax) {
@@ -1516,11 +1671,7 @@ function triggerSlotPunish(reason, forceMax) {
     const duration = Math.round(cfg.shockSeconds * 1000);
     const ratio = forceMax ? 1 : clamp(slotPressure / 100, 0, 1);
     const strength = Math.round(cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio);
-    const sent = sendGameMessage({
-        type: "game_shock_trigger",
-        strength,
-        duration
-    });
+    const sent = sendConfiguredShock(strength, duration);
 
     setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，但后台未连接`);
     setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | 未能连接后台下发`);

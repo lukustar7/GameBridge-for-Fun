@@ -325,56 +325,109 @@ def build_pulse_operation(channel_strength):
     return ((100, 100, 100, 100), (wave_strength, wave_strength, wave_strength, wave_strength))
 
 
+def parse_output_config(data):
+    """解析游戏端传来的输出通道配置，默认只使用 A 通道"""
+    output_mode = data.get("outputMode", data.get("output_mode", "a"))
+    if output_mode not in {"a", "b", "ab"}:
+        output_mode = "a"
+
+    b_strength_mode = data.get("bStrengthMode", data.get("b_strength_mode", "percent"))
+    if b_strength_mode not in {"same", "percent"}:
+        b_strength_mode = "percent"
+
+    b_strength_percent = clamp_int(
+        data.get("bStrengthPercent", data.get("b_strength_percent", 50)),
+        10,
+        100,
+        fallback=50
+    )
+    return output_mode, b_strength_mode, b_strength_percent
+
+
+def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_strength_percent):
+    """把游戏强度换算成 A/B 两路最终强度，并分别套用设备限幅"""
+    base = clamp_int(base_strength, 0, 200, fallback=0)
+    if base <= 0:
+        return []
+
+    limit_a = state["limit_a"] if state["limit_a"] > 0 else 200
+    limit_b = state["limit_b"] if state["limit_b"] > 0 else 200
+    targets = []
+
+    if output_mode in {"a", "ab"}:
+        targets.append((Channel.A, min(base, limit_a), "client_strength_a"))
+
+    if output_mode in {"b", "ab"}:
+        b_base = base if b_strength_mode == "same" else round(base * b_strength_percent / 100)
+        targets.append((Channel.B, min(clamp_int(b_base, 0, 200, fallback=0), limit_b), "client_strength_b"))
+
+    return [(channel, strength, state_key) for channel, strength, state_key in targets if strength > 0]
+
+
 async def stop_all_output():
-    """尽量清空 A 通道输出，用于返回列表、断线或用户点击停止输出"""
+    """尽量清空 A/B 两路输出，用于返回列表、断线或用户点击停止输出"""
     global dg_app_client, shock_generation
     shock_generation += 1
     if not dg_app_client or not state["app_connected"]:
         return
 
     try:
-        await dg_app_client.clear_pulses(Channel.A)
-        await dg_app_client.set_strength(Channel.A, StrengthOperationType.SET_TO, 0)
+        for channel in (Channel.A, Channel.B):
+            await dg_app_client.clear_pulses(channel)
+            await dg_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0)
+        state["client_strength_a"] = 0
+        state["client_strength_b"] = 0
     except Exception as e:
         print(f"停止输出失败: {e}")
 
 
-async def handle_game_shock(strength, duration_ms):
+async def handle_game_shock(
+    strength,
+    duration_ms,
+    output_mode="a",
+    b_strength_mode="percent",
+    b_strength_percent=50,
+    clear_after=True
+):
     """向 App 客户端下发电击脉冲任务的公共逻辑"""
     global dg_app_client, state, shock_generation
     if not state["app_connected"] or not dg_app_client:
         return
     
     try:
-        # 通道强度遵循 0-200，且不能超过 App/设备端软上限。
-        limit_a = state["limit_a"] if state["limit_a"] > 0 else 200
-        safe_strength = min(clamp_int(strength, 0, 200, fallback=0), limit_a)
+        # A/B 通道各自遵循 0-200，且不能超过 App/设备端软上限。
+        channel_targets = build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent)
         safe_duration = clamp_int(
             duration_ms,
             MIN_SHOCK_DURATION_MS,
             MAX_SHOCK_DURATION_MS,
             fallback=MIN_SHOCK_DURATION_MS
         )
-        if safe_strength <= 0:
+        if not channel_targets:
             return
 
-        pulse_unit = build_pulse_operation(safe_strength)
         loops = max(1, int(safe_duration / 100))
         generation = shock_generation
 
         async with shock_lock:
             if not state["app_connected"] or generation != shock_generation:
                 return
-            await dg_app_client.set_strength(Channel.A, StrengthOperationType.SET_TO, safe_strength)
+
+            pulse_targets = []
+            for channel, safe_strength, state_key in channel_targets:
+                await dg_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength)
+                state[state_key] = safe_strength
+                pulse_targets.append((channel, build_pulse_operation(safe_strength)))
 
             for _ in range(loops):
                 if not state["app_connected"] or generation != shock_generation:
                     break
-                await dg_app_client.add_pulses(Channel.A, pulse_unit)
+                for channel, pulse_unit in pulse_targets:
+                    await dg_app_client.add_pulses(channel, pulse_unit)
                 await asyncio.sleep(0.1)
 
-            # 单次长惩罚结束后主动清空，避免设备端队列里残留后续波形。
-            if safe_duration >= 500:
+            # 结算型惩罚结束后主动清空，避免设备端队列里残留后续波形；持续型脉冲由下一帧覆盖。
+            if clear_after:
                 await stop_all_output()
     except Exception as e:
         print(f"脉冲下发失败: {e}")
@@ -460,9 +513,17 @@ async def web_ws_handler(websocket, path):
                     strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
                     duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
-                        asyncio.create_task(handle_game_shock(strength, duration))
+                        output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                        asyncio.create_task(handle_game_shock(
+                            strength,
+                            duration,
+                            output_mode,
+                            b_strength_mode,
+                            b_strength_percent,
+                            clear_after=False
+                        ))
                         
-                # 游戏 3 摇骰子结算惩罚上报 (单次触发具有一定持续时间)
+                # 结算型惩罚上报：骰子、角子机满槽和角子机轻惩罚都走这里。
                 elif data.get("type") == "game_shock_trigger":
                     strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
                     duration = clamp_int(
@@ -472,8 +533,16 @@ async def web_ws_handler(websocket, path):
                         fallback=1000
                     )
                     if strength > 0:
+                        output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
                         # 开启一个后台异步任务执行指定时长的电击
-                        asyncio.create_task(handle_game_shock(strength, duration))
+                        asyncio.create_task(handle_game_shock(
+                            strength,
+                            duration,
+                            output_mode,
+                            b_strength_mode,
+                            b_strength_percent,
+                            clear_after=True
+                        ))
 
                 elif data.get("type") == "stop_shock":
                     await stop_all_output()
