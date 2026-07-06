@@ -14,3 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 前端游戏集成 Web Audio API 骰子撞击音效合成器与 `navigator.vibrate` 物理震动反馈。
 - 引入本地 `qrcode.min.js`，实现离线/弱网二维码极速渲染。
 - 后端 Python 异步服务端，实现多服务端口防冲突分配与 V3 脉冲波形下发逻辑。
+
+### Removed
+- 删除了与郊狼脉冲主机无关的其他硬件协议文档（爪印无线按钮传感器、灵猫边缘控制传感器、负鼠振动控制器）。
+
