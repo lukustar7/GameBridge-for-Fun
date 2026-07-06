@@ -108,18 +108,22 @@ function updateUI(data) {
     
     // 延迟格式化显示 (冷峻标记)
     const statAppLat = document.getElementById("stat-app-latency");
-    if (data.app_latency >= 0) {
-        statAppLat.innerText = `${data.app_latency}ms`;
-        statAppLat.className = getLatencyClass(data.app_latency);
+    const appLatency = Number(data.app_latency);
+    if (Number.isFinite(appLatency) && appLatency >= 0) {
+        statAppLat.innerText = `${appLatency}ms`;
+        statAppLat.className = getLatencyClass(appLatency);
     } else {
         statAppLat.innerText = "-";
         statAppLat.className = "";
     }
 
+    updateGameLatency(data.game_latency);
+    document.getElementById("stat-game-connected").innerText = data.game_connected ? "已连接" : "未连接";
     document.getElementById("stat-strength-a").innerText = data.strength_a;
     document.getElementById("stat-strength-b").innerText = data.strength_b;
     document.getElementById("stat-limit-a").innerText = data.limit_a;
     document.getElementById("stat-limit-b").innerText = data.limit_b;
+    document.getElementById("stat-battery-level").innerText = formatBatteryLevel(data.battery_level);
 
     // 5. 更新 Settings 面板输入框
     document.getElementById("input-http-port").value = data.http_port;
@@ -129,13 +133,21 @@ function updateUI(data) {
 
 function updateGameLatency(rtt) {
     const gameLatTd = document.getElementById("stat-game-latency");
-    if (rtt >= 0) {
-        gameLatTd.innerText = `${rtt}ms`;
-        gameLatTd.className = getLatencyClass(rtt);
+    const latency = Number(rtt);
+    if (Number.isFinite(latency) && latency >= 0) {
+        gameLatTd.innerText = `${latency}ms`;
+        gameLatTd.className = getLatencyClass(latency);
     } else {
         gameLatTd.innerText = "-";
         gameLatTd.className = "";
     }
+}
+
+function formatBatteryLevel(level) {
+    if (level === null || level === undefined || level === "") return "未接入";
+    const value = Number(level);
+    if (!Number.isFinite(value)) return "未接入";
+    return `${Math.round(value)}%`;
 }
 
 function getLatencyClass(rtt) {

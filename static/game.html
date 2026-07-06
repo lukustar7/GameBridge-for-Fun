@@ -76,6 +76,51 @@
             margin-top: 12px;
         }
 
+        .notice-panel {
+            border: 1px solid #222222;
+            padding: 16px;
+            background-color: #000000;
+        }
+
+        .info-list {
+            color: #777777;
+            font-size: 0.85rem;
+            padding-left: 18px;
+        }
+
+        .info-list li {
+            margin: 6px 0;
+        }
+
+        .tech-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            column-gap: 16px;
+        }
+
+        .tech-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 7px 0;
+            border-bottom: 1px solid #111111;
+            color: #777777;
+            font-size: 0.82rem;
+        }
+
+        .tech-row span:last-child {
+            color: #ffffff;
+            font-family: monospace;
+            text-align: right;
+        }
+
+        .field-help {
+            color: #666666;
+            font-size: 0.78rem;
+            line-height: 1.45;
+            margin-top: 5px;
+        }
+
         .game-help {
             color: #888888;
             font-size: 0.9rem;
@@ -125,6 +170,10 @@
                 grid-template-columns: 1fr;
             }
 
+            .tech-grid {
+                grid-template-columns: 1fr;
+            }
+
             .dice-area {
                 gap: 10px;
             }
@@ -146,6 +195,43 @@
         <!-- 游戏选择页只负责选择玩法，不直接启动，避免玩家没调好参数就开始受罚。 -->
         <div id="screen-select" class="screen active">
             <h2 style="margin-bottom: 20px;">选择挑战游戏</h2>
+            <div class="game-select-container">
+                <div class="notice-panel">
+                    <h2>安全与紧急停止</h2>
+                    <ul class="info-list">
+                        <li>游玩页右上方有“停止输出”，点击后会立即请求清空输出。</li>
+                        <li>手机上滑回桌面、锁屏、切后台、刷新或关闭网页时，页面会请求紧急停止；服务端在游戏连接断开时也会兜底清空 A 通道。</li>
+                        <li>开始游戏后会请求手机屏幕常亮；如果浏览器不支持，仍建议保持网页在前台。</li>
+                        <li>电脑和手机必须处于同一局域网，二维码中的端口和 token 由电脑后台自动生成。</li>
+                    </ul>
+                </div>
+
+                <div class="notice-panel">
+                    <h2>可调参数边界</h2>
+                    <p class="sub-text">
+                        官方 V3 文档包含 A/B 通道强度、波形频率、波形强度、通道软上限、频率平衡和强度平衡等硬件参数。当前小游戏只开放与玩法直接相关的强度区间、容错、灵敏度、时长和难度；软上限、平衡参数和 B 通道暂不在游戏页直接修改。
+                    </p>
+                </div>
+
+                <div class="notice-panel">
+                    <h2>连接状态</h2>
+                    <div class="tech-grid">
+                        <div class="tech-row"><span>局域网 IP</span><span id="tech-local-ip">-</span></div>
+                        <div class="tech-row"><span>HTTP 端口</span><span id="tech-http-port">-</span></div>
+                        <div class="tech-row"><span>网页 WS 端口</span><span id="tech-web-ws-port">-</span></div>
+                        <div class="tech-row"><span>App WS 端口</span><span id="tech-app-ws-port">-</span></div>
+                        <div class="tech-row"><span>官方 App</span><span id="tech-app-status">等待绑定</span></div>
+                        <div class="tech-row"><span>游戏端连接</span><span id="tech-game-status">连接中</span></div>
+                        <div class="tech-row"><span>App 延迟</span><span id="tech-app-latency">-</span></div>
+                        <div class="tech-row"><span>浏览器延迟</span><span id="tech-game-latency">-</span></div>
+                        <div class="tech-row"><span>A 通道强度</span><span id="tech-strength-a">-</span></div>
+                        <div class="tech-row"><span>B 通道强度</span><span id="tech-strength-b">-</span></div>
+                        <div class="tech-row"><span>A 通道限幅</span><span id="tech-limit-a">-</span></div>
+                        <div class="tech-row"><span>B 通道限幅</span><span id="tech-limit-b">-</span></div>
+                        <div class="tech-row"><span>设备电量</span><span id="tech-battery">未接入</span></div>
+                    </div>
+                </div>
+            </div>
             <div class="game-select-container">
                 <div class="game-card" onclick="openGameSettings('shake')">
                     <h3>手抖挑战</h3>
@@ -177,6 +263,7 @@
                                 <option value="radius">安全半径模式</option>
                                 <option value="gap">夹缝生存模式</option>
                             </select>
+                            <p class="field-help">决定安全区规则：安全半径模式只要求留在圆内，夹缝生存模式要求留在内外圈之间。</p>
                         </div>
 
                         <div class="slider-container">
@@ -185,6 +272,7 @@
                                 <span id="val-shake-strength-min">20</span>
                             </div>
                             <input type="range" id="shake-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('shake-strength-min')">
+                            <p class="field-help">刚越界并触发时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
                         </div>
 
                         <div class="slider-container">
@@ -193,6 +281,7 @@
                                 <span id="val-shake-strength-max">60</span>
                             </div>
                             <input type="range" id="shake-strength-max" min="0" max="200" value="60" oninput="updateSettingValue('shake-strength-max')">
+                            <p class="field-help">偏离越远时可升到的最高强度，后端仍会按硬件限幅和安全上限再次截断。</p>
                         </div>
 
                         <div class="slider-container">
@@ -201,6 +290,7 @@
                                 <span id="val-shake-safe-radius">26%</span>
                             </div>
                             <input type="range" id="shake-safe-radius" min="12" max="45" value="26" oninput="updateSettingValue('shake-safe-radius')">
+                            <p class="field-help">安全半径模式下越大越容易；夹缝模式下它代表外圈边界。</p>
                         </div>
 
                         <div class="slider-container">
@@ -209,6 +299,7 @@
                                 <span id="val-shake-gap-inner">12%</span>
                             </div>
                             <input type="range" id="shake-gap-inner" min="6" max="28" value="12" oninput="updateSettingValue('shake-gap-inner')">
+                            <p class="field-help">仅夹缝生存模式使用，弹珠太靠中心也会被判定为离开目标区域。</p>
                         </div>
 
                         <div class="slider-container">
@@ -217,6 +308,7 @@
                                 <span id="val-shake-sensitivity">55</span>
                             </div>
                             <input type="range" id="shake-sensitivity" min="20" max="100" value="55" oninput="updateSettingValue('shake-sensitivity')">
+                            <p class="field-help">数值越高，手机同样的倾斜会让弹珠移动得越快，难度也越高。</p>
                         </div>
 
                         <div class="slider-container">
@@ -225,6 +317,7 @@
                                 <span id="val-shake-forgive-ms">600ms</span>
                             </div>
                             <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
+                            <p class="field-help">离开安全区后等待多久才开始输出，给短暂误触和传感器抖动留缓冲。</p>
                         </div>
                     </div>
 
@@ -242,6 +335,7 @@
                                 <span id="val-angle-strength-min">15</span>
                             </div>
                             <input type="range" id="angle-strength-min" min="0" max="200" value="15" oninput="updateSettingValue('angle-strength-min')">
+                            <p class="field-help">持续偏离刚触发时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
                         </div>
 
                         <div class="slider-container">
@@ -250,6 +344,7 @@
                                 <span id="val-angle-strength-max">70</span>
                             </div>
                             <input type="range" id="angle-strength-max" min="0" max="200" value="70" oninput="updateSettingValue('angle-strength-max')">
+                            <p class="field-help">偏离角度很大时可升到的最高强度，后端会继续受硬件限幅保护。</p>
                         </div>
 
                         <div class="slider-container">
@@ -258,6 +353,7 @@
                                 <span id="val-angle-target-offset">0°</span>
                             </div>
                             <input type="range" id="angle-target-offset" min="-45" max="45" value="0" oninput="updateSettingValue('angle-target-offset')">
+                            <p class="field-help">以校准姿态为基准，设置需要保持的目标倾斜角度；0 度就是保持当前姿态。</p>
                         </div>
 
                         <div class="slider-container">
@@ -266,6 +362,7 @@
                                 <span id="val-angle-tolerance">8°</span>
                             </div>
                             <input type="range" id="angle-tolerance" min="2" max="30" value="8" oninput="updateSettingValue('angle-tolerance')">
+                            <p class="field-help">目标角度左右可接受的范围；越小越严格，越容易触发。</p>
                         </div>
 
                         <div class="slider-container">
@@ -274,6 +371,7 @@
                                 <span id="val-angle-trigger-ms">800ms</span>
                             </div>
                             <input type="range" id="angle-trigger-ms" min="100" max="2500" step="100" value="800" oninput="updateSettingValue('angle-trigger-ms')">
+                            <p class="field-help">偏离超过允许误差后必须持续多久才输出，避免一瞬间晃动就误判。</p>
                         </div>
 
                         <div class="slider-container">
@@ -282,6 +380,7 @@
                                 <span id="val-angle-ramp-degrees">28°</span>
                             </div>
                             <input type="range" id="angle-ramp-degrees" min="5" max="60" value="28" oninput="updateSettingValue('angle-ramp-degrees')">
+                            <p class="field-help">超过误差后，偏离多少度会从基础强度逐步爬到最大强度。</p>
                         </div>
                     </div>
 
@@ -299,6 +398,7 @@
                                 <span id="val-dice-strength-min">20</span>
                             </div>
                             <input type="range" id="dice-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength-min')">
+                            <p class="field-help">普通失败且点差较小时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
                         </div>
 
                         <div class="slider-container">
@@ -307,6 +407,7 @@
                                 <span id="val-dice-strength-max">80</span>
                             </div>
                             <input type="range" id="dice-strength-max" min="0" max="200" value="80" oninput="updateSettingValue('dice-strength-max')">
+                            <p class="field-help">普通失败点差很大时可升到的最高强度，豹子也使用这个强度结算。</p>
                         </div>
 
                         <div class="slider-container">
@@ -315,6 +416,7 @@
                                 <span id="val-dice-time-min">1.0s</span>
                             </div>
                             <input type="range" id="dice-time-min" min="0.5" max="5.0" step="0.5" value="1.0" oninput="updateSettingValue('dice-time-min')">
+                            <p class="field-help">普通失败点差较小时的最短输出时间，避免小输也直接拉满。</p>
                         </div>
 
                         <div class="slider-container">
@@ -323,6 +425,7 @@
                                 <span id="val-dice-time-max">4.0s</span>
                             </div>
                             <input type="range" id="dice-time-max" min="0.5" max="10.0" step="0.5" value="4.0" oninput="updateSettingValue('dice-time-max')">
+                            <p class="field-help">普通失败点差很大时的最长输出时间，后端单次任务仍有 60 秒硬上限。</p>
                         </div>
 
                         <div class="slider-container">
@@ -331,6 +434,7 @@
                                 <span id="val-dice-shake-sensitivity">15</span>
                             </div>
                             <input type="range" id="dice-shake-sensitivity" min="8" max="35" value="15" oninput="updateSettingValue('dice-shake-sensitivity')">
+                            <p class="field-help">数值越低越容易识别为摇骰子；数值越高，需要更明显的晃动才结算。</p>
                         </div>
 
                         <div class="slider-container">
@@ -339,6 +443,7 @@
                                 <span id="val-dice-leopard-seconds-per-point">5s</span>
                             </div>
                             <input type="range" id="dice-leopard-seconds-per-point" min="1" max="10" value="5" oninput="updateSettingValue('dice-leopard-seconds-per-point')">
+                            <p class="field-help">任意一方摇出三个相同点数会直接触发；三个 6 时长就是 6 乘以这里的秒数。</p>
                         </div>
 
                         <div>
@@ -348,12 +453,16 @@
                                 <option value="normal">标准</option>
                                 <option value="hard">较强</option>
                             </select>
+                            <p class="field-help">影响对手摇出高点数的概率，难度越高，玩家普通失败的概率越高。</p>
                         </div>
 
-                        <label class="switch-row">
-                            <span>允许手动摇号</span>
-                            <input type="checkbox" id="dice-manual-roll" onchange="saveSelectedSettings(true)">
-                        </label>
+                        <div>
+                            <label class="switch-row">
+                                <span>允许手动摇号</span>
+                                <input type="checkbox" id="dice-manual-roll" onchange="saveSelectedSettings(true)">
+                            </label>
+                            <p class="field-help">开启后可以点击按钮摇号；关闭后只能靠手机加速度传感器触发摇骰子。</p>
+                        </div>
                     </div>
 
                     <div class="settings-actions single">

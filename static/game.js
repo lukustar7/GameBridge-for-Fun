@@ -121,6 +121,7 @@ let diceShakeEnergy = 0;
 let shakeStopTimeout = null;
 let manualRollTimer = null;
 let wakeLock = null;
+let latestGameLatency = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -179,6 +180,7 @@ function connectWebSocket() {
     ws.onopen = () => {
         console.log(`游戏端连接成功: ${targetUrl}`);
         triedPortsCount = 0;
+        setText("tech-game-status", "已连接");
         setText("ping-badge", "网速延迟: --ms");
 
         clearInterval(latencyTimer);
@@ -203,12 +205,16 @@ function connectWebSocket() {
 
         if (data.type === "pong") {
             const rtt = Date.now() - data.time;
+            latestGameLatency = rtt;
             setText("ping-badge", `网速延迟: ${rtt}ms`);
+            updateLocalGameLatency();
 
             sendGameMessage({
                 type: "latency_report",
                 rtt
             });
+        } else if (data.type === "state_update") {
+            updateTechStatus(data);
         } else if (data.type === "button_feedback") {
             vibrateBriefly(20);
         }
@@ -216,7 +222,10 @@ function connectWebSocket() {
 
     ws.onclose = () => {
         clearInterval(latencyTimer);
+        latestGameLatency = null;
         setText("ping-badge", "网速延迟: 离线");
+        setText("tech-game-status", "离线");
+        updateLocalGameLatency();
 
         if (suppressReconnect) {
             return;
@@ -252,6 +261,49 @@ function sendGameMessage(payload) {
         return true;
     }
     return false;
+}
+
+function formatLatency(value) {
+    const latency = Number(value);
+    if (!Number.isFinite(latency) || latency < 0) return "-";
+    return `${Math.round(latency)}ms`;
+}
+
+function formatBatteryLevel(level) {
+    if (level === null || level === undefined || level === "") return "未接入";
+    const value = Number(level);
+    if (!Number.isFinite(value)) return "未接入";
+    return `${Math.round(value)}%`;
+}
+
+function formatHardwareReading(value, appConnected) {
+    const number = Number(value);
+    if (!appConnected || !Number.isFinite(number)) return "未读取";
+    return String(number);
+}
+
+function updateLocalGameLatency() {
+    setText("tech-game-latency", formatLatency(latestGameLatency));
+}
+
+function updateTechStatus(data) {
+    const appConnected = Boolean(data.app_connected);
+
+    // 选择页的技术状态用于现场排障：端口、连接、延迟和硬件回读统一放在这里。
+    setText("tech-local-ip", data.local_ip || window.location.hostname || "-");
+    setText("tech-http-port", data.http_port || "-");
+    setText("tech-web-ws-port", data.web_ws_port || currentWsPort || "-");
+    setText("tech-app-ws-port", data.app_ws_port || "-");
+    setText("tech-app-status", appConnected ? "已绑定" : "等待绑定");
+    setText("tech-game-status", data.game_connected ? "已连接" : "未连接");
+    setText("tech-app-latency", formatLatency(data.app_latency));
+    const shownGameLatency = latestGameLatency !== null ? latestGameLatency : data.game_latency;
+    setText("tech-game-latency", formatLatency(shownGameLatency));
+    setText("tech-strength-a", formatHardwareReading(data.strength_a, appConnected));
+    setText("tech-strength-b", formatHardwareReading(data.strength_b, appConnected));
+    setText("tech-limit-a", formatHardwareReading(data.limit_a, appConnected));
+    setText("tech-limit-b", formatHardwareReading(data.limit_b, appConnected));
+    setText("tech-battery", formatBatteryLevel(data.battery_level));
 }
 
 function closeGameSocketForEmergency() {

@@ -39,11 +39,13 @@ dg_app_client = None
 state = {
     "app_connected": False,      # 手机官方 App 是否已绑定
     "app_latency": -1,           # 电脑到手机 App 的网速延迟 (ms)
+    "game_latency": -1,          # 电脑到手机浏览器小游戏页的应用层延迟 (ms)
     "app_qrcode_url": "",        # 手机 App 绑定扫码 URL
     "client_strength_a": 0,      # A 通道当前实际强度
     "client_strength_b": 0,      # B 通道当前实际强度
     "limit_a": 0,                # A 通道硬件上限限制
     "limit_b": 0,                # B 通道硬件上限限制
+    "battery_level": None,       # V3 文档有电量特征位；当前 pydglab-ws 桥接层未暴露读取接口
     "game_client_connected": False # 手机小游戏网页是否已连入
 }
 
@@ -114,7 +116,7 @@ def run_http_server():
 # --- 2. WebSocket 广播函数 ---
 
 async def broadcast_state():
-    """向所有连入的控制台网页同步当前的最新连接状态与端口设置"""
+    """向控制台和手机游戏页同步当前的最新连接状态、端口与硬件读数"""
     async with state_lock:
         msg = {
             "type": "state_update",
@@ -125,16 +127,19 @@ async def broadcast_state():
             "game_token": GAME_ACCESS_TOKEN,
             "app_connected": state["app_connected"],
             "app_latency": state["app_latency"],
+            "game_latency": state["game_latency"],
             "app_qrcode_url": state["app_qrcode_url"],
             "strength_a": state["client_strength_a"],
             "strength_b": state["client_strength_b"],
             "limit_a": state["limit_a"],
             "limit_b": state["limit_b"],
+            "battery_level": state["battery_level"],
             "game_connected": state["game_client_connected"]
         }
     payload = json.dumps(msg)
-    if console_connections:
-        await asyncio.gather(*(c.send(payload) for c in console_connections), return_exceptions=True)
+    targets = tuple(console_connections | game_connections)
+    if targets:
+        await asyncio.gather(*(c.send(payload) for c in targets), return_exceptions=True)
 
 
 # --- 3. 官方 App 桥接后台协程 (基于 pydglab-ws) ---
@@ -168,6 +173,7 @@ async def read_app_data_stream(client):
                 state["app_latency"] = -1
                 state["client_strength_a"] = 0
                 state["client_strength_b"] = 0
+                state["battery_level"] = None
                 await broadcast_state()
                 return
 
@@ -184,6 +190,15 @@ async def read_app_data_stream(client):
             if hasattr(data, 'limit_a') and hasattr(data, 'limit_b'):
                 state["limit_a"] = data.limit_a
                 state["limit_b"] = data.limit_b
+            # 当前 pydglab-ws 1.1.0 没有公开电量数据类型；这里兼容后续版本可能新增的字段。
+            battery_value = getattr(data, 'battery_level', None)
+            if battery_value is None:
+                battery_value = getattr(data, 'battery', None)
+            if battery_value is not None:
+                try:
+                    state["battery_level"] = max(0, min(100, int(battery_value)))
+                except (TypeError, ValueError):
+                    pass
                 
             # 若是收到设备端按钮被按下的通知，向控制台和游戏广播
             if hasattr(data, 'name'):
@@ -198,6 +213,7 @@ async def read_app_data_stream(client):
         print(f"与 App 的连接断开: {e}")
         state["app_connected"] = False
         state["app_latency"] = -1
+        state["battery_level"] = None
         await broadcast_state()
 
 
@@ -239,6 +255,7 @@ async def app_bridge_runner():
             state["app_latency"] = -1
             state["client_strength_a"] = 0
             state["client_strength_b"] = 0
+            state["battery_level"] = None
             dg_app_client = None
             await broadcast_state()
 
@@ -375,12 +392,14 @@ async def web_ws_handler(websocket, path):
                     
                 # 网页上报的 RTT 延迟数据，广播给电脑控制台展示
                 elif data.get("type") == "latency_report":
+                    state["game_latency"] = clamp_int(data.get("rtt"), -1, 60000, fallback=-1)
                     report_msg = json.dumps({
                         "type": "game_latency",
-                        "latency": data.get("rtt")
+                        "latency": state["game_latency"]
                     })
                     if console_connections:
                         await asyncio.gather(*(c.send(report_msg) for c in console_connections), return_exceptions=True)
+                    await broadcast_state()
                 
                 # 游戏 1 / 游戏 2 的持续线性惩罚数据上报 (每 100ms 触发一次)
                 elif data.get("type") == "game_pulse":
@@ -417,6 +436,8 @@ async def web_ws_handler(websocket, path):
             game_connections.discard(websocket)
             game_connection_last_pulse_at.pop(websocket, None)
             state["game_client_connected"] = len(game_connections) > 0
+            if not state["game_client_connected"]:
+                state["game_latency"] = -1
             await stop_all_output()
             await broadcast_state()
     else:
