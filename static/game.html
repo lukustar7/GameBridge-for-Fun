@@ -164,6 +164,72 @@
             background-color: #000000;
         }
 
+        .slot-machine {
+            display: grid;
+            gap: 18px;
+            padding: 8px 0 2px;
+        }
+
+        .slot-reels {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .slot-reel {
+            aspect-ratio: 1;
+            min-height: 84px;
+            border: 1px solid #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(2.2rem, 16vw, 4.2rem);
+            background-color: #030303;
+            line-height: 1;
+            transition: border-color 120ms ease, transform 120ms ease;
+        }
+
+        .slot-reel.spinning {
+            border-color: #ff3333;
+            transform: translateY(-2px);
+        }
+
+        .slot-danger-header {
+            display: flex;
+            justify-content: space-between;
+            color: #ffffff;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+
+        .slot-danger-track {
+            height: 18px;
+            border: 1px solid #333333;
+            background-color: #050505;
+            overflow: hidden;
+        }
+
+        .slot-danger-fill {
+            width: 0%;
+            height: 100%;
+            background-color: #22c55e;
+            transition: width 180ms ease, background-color 180ms ease;
+        }
+
+        .slot-result-line {
+            min-height: 46px;
+            color: #888888;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .slot-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
         @media (max-width: 420px) {
             .flex-row {
                 align-items: flex-start;
@@ -185,6 +251,10 @@
             .dice-box {
                 width: 58px;
                 height: 58px;
+            }
+
+            .slot-reel {
+                min-height: 68px;
             }
         }
     </style>
@@ -248,6 +318,10 @@
                 <div class="game-card" onclick="openGameSettings('dice')">
                     <h3>摇骰子对决</h3>
                     <p class="sub-text" style="margin-top: 5px;">晃动越充分，玩家骰子越有优势，失败后按差额结算</p>
+                </div>
+                <div class="game-card" onclick="openGameSettings('slot')">
+                    <h3>极速角子机</h3>
+                    <p class="sub-text" style="margin-top: 5px;">Emoji 三轮高频开奖，全不同会推高压力条，满格立即触发惩罚</p>
                 </div>
             </div>
         </div>
@@ -474,6 +548,123 @@
                     </div>
                 </div>
 
+                <div id="settings-slot" class="setting-panel">
+                    <div class="settings-stack">
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>基础惩罚强度</span>
+                                <span id="val-slot-strength-min">20</span>
+                            </div>
+                            <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
+                            <p class="field-help">压力条刚满时使用的最低强度，范围遵循官方通道强度 0 到 200。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>最大惩罚强度</span>
+                                <span id="val-slot-strength-max">85</span>
+                            </div>
+                            <input type="range" id="slot-strength-max" min="0" max="200" value="85" oninput="updateSettingValue('slot-strength-max')">
+                            <p class="field-help">连空越多、压力越高时可升到的最高强度，后端仍会做硬件安全截断。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>满槽持续时间</span>
+                                <span id="val-slot-shock-seconds">2.0s</span>
+                            </div>
+                            <input type="range" id="slot-shock-seconds" min="0.5" max="8.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
+                            <p class="field-help">压力条满格后单次输出多久；触发后会进入短冷却，避免自动连转叠得太密。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>开奖时长</span>
+                                <span id="val-slot-spin-ms">700ms</span>
+                            </div>
+                            <input type="range" id="slot-spin-ms" min="450" max="1400" step="50" value="700" oninput="updateSettingValue('slot-spin-ms')">
+                            <p class="field-help">每次按下开转后多久开奖；数值越低节奏越快，紧张感也越强。</p>
+                        </div>
+
+                        <div>
+                            <label class="switch-row">
+                                <span>自动连转</span>
+                                <input type="checkbox" id="slot-auto-spin" onchange="saveSelectedSettings(true)">
+                            </label>
+                            <p class="field-help">开启后会在每次开奖结束后自动进入下一轮；停止输出或返回列表会立刻终止。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>自动连转间隔</span>
+                                <span id="val-slot-auto-interval-ms">650ms</span>
+                            </div>
+                            <input type="range" id="slot-auto-interval-ms" min="300" max="1800" step="50" value="650" oninput="updateSettingValue('slot-auto-interval-ms')">
+                            <p class="field-help">自动连转时两次开奖之间等待多久；惩罚触发后的冷却时间会额外加上满槽持续时间。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>空转压力增加</span>
+                                <span id="val-slot-miss-gain">24%</span>
+                            </div>
+                            <input type="range" id="slot-miss-gain" min="8" max="45" value="24" oninput="updateSettingValue('slot-miss-gain')">
+                            <p class="field-help">三个图案全不同时增加多少压力；越高越容易快速满格。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>连空递增</span>
+                                <span id="val-slot-streak-bonus">6%</span>
+                            </div>
+                            <input type="range" id="slot-streak-bonus" min="0" max="15" value="6" oninput="updateSettingValue('slot-streak-bonus')">
+                            <p class="field-help">连续全不同后，每多空一轮额外增加的压力，用来制造越输越危险的节奏。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>小奖压力减少</span>
+                                <span id="val-slot-small-win-drop">14%</span>
+                            </div>
+                            <input type="range" id="slot-small-win-drop" min="0" max="35" value="14" oninput="updateSettingValue('slot-small-win-drop')">
+                            <p class="field-help">两个相同图案时减少多少压力；调低会让小奖更像喘口气，而不是直接安全。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>大奖压力减少</span>
+                                <span id="val-slot-jackpot-drop">70%</span>
+                            </div>
+                            <input type="range" id="slot-jackpot-drop" min="20" max="100" value="70" oninput="updateSettingValue('slot-jackpot-drop')">
+                            <p class="field-help">三个相同图案时减少多少压力；设为 100 基本等于大奖清空压力。</p>
+                        </div>
+
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">中奖率档位</label>
+                            <select id="slot-win-rate" onchange="saveSelectedSettings(true)">
+                                <option value="loose">宽松</option>
+                                <option value="normal">标准</option>
+                                <option value="brutal">残酷</option>
+                            </select>
+                            <p class="field-help">控制小奖和大奖的大致概率；残酷档会让全不同更常见，压力上涨更快。</p>
+                        </div>
+
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">三个 7 规则</label>
+                            <select id="slot-seven-rule" onchange="saveSelectedSettings(true)">
+                                <option value="reset">清空压力</option>
+                                <option value="fill">直接满槽</option>
+                                <option value="shock">立即最大惩罚</option>
+                            </select>
+                            <p class="field-help">三个 7 是独立彩蛋：可以当大奖清空，也可以直接推满压力或立刻按最大强度结算。</p>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions single">
+                        <button onclick="startConfiguredGame()">开始游戏</button>
+                    </div>
+                </div>
+
                 <div id="settings-message" class="inline-note"></div>
             </div>
         </div>
@@ -512,6 +703,32 @@
 
                         <button id="btn-roll" onclick="rollDicesManual()" style="width: 100%;">手动摇号</button>
                     </div>
+
+                    <div id="slot-viewport" style="display: none; padding: 12px 0;">
+                        <div class="slot-machine">
+                            <div class="slot-reels">
+                                <div class="slot-reel" id="slot-reel-1">🍒</div>
+                                <div class="slot-reel" id="slot-reel-2">🔔</div>
+                                <div class="slot-reel" id="slot-reel-3">💎</div>
+                            </div>
+
+                            <div>
+                                <div class="slot-danger-header">
+                                    <span>压力进度</span>
+                                    <span id="slot-pressure-label">0%</span>
+                                </div>
+                                <div class="slot-danger-track" aria-hidden="true">
+                                    <div id="slot-pressure-fill" class="slot-danger-fill"></div>
+                                </div>
+                            </div>
+
+                            <div id="slot-result" class="slot-result-line">点击开转，连续空转会把压力推向满格。</div>
+
+                            <div class="slot-actions">
+                                <button id="btn-slot-spin" onclick="startSlotSpin()">开转</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="panel">
@@ -543,6 +760,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260706-scroll-fix"></script>
+    <script src="game.js?v=20260706-slot-machine"></script>
 </body>
 </html>

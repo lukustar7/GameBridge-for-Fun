@@ -415,7 +415,11 @@ async def web_ws_handler(websocket, path):
         query = parse_qs(parsed_path.query)
         token = query.get("token", [""])[0]
         if token != GAME_ACCESS_TOKEN:
-            await websocket.close(code=1008, reason="invalid game token")
+            try:
+                # 无 token 页面会被立即拒绝；如果浏览器已经主动断开，不再把正常拒绝打印成异常栈。
+                await websocket.close(code=1008, reason="invalid game token")
+            except websockets.exceptions.ConnectionClosed:
+                pass
             return
 
         game_connections.add(websocket)
