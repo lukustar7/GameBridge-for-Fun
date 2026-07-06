@@ -495,6 +495,7 @@ function showScreen(screenId) {
         node.classList.remove("active");
     });
     $(screenId).classList.add("active");
+    window.scrollTo(0, 0);
 }
 
 function showSelectScreen() {

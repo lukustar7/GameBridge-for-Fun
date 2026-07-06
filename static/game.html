@@ -7,8 +7,8 @@
     <link rel="stylesheet" href="style.css">
     <style>
         body {
-            /* 手机端游戏需要稳定触摸输入，禁止页面滚动、缩放和误选中文字。 */
-            touch-action: none;
+            /* 选择页和设置页内容较长，需要允许纵向滚动；真正的游玩区再单独锁触摸。 */
+            touch-action: pan-y;
             -webkit-user-select: none;
             user-select: none;
         }
@@ -48,6 +48,10 @@
 
         .screen.active {
             display: block;
+        }
+
+        #screen-play {
+            touch-action: none;
         }
 
         .setting-panel {
@@ -539,6 +543,6 @@
         </div>
     </div>
 
-    <script src="game.js"></script>
+    <script src="game.js?v=20260706-scroll-fix"></script>
 </body>
 </html>

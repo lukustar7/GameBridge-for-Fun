@@ -47,17 +47,19 @@ function initQRCodes() {
     appQR = new QRCode(appBox, {
         width: 180,
         height: 180,
+        typeNumber: 12,
         colorDark: "#ffffff",
         colorLight: "#000000",
-        correctLevel: QRCode.CorrectLevel.H
+        correctLevel: QRCode.CorrectLevel.M
     });
 
     gameQR = new QRCode(gameBox, {
         width: 180,
         height: 180,
+        typeNumber: 12,
         colorDark: "#ffffff",
         colorLight: "#000000",
-        correctLevel: QRCode.CorrectLevel.H
+        correctLevel: QRCode.CorrectLevel.M
     });
 }
 

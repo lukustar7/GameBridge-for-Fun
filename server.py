@@ -3,9 +3,12 @@
 DG-LAB 郊狼小游戏选择器中转系统 - 后端核心服务端 (重构适配版)
 """
 import asyncio
+import ipaddress
 import json
+import re
 import secrets
 import socket
+import subprocess
 import threading
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -65,10 +68,51 @@ shock_generation = 0
 # --- 工具函数：网络与端口探测 ---
 
 def get_local_ip():
-    """获取本地局域网 IP"""
+    """获取手机能访问的本地局域网 IPv4 地址，避开 VPN/虚拟网卡地址"""
+
+    def is_usable_lan_ip(ip_text):
+        try:
+            ip = ipaddress.ip_address(ip_text)
+        except ValueError:
+            return False
+
+        if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+            return False
+
+        # 198.18.0.0/15 常见于代理/VPN/测试网段，手机通常无法通过它访问电脑。
+        if ip in ipaddress.ip_network("198.18.0.0/15"):
+            return False
+
+        return ip.version == 4 and ip.is_private
+
+    candidates = []
+
+    # macOS 下 ifconfig 能看到真实 Wi-Fi 地址；优先从这里找 RFC1918 私有网段地址。
+    try:
+        output = subprocess.check_output(["/sbin/ifconfig"], text=True, timeout=2)
+        for match in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)\b", output):
+            ip_text = match.group(1)
+            if is_usable_lan_ip(ip_text):
+                candidates.append(ip_text)
+    except Exception:
+        pass
+
+    # 兜底：再尝试系统主机名解析，避免非 macOS 环境没有 ifconfig。
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip_text = info[4][0]
+            if is_usable_lan_ip(ip_text):
+                candidates.append(ip_text)
+    except Exception:
+        pass
+
+    if candidates:
+        # 保持顺序去重，避免重复网卡地址导致日志混乱。
+        return list(dict.fromkeys(candidates))[0]
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # 连接一个虚拟的外部地址，不产生实际流量，直接获取局域网出口网卡 IP
+        # 最后兜底：连接一个虚拟外部地址，不产生实际流量，但可能被 VPN 劫持。
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:
@@ -285,7 +329,7 @@ async def stop_all_output():
     """尽量清空 A 通道输出，用于返回列表、断线或用户点击停止输出"""
     global dg_app_client, shock_generation
     shock_generation += 1
-    if not dg_app_client:
+    if not dg_app_client or not state["app_connected"]:
         return
 
     try:
