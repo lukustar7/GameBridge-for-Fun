@@ -356,14 +356,14 @@
                         <div id="common-b-settings">
                             <div style="margin-bottom: 15px;">
                                 <label class="slider-label" style="margin-bottom: 5px;">B 通道强度</label>
-                                <select id="common-b-strength-mode" onchange="saveSelectedSettings(true)">
+                                <select id="common-b-strength-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
                                     <option value="percent">按比例降低</option>
                                     <option value="same">跟 A 一样</option>
                                 </select>
                                 <p class="field-help">选“按比例降低”更稳；选“跟 A 一样”时，A 多少强度，B 就多少强度。</p>
                             </div>
 
-                            <div class="slider-container">
+                            <div id="common-b-percent-settings" class="slider-container">
                                 <div class="slider-label">
                                     <span>B 强度比例</span>
                                     <span id="val-common-b-strength-percent">50%</span>
@@ -814,6 +814,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260706-dice-channel-slot"></script>
+    <script src="game.js?v=20260706-qa-fixes"></script>
 </body>
 </html>

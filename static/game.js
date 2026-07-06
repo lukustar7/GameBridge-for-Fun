@@ -14,6 +14,8 @@ const gameToken = urlParams.get("token") || "";
 let currentWsPort = hasPinnedWsPort ? pinnedWsPort : 18081;
 let triedPortsCount = 0;
 const maxPortPortion = 10;
+// 记录官方 App 是否已经绑定。没有 App 时，游戏只能演示结算，不能假装已经下发电击。
+let latestAppConnected = false;
 
 // selectedGame 是设置页当前选中的游戏；activeGame 是已经真正开始运行的游戏。
 let selectedGame = null;
@@ -353,6 +355,7 @@ function updateLocalGameLatency() {
 
 function updateTechStatus(data) {
     const appConnected = Boolean(data.app_connected);
+    latestAppConnected = appConnected;
 
     // 选择页的技术状态用于现场排障：端口、连接、延迟和硬件回读统一放在这里。
     setText("tech-local-ip", data.local_ip || window.location.hostname || "-");
@@ -648,9 +651,15 @@ function populateOutputSettings(cfg) {
 
 function updateBChannelSettingsVisibility() {
     const mode = $("common-output-mode") ? $("common-output-mode").value : "a";
+    const strengthMode = $("common-b-strength-mode") ? $("common-b-strength-mode").value : "percent";
     const bGroup = $("common-b-settings");
+    const percentGroup = $("common-b-percent-settings");
     if (bGroup) {
         bGroup.style.display = mode === "a" ? "none" : "block";
+    }
+    // 只有 B 通道按比例降低时才展示比例滑块；“跟 A 一样”不需要额外百分比。
+    if (percentGroup) {
+        percentGroup.style.display = mode === "a" || strengthMode === "same" ? "none" : "block";
     }
 }
 
@@ -931,6 +940,8 @@ function stopCurrentGame() {
 function canPunish(requiresOrientation = true) {
     if (!activeGame) return false;
     if (requiresOrientation && !orientationReady) return false;
+    // App 未绑定时直接拦截，避免按钮进入“正在电”的假状态。
+    if (!latestAppConnected) return false;
     if (Date.now() - gameStartedAt < 1200) return false;
     return ws && ws.readyState === WebSocket.OPEN;
 }
@@ -964,6 +975,8 @@ function getOutputPayload() {
 function sendConfiguredShock(strength, duration) {
     const safeStrength = clamp(Math.round(strength), 0, 200);
     if (safeStrength <= 0) return false;
+    // 发送前再次确认 App 绑定状态，防止状态刷新延迟导致空发。
+    if (!latestAppConnected) return false;
 
     return sendGameMessage({
         type: "game_shock_trigger",
@@ -1370,6 +1383,14 @@ function startDicePunishQueue(rawCount, reason) {
         return;
     }
 
+    if (!latestAppConnected) {
+        dicePunishRemaining = 0;
+        setText("dice-instruction", `${reason} | App 未绑定，未输出`);
+        $("dice-instruction").style.color = "#ff3333";
+        $("btn-roll").disabled = !gameSettings.dice.manualRoll;
+        return;
+    }
+
     dicePunishGeneration++;
     dicePunishRemaining = cappedCount;
     const cappedText = rawCount > cappedCount ? `，已按上限截到 ${cappedCount} 下` : "";
@@ -1392,7 +1413,7 @@ function runNextDicePunish(generation) {
         "dice-instruction",
         sent
             ? `正在电 | 剩余 ${currentIndex} 下，每下 ${cfg.singleSeconds.toFixed(1)}s`
-            : `后台未连接 | 剩余 ${currentIndex} 下`
+            : `App 未绑定 | 剩余 ${currentIndex} 下`
     );
     $("dice-instruction").style.color = "#ff3333";
 
@@ -1663,7 +1684,7 @@ function triggerSlotLightPunish() {
     const sent = sendConfiguredShock(cfg.strengthMin, duration);
     slotLightCooldownUntil = now + duration + 150;
 
-    return sent ? `没中奖轻电 ${cfg.strengthMin}` : "没中奖，但后台未连接";
+    return sent ? `没中奖轻电 ${cfg.strengthMin}` : "App 未绑定，未输出";
 }
 
 function triggerSlotPunish(reason, forceMax) {
@@ -1673,9 +1694,14 @@ function triggerSlotPunish(reason, forceMax) {
     const strength = Math.round(cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio);
     const sent = sendConfiguredShock(strength, duration);
 
-    setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，但后台未连接`);
-    setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | 未能连接后台下发`);
+    setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，App 未绑定`);
+    setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | App 未绑定，未输出`);
     vibrateBriefly(Math.min(900, duration));
+
+    if (!sent) {
+        finishSlotRound();
+        return;
+    }
 
     slotCooldownUntil = Date.now() + duration + 500;
     const button = $("btn-slot-spin");
