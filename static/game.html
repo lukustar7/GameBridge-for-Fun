@@ -51,6 +51,10 @@
         }
 
         #screen-play {
+            touch-action: pan-y;
+        }
+
+        .canvas-container {
             touch-action: none;
         }
 
@@ -153,10 +157,23 @@
         }
 
         .dice-area {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
+            display: grid;
+            gap: 14px;
             margin: 30px 0;
+        }
+
+        .dice-row {
+            display: grid;
+            grid-template-columns: 42px repeat(3, minmax(0, 70px));
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .dice-row-label {
+            color: #888888;
+            font-size: 0.85rem;
+            text-align: right;
         }
 
         .dice-box {
@@ -169,6 +186,11 @@
             font-size: 2.2rem;
             font-family: monospace;
             background-color: #000000;
+        }
+
+        .dice-row.opponent .dice-box {
+            border-color: #555555;
+            color: #bbbbbb;
         }
 
         .slot-machine {
@@ -252,7 +274,12 @@
             }
 
             .dice-area {
-                gap: 10px;
+                gap: 12px;
+            }
+
+            .dice-row {
+                grid-template-columns: 34px repeat(3, minmax(0, 58px));
+                gap: 8px;
             }
 
             .dice-box {
@@ -283,6 +310,7 @@
                         <li>游玩页右上方有“停止输出”，点击后会立即请求清空输出。</li>
                         <li>手机上滑回桌面、锁屏、切后台、刷新或关闭网页时，页面会请求紧急停止；服务端在游戏连接断开时也会兜底清空 A/B 两路。</li>
                         <li>开始游戏后会请求手机屏幕常亮；如果浏览器不支持，仍建议保持网页在前台。</li>
+                        <li>iPhone 首次玩手抖挑战或保持角度时会请求动作与方向权限；如果普通局域网 HTTP 被系统拒绝，页面会直接提示原因。</li>
                         <li>电脑和手机必须处于同一局域网，二维码中的端口和 token 由电脑后台自动生成。</li>
                     </ul>
                 </div>
@@ -742,9 +770,18 @@
                         </div>
 
                         <div class="dice-area">
-                            <div class="dice-box" id="dice-1">-</div>
-                            <div class="dice-box" id="dice-2">-</div>
-                            <div class="dice-box" id="dice-3">-</div>
+                            <div class="dice-row player">
+                                <div class="dice-row-label">你</div>
+                                <div class="dice-box" id="dice-1">-</div>
+                                <div class="dice-box" id="dice-2">-</div>
+                                <div class="dice-box" id="dice-3">-</div>
+                            </div>
+                            <div class="dice-row opponent">
+                                <div class="dice-row-label">对手</div>
+                                <div class="dice-box" id="opponent-dice-1">-</div>
+                                <div class="dice-box" id="opponent-dice-2">-</div>
+                                <div class="dice-box" id="opponent-dice-3">-</div>
+                            </div>
                         </div>
 
                         <div id="dice-scores" class="sub-text" style="margin-bottom: 20px; font-size: 0.95rem;">
@@ -814,6 +851,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260706-qa-fixes"></script>
+    <script src="game.js?v=20260706-sensor-dice-scroll"></script>
 </body>
 </html>

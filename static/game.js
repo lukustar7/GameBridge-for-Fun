@@ -132,9 +132,12 @@ let sensorsAllowed = false;
 let sensorsBound = false;
 let orientationReady = false;
 let motionReady = false;
+let lastSensorPermissionMessage = "";
 let phoneBeta = 0;   // 前后倾斜，单位为度。
 let phoneGamma = 0;  // 左右倾斜，单位为度。
 let shakeAcc = 0;    // 三轴加速度合成值，摇骰子时用于判断晃动强度。
+let lastOrientationAt = 0;
+let lastMotionAt = 0;
 
 let canvas = null;
 let ctx = null;
@@ -460,17 +463,53 @@ function bindEmergencyStopEvents() {
 
 async function requestSensorPermission() {
     if (sensorsAllowed) return true;
+    lastSensorPermissionMessage = "";
 
-    if (typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function") {
-        try {
-            const permissionState = await DeviceOrientationEvent.requestPermission();
-            sensorsAllowed = permissionState === "granted";
-            return sensorsAllowed;
-        } catch (error) {
-            console.error("传感器授权失败:", error);
-            return false;
+    const needsSecureHint = isIOSLikeDevice() && !window.isSecureContext;
+    const permissionRequests = [];
+
+    try {
+        if (typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function") {
+            permissionRequests.push({
+                name: "方向",
+                promise: DeviceOrientationEvent.requestPermission()
+            });
         }
+
+        if (typeof DeviceMotionEvent !== "undefined" &&
+            typeof DeviceMotionEvent.requestPermission === "function") {
+            permissionRequests.push({
+                name: "动作",
+                promise: DeviceMotionEvent.requestPermission()
+            });
+        }
+
+        if (permissionRequests.length > 0) {
+            const results = await Promise.all(permissionRequests.map((item) => item.promise));
+            const deniedItem = permissionRequests.find((item, index) => results[index] !== "granted");
+            sensorsAllowed = !deniedItem;
+            if (!sensorsAllowed) {
+                lastSensorPermissionMessage = `${deniedItem.name}感应权限未允许，请在弹窗里选择允许`;
+            }
+            return sensorsAllowed;
+        }
+    } catch (error) {
+        console.error("传感器授权失败:", error);
+        lastSensorPermissionMessage = needsSecureHint
+            ? "iPhone 可能要求 HTTPS 安全页面才会弹出感应器权限；请先用手动玩法，或后续改用 HTTPS/受信任证书访问"
+            : "感应器权限请求失败，请确认浏览器允许动作与方向访问";
+        return false;
+    }
+
+    if (needsSecureHint) {
+        lastSensorPermissionMessage = "iPhone 当前通过普通 HTTP 局域网页面访问，浏览器可能不会开放动作/方向感应权限";
+        return false;
+    }
+
+    if (typeof DeviceOrientationEvent === "undefined" && typeof DeviceMotionEvent === "undefined") {
+        lastSensorPermissionMessage = "当前浏览器没有提供动作/方向感应器";
+        return false;
     }
 
     sensorsAllowed = true;
@@ -485,10 +524,76 @@ function bindSensors() {
     window.addEventListener("devicemotion", handleMotion);
 }
 
+function isIOSLikeDevice() {
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    return /iPad|iPhone|iPod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function waitForSensorReadiness(gameName, timeoutMs = 1400) {
+    const requiresOrientation = gameName === "shake" || gameName === "angle";
+    const requiresMotion = gameName === "dice";
+    if ((requiresOrientation && hasFreshOrientation()) || (requiresMotion && hasFreshMotion())) {
+        return Promise.resolve(true);
+    }
+
+    return new Promise((resolve) => {
+        const startAt = Date.now();
+        const timer = setInterval(() => {
+            const ready = (requiresOrientation && hasFreshOrientation()) || (requiresMotion && hasFreshMotion());
+            if (ready) {
+                clearInterval(timer);
+                resolve(true);
+                return;
+            }
+
+            if (Date.now() - startAt >= timeoutMs) {
+                clearInterval(timer);
+                resolve(false);
+            }
+        }, 50);
+    });
+}
+
+function hasFreshOrientation() {
+    return orientationReady && Date.now() - lastOrientationAt < 1600;
+}
+
+function hasFreshMotion() {
+    return motionReady && Date.now() - lastMotionAt < 1600;
+}
+
+function resetRequiredSensorState(gameName) {
+    // 每次开始或校准都要求拿到新的传感器回包，避免用旧状态误判“传感器可用”。
+    if (gameName === "shake" || gameName === "angle") {
+        orientationReady = false;
+        lastOrientationAt = 0;
+    }
+
+    if (gameName === "dice") {
+        motionReady = false;
+        lastMotionAt = 0;
+        shakeAcc = 0;
+    }
+}
+
+function getSensorNotReadyMessage(gameName) {
+    if (lastSensorPermissionMessage) {
+        return lastSensorPermissionMessage;
+    }
+
+    if (gameName === "dice") {
+        return "还没有收到摇晃感应数据；可以先用手动摇号，或检查浏览器动作感应权限";
+    }
+
+    return "还没有收到倾斜感应数据；请确认 iPhone 已允许动作与方向访问，并保持网页在前台";
+}
+
 function handleOrientation(event) {
     phoneBeta = Number.isFinite(event.beta) ? event.beta : 0;
     phoneGamma = Number.isFinite(event.gamma) ? event.gamma : 0;
     orientationReady = true;
+    lastOrientationAt = Date.now();
 }
 
 function handleMotion(event) {
@@ -500,6 +605,7 @@ function handleMotion(event) {
     const z = acc.z || 0;
     shakeAcc = Math.sqrt(x * x + y * y + z * z);
     motionReady = true;
+    lastMotionAt = Date.now();
 
     const cfg = gameSettings.dice;
     if (activeGame === "dice" && shakeAcc > cfg.shakeSensitivity) {
@@ -793,9 +899,21 @@ function collectSettingsFromForm(gameName) {
     return { ...DEFAULT_SETTINGS[gameName] };
 }
 
-function calibrateCurrentPose(gameName) {
-    if (!orientationReady) {
-        setText("settings-message", "传感器尚未回传姿态，开始游戏时会自动校准");
+async function calibrateCurrentPose(gameName) {
+    if (gameName !== "shake" && gameName !== "angle") return;
+
+    resetRequiredSensorState(gameName);
+    setText("settings-message", "正在请求手机倾斜感应权限...");
+    const allowed = await requestSensorPermission();
+    if (!allowed) {
+        setText("settings-message", getSensorNotReadyMessage(gameName));
+        return;
+    }
+
+    bindSensors();
+    const ready = await waitForSensorReadiness(gameName);
+    if (!ready) {
+        setText("settings-message", getSensorNotReadyMessage(gameName));
         return;
     }
 
@@ -815,13 +933,29 @@ async function startConfiguredGame() {
     saveSelectedSettings(true);
     const needsSensors = selectedGame === "shake" || selectedGame === "angle" || selectedGame === "dice";
     if (needsSensors) {
+        resetRequiredSensorState(selectedGame);
+        setText("settings-message", "正在请求手机感应器权限...");
         const allowed = await requestSensorPermission();
         if (!allowed) {
-            setText("settings-message", "需要允许运动与方向感应权限");
+            setText("settings-message", getSensorNotReadyMessage(selectedGame));
             return;
         }
 
         bindSensors();
+        const ready = await waitForSensorReadiness(selectedGame);
+        if (!ready && (selectedGame === "shake" || selectedGame === "angle")) {
+            setText("settings-message", getSensorNotReadyMessage(selectedGame));
+            return;
+        }
+
+        if (!ready && selectedGame === "dice" && !gameSettings.dice.manualRoll) {
+            setText("settings-message", "未收到摇晃感应数据；请先开启手动摇号，或检查 iPhone 动作感应权限");
+            return;
+        }
+
+        if (!ready && selectedGame === "dice") {
+            setText("settings-message", "未收到摇晃感应数据，进入后仍可用手动摇号");
+        }
     }
 
     if (selectedGame === "dice") {
@@ -873,7 +1007,7 @@ function setupPlayScreen(gameName) {
         setText("game-status", "保持当前姿态附近的目标角度");
         initAngleGame();
     } else if (gameName === "dice") {
-        setText("game-status", motionReady ? "摇晃手机开始对决" : "等待加速度传感器回传");
+        setText("game-status", motionReady ? "摇晃手机开始对决" : "未收到摇晃感应，可先手动摇号");
         initDiceGame();
     } else if (gameName === "slot") {
         setText("game-status", "点击开转，高频开奖");
@@ -1251,6 +1385,9 @@ function initDiceGame() {
     setText("dice-1", "-");
     setText("dice-2", "-");
     setText("dice-3", "-");
+    setText("opponent-dice-1", "-");
+    setText("opponent-dice-2", "-");
+    setText("opponent-dice-3", "-");
     setText("dice-scores", "玩家总分: - | 对手总分: -");
     setText("dice-instruction", "摇晃手机，或点击按钮开一局");
     $("dice-instruction").style.color = "#888888";
@@ -1269,6 +1406,9 @@ function triggerDiceShake(force) {
         setText("dice-1", "?");
         setText("dice-2", "?");
         setText("dice-3", "?");
+        setText("opponent-dice-1", "?");
+        setText("opponent-dice-2", "?");
+        setText("opponent-dice-3", "?");
         $("btn-roll").disabled = true;
     }
 
@@ -1297,6 +1437,9 @@ function rollDicesManual() {
     setText("dice-1", "?");
     setText("dice-2", "?");
     setText("dice-3", "?");
+    setText("opponent-dice-1", "?");
+    setText("opponent-dice-2", "?");
+    setText("opponent-dice-3", "?");
 
     let count = 0;
     manualRollTimer = setInterval(() => {
@@ -1349,6 +1492,9 @@ function settleDiceGame() {
     setText("dice-1", player[0]);
     setText("dice-2", player[1]);
     setText("dice-3", player[2]);
+    setText("opponent-dice-1", opponent[0]);
+    setText("opponent-dice-2", opponent[1]);
+    setText("opponent-dice-3", opponent[2]);
     setText("dice-scores", `玩家总分: ${pTotal} | 对手总分: ${oTotal}`);
     $("btn-roll").disabled = !cfg.manualRoll;
 
