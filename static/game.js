@@ -146,6 +146,7 @@ let gameLoopTimer = null;
 let gameStartedAt = 0;
 let lastPulseAt = 0;
 let lastVibrateAt = 0;
+let lastWarningVibrateAt = 0;
 
 // 校准值只保存当前会话。玩家每次开始游戏时也会自动用当前姿态兜底校准。
 const calibration = {
@@ -191,6 +192,16 @@ let slotLightCooldownUntil = 0;
 let dicePunishTimer = null;
 let dicePunishRemaining = 0;
 let dicePunishGeneration = 0;
+
+// 真实骰子是 3x3 点阵。这里用 1-9 表示九宫格位置，避免在多处手写点位导致显示错位。
+const DICE_PIP_MAP = {
+    1: [5],
+    2: [1, 9],
+    3: [1, 5, 9],
+    4: [1, 3, 7, 9],
+    5: [1, 3, 5, 7, 9],
+    6: [1, 3, 4, 6, 7, 9]
+};
 
 function $(id) {
     return document.getElementById(id);
@@ -1144,6 +1155,24 @@ function vibrateBriefly(duration) {
     navigator.vibrate(Math.round(duration));
 }
 
+// 浏览器支持震动时，按“短-停-长”这类节奏反馈输赢；不支持时自动静默，不影响游戏规则。
+function vibratePattern(pattern, minGap = 180) {
+    if (!navigator.vibrate) return;
+    const now = Date.now();
+    if (now - lastVibrateAt < minGap) return;
+    lastVibrateAt = now;
+    navigator.vibrate(pattern);
+}
+
+// 危险提醒要和普通开奖震动分开限频，否则偏离安全区时会把手机震个不停。
+function vibrateWarning(duration = 18, minGap = 650) {
+    if (!navigator.vibrate) return;
+    const now = Date.now();
+    if (now - lastWarningVibrateAt < minGap) return;
+    lastWarningVibrateAt = now;
+    navigator.vibrate(duration);
+}
+
 // --- 7. 游戏 1：手抖挑战 ---
 
 function prepareCanvas() {
@@ -1171,6 +1200,32 @@ function initShakeGame() {
     gameLoopTimer = setInterval(checkShakePunish, 100);
 }
 
+function getShakeZoneState(cfg, width, height) {
+    const minSide = Math.min(width, height);
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const dist = Math.hypot(ballX - centerX, ballY - centerY);
+    const outer = minSide * cfg.safeRadius / 100;
+    const inner = cfg.mode === "gap" ? minSide * cfg.gapInner / 100 : 0;
+    let err = 0;
+
+    // 手抖挑战有两种玩法：普通圆形安全区、夹缝安全区。统一算出 err，后面画面和惩罚都复用它。
+    if (cfg.mode === "radius") {
+        err = Math.max(0, dist - outer);
+    } else {
+        err = dist < inner ? inner - dist : Math.max(0, dist - outer);
+    }
+
+    return {
+        centerX,
+        centerY,
+        inner,
+        outer,
+        err,
+        dangerRatio: clamp(err / (minSide * 0.22), 0, 1)
+    };
+}
+
 function runShakeLoop() {
     if (activeGame !== "shake") return;
 
@@ -1178,9 +1233,6 @@ function runShakeLoop() {
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
-    const minSide = Math.min(width, height);
-    const centerX = width / 2;
-    const centerY = height / 2;
 
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
@@ -1213,31 +1265,61 @@ function runShakeLoop() {
         ballVy = -ballVy * 0.5;
     }
 
-    ctx.strokeStyle = "#222222";
+    const zone = getShakeZoneState(cfg, width, height);
+    const dangerAlpha = 0.06 + zone.dangerRatio * 0.18;
+
+    if (zone.err > 0) {
+        ctx.fillStyle = `rgba(255, 51, 51, ${dangerAlpha})`;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    ctx.strokeStyle = "#151515";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= width; x += 36) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += 36) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = zone.err > 0 ? "#ff3333" : "#333333";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(centerX - 15, centerY);
-    ctx.lineTo(centerX + 15, centerY);
-    ctx.moveTo(centerX, centerY - 15);
-    ctx.lineTo(centerX, centerY + 15);
+    ctx.moveTo(zone.centerX - 18, zone.centerY);
+    ctx.lineTo(zone.centerX + 18, zone.centerY);
+    ctx.moveTo(zone.centerX, zone.centerY - 18);
+    ctx.lineTo(zone.centerX, zone.centerY + 18);
     ctx.stroke();
 
-    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = zone.err > 0 ? 18 : 10;
+    ctx.shadowColor = zone.err > 0 ? "rgba(255, 51, 51, 0.65)" : "rgba(34, 197, 94, 0.35)";
+    ctx.strokeStyle = zone.err > 0 ? "#ff3333" : "#ffffff";
     ctx.beginPath();
     if (cfg.mode === "radius") {
-        ctx.arc(centerX, centerY, minSide * cfg.safeRadius / 100, 0, Math.PI * 2);
+        ctx.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
     } else {
-        ctx.arc(centerX, centerY, minSide * cfg.gapInner / 100, 0, Math.PI * 2);
+        ctx.arc(zone.centerX, zone.centerY, zone.inner, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(centerX, centerY, minSide * cfg.safeRadius / 100, 0, Math.PI * 2);
+        ctx.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = zone.err > 0 ? "#ff3333" : "#ffffff";
+    ctx.shadowBlur = zone.err > 0 ? 18 : 10;
+    ctx.shadowColor = zone.err > 0 ? "rgba(255, 51, 51, 0.7)" : "rgba(255, 255, 255, 0.35)";
     ctx.beginPath();
     ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
 
     animationFrameId = requestAnimationFrame(runShakeLoop);
 }
@@ -1249,22 +1331,9 @@ function checkShakePunish() {
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
-    const minSide = Math.min(width, height);
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const dist = Math.hypot(ballX - centerX, ballY - centerY);
+    const zone = getShakeZoneState(cfg, width, height);
 
-    let err = 0;
-    if (cfg.mode === "radius") {
-        const radius = minSide * cfg.safeRadius / 100;
-        err = Math.max(0, dist - radius);
-    } else {
-        const inner = minSide * cfg.gapInner / 100;
-        const outer = minSide * cfg.safeRadius / 100;
-        err = dist < inner ? inner - dist : Math.max(0, dist - outer);
-    }
-
-    if (err <= 0) {
+    if (zone.err <= 0) {
         shakeOutSince = null;
         setText("game-status", "安全区内");
         return;
@@ -1276,9 +1345,15 @@ function checkShakePunish() {
         return;
     }
 
-    if (Date.now() - shakeOutSince < cfg.forgiveMs) return;
+    const elapsed = Date.now() - shakeOutSince;
+    if (elapsed < cfg.forgiveMs) {
+        const remain = Math.ceil((cfg.forgiveMs - elapsed) / 100) / 10;
+        setText("game-status", `已出界，约 ${remain.toFixed(1)}s 后触发`);
+        vibrateWarning();
+        return;
+    }
 
-    const ratio = clamp(err / (minSide * 0.22), 0, 1);
+    const ratio = zone.dangerRatio;
     const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
     setText("game-status", `出界惩罚: ${Math.round(strength)}`);
     sendPulse(strength, 120);
@@ -1297,6 +1372,16 @@ function getCurrentAngleOffset() {
     return clamp(phoneBeta - calibration.angleBeta, -90, 90);
 }
 
+function getAngleState(cfg) {
+    const offset = getCurrentAngleOffset();
+    const rawErr = Math.abs(offset - cfg.targetOffset) - cfg.tolerance;
+    return {
+        offset,
+        err: Math.max(0, rawErr),
+        dangerRatio: clamp(Math.max(0, rawErr) / cfg.rampDegrees, 0, 1)
+    };
+}
+
 function runAngleLoop() {
     if (activeGame !== "angle") return;
 
@@ -1309,24 +1394,45 @@ function runAngleLoop() {
     const gaugeWidth = width - pad * 2;
     const targetX = pad + ((cfg.targetOffset + 90) / 180) * gaugeWidth;
     const tolerancePx = (cfg.tolerance / 180) * gaugeWidth;
-    const currentX = pad + ((getCurrentAngleOffset() + 90) / 180) * gaugeWidth;
+    const angleState = getAngleState(cfg);
+    const currentX = pad + ((angleState.offset + 90) / 180) * gaugeWidth;
+    const dangerColor = angleState.err > 0 ? "#ff3333" : "#ffffff";
 
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
 
-    ctx.strokeStyle = "#222222";
+    if (angleState.err > 0) {
+        ctx.fillStyle = `rgba(255, 51, 51, ${0.05 + angleState.dangerRatio * 0.18})`;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    ctx.strokeStyle = "#151515";
     ctx.lineWidth = 1;
+    for (let x = pad; x <= width - pad; x += Math.max(24, gaugeWidth / 8)) {
+        ctx.beginPath();
+        ctx.moveTo(x, centerY - 74);
+        ctx.lineTo(x, centerY + 74);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = "#333333";
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(pad, centerY);
     ctx.lineTo(width - pad, centerY);
     ctx.stroke();
 
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 4;
+    ctx.strokeStyle = angleState.err > 0 ? "#fb923c" : "#22c55e";
+    ctx.lineWidth = 8;
+    ctx.lineCap = "round";
+    ctx.shadowBlur = angleState.err > 0 ? 12 : 8;
+    ctx.shadowColor = angleState.err > 0 ? "rgba(251, 146, 60, 0.42)" : "rgba(34, 197, 94, 0.36)";
     ctx.beginPath();
     ctx.moveTo(targetX - tolerancePx, centerY);
     ctx.lineTo(targetX + tolerancePx, centerY);
     ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.lineCap = "butt";
 
     ctx.strokeStyle = "#888888";
     ctx.lineWidth = 1;
@@ -1335,17 +1441,27 @@ function runAngleLoop() {
     ctx.lineTo(targetX, centerY + 42);
     ctx.stroke();
 
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = dangerColor;
+    ctx.lineWidth = 3;
+    ctx.shadowBlur = angleState.err > 0 ? 18 : 8;
+    ctx.shadowColor = angleState.err > 0 ? "rgba(255, 51, 51, 0.68)" : "rgba(255, 255, 255, 0.36)";
     ctx.beginPath();
     ctx.moveTo(currentX, centerY - 60);
     ctx.lineTo(currentX, centerY + 60);
     ctx.stroke();
 
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = dangerColor;
     ctx.beginPath();
     ctx.arc(currentX, centerY, 5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = "#777777";
+    ctx.font = "12px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`目标 ${cfg.targetOffset}°`, targetX, centerY + 92);
+    ctx.fillStyle = angleState.err > 0 ? "#ff3333" : "#ffffff";
+    ctx.fillText(`当前 ${Math.round(angleState.offset)}°`, currentX, centerY - 82);
 
     animationFrameId = requestAnimationFrame(runAngleLoop);
 }
@@ -1354,9 +1470,9 @@ function checkAnglePunish() {
     if (activeGame !== "angle" || !canPunish(true)) return;
 
     const cfg = gameSettings.angle;
-    const err = Math.abs(getCurrentAngleOffset() - cfg.targetOffset) - cfg.tolerance;
+    const angleState = getAngleState(cfg);
 
-    if (err <= 0) {
+    if (angleState.err <= 0) {
         angleBadSince = null;
         setText("game-status", "角度稳定");
         return;
@@ -1368,9 +1484,15 @@ function checkAnglePunish() {
         return;
     }
 
-    if (Date.now() - angleBadSince < cfg.triggerMs) return;
+    const elapsed = Date.now() - angleBadSince;
+    if (elapsed < cfg.triggerMs) {
+        const remain = Math.ceil((cfg.triggerMs - elapsed) / 100) / 10;
+        setText("game-status", `角度偏离，约 ${remain.toFixed(1)}s 后触发`);
+        vibrateWarning();
+        return;
+    }
 
-    const ratio = clamp(err / cfg.rampDegrees, 0, 1);
+    const ratio = angleState.dangerRatio;
     const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
     setText("game-status", `角度惩罚: ${Math.round(strength)}`);
     sendPulse(strength, 120);
@@ -1378,17 +1500,55 @@ function checkAnglePunish() {
 
 // --- 9. 游戏 3：摇骰子对决 ---
 
+function setDiceFace(id, value, isRolling = false) {
+    const node = $(id);
+    if (!node) return;
+
+    const numericValue = Number(value);
+    const pips = DICE_PIP_MAP[numericValue];
+    node.classList.toggle("pending", isRolling || value === "?");
+    node.classList.toggle("empty", value === "-");
+    node.replaceChildren();
+
+    // 正常点数用九宫格画出真实骰子点；等待和空状态仍保留文字，玩家一眼能看出是否已开奖。
+    if (!pips) {
+        node.textContent = value;
+        return;
+    }
+
+    const grid = document.createElement("div");
+    grid.className = "dice-face-grid";
+    for (let index = 1; index <= 9; index++) {
+        const pip = document.createElement("span");
+        pip.className = pips.includes(index) ? "dice-pip active" : "dice-pip";
+        grid.appendChild(pip);
+    }
+
+    const label = document.createElement("span");
+    label.className = "sr-only";
+    label.textContent = `${numericValue} 点`;
+    node.appendChild(grid);
+    node.appendChild(label);
+}
+
+function setDiceFaces(prefix, values, isRolling = false) {
+    values.forEach((value, index) => {
+        const id = prefix ? `${prefix}-${index + 1}` : `dice-${index + 1}`;
+        setDiceFace(id, value, isRolling);
+    });
+}
+
+function setDiceRoundFaces(playerValues, opponentValues, isRolling = false) {
+    setDiceFaces("", playerValues, isRolling);
+    setDiceFaces("opponent-dice", opponentValues, isRolling);
+}
+
 function initDiceGame() {
     isDiceShaking = false;
     diceShakeEnergy = 0;
     dicePunishRemaining = 0;
     dicePunishGeneration++;
-    setText("dice-1", "-");
-    setText("dice-2", "-");
-    setText("dice-3", "-");
-    setText("opponent-dice-1", "-");
-    setText("opponent-dice-2", "-");
-    setText("opponent-dice-3", "-");
+    setDiceRoundFaces(["-", "-", "-"], ["-", "-", "-"]);
     setText("dice-scores", "玩家总分: - | 对手总分: -");
     setText("dice-instruction", "摇晃手机，或点击按钮开一局");
     $("dice-instruction").style.color = "#888888";
@@ -1404,12 +1564,7 @@ function triggerDiceShake(force) {
         diceShakeEnergy = 0;
         setText("dice-instruction", "正在摇号...");
         $("dice-instruction").style.color = "#888888";
-        setText("dice-1", "?");
-        setText("dice-2", "?");
-        setText("dice-3", "?");
-        setText("opponent-dice-1", "?");
-        setText("opponent-dice-2", "?");
-        setText("opponent-dice-3", "?");
+        setDiceRoundFaces(["?", "?", "?"], ["?", "?", "?"], true);
         $("btn-roll").disabled = true;
     }
 
@@ -1418,6 +1573,11 @@ function triggerDiceShake(force) {
 
     if (now - lastShakeTime > 80) {
         playDiceCollisionSound();
+        setDiceRoundFaces(
+            [rollPlayerDie(), rollPlayerDie(), rollPlayerDie()],
+            [rollOpponentDie(cfg.opponentDifficulty), rollOpponentDie(cfg.opponentDifficulty), rollOpponentDie(cfg.opponentDifficulty)],
+            true
+        );
         lastShakeTime = now;
     }
 
@@ -1435,18 +1595,18 @@ function rollDicesManual() {
     diceShakeEnergy = 30;
     $("btn-roll").disabled = true;
     setText("dice-instruction", "正在摇号...");
-    setText("dice-1", "?");
-    setText("dice-2", "?");
-    setText("dice-3", "?");
-    setText("opponent-dice-1", "?");
-    setText("opponent-dice-2", "?");
-    setText("opponent-dice-3", "?");
+    setDiceRoundFaces(["?", "?", "?"], ["?", "?", "?"], true);
 
     let count = 0;
     manualRollTimer = setInterval(() => {
         diceShakeEnergy = clamp(diceShakeEnergy + 7, 0, 90);
         playDiceCollisionSound();
         vibrateBriefly(35);
+        setDiceRoundFaces(
+            [rollPlayerDie(), rollPlayerDie(), rollPlayerDie()],
+            [rollOpponentDie(cfg.opponentDifficulty), rollOpponentDie(cfg.opponentDifficulty), rollOpponentDie(cfg.opponentDifficulty)],
+            true
+        );
         count++;
         if (count >= 10) {
             clearInterval(manualRollTimer);
@@ -1490,17 +1650,13 @@ function settleDiceGame() {
     const pTotal = player.reduce((sum, value) => sum + value, 0);
     const oTotal = opponent.reduce((sum, value) => sum + value, 0);
 
-    setText("dice-1", player[0]);
-    setText("dice-2", player[1]);
-    setText("dice-3", player[2]);
-    setText("opponent-dice-1", opponent[0]);
-    setText("opponent-dice-2", opponent[1]);
-    setText("opponent-dice-3", opponent[2]);
+    setDiceRoundFaces(player, opponent);
     setText("dice-scores", `玩家总分: ${pTotal} | 对手总分: ${oTotal}`);
     $("btn-roll").disabled = !cfg.manualRoll;
 
     const playerTriple = getTripleFace(player);
     if (playerTriple > 0) {
+        vibratePattern([80, 35, 120], 0);
         const count = playerTriple * cfg.leopardMultiplier;
         startDicePunishQueue(count, `${playerTriple} 点豹子`);
         return;
@@ -1509,10 +1665,12 @@ function settleDiceGame() {
     if (pTotal >= oTotal) {
         setText("dice-instruction", `你赢了 | ${pTotal} : ${oTotal}`);
         $("dice-instruction").style.color = "#ffffff";
+        vibratePattern([28, 35, 28], 0);
         return;
     }
 
     const diff = oTotal - pTotal;
+    vibratePattern([45, 30, 90], 0);
     startDicePunishQueue(diff, `输了 ${diff} 点`);
 }
 
@@ -1596,6 +1754,7 @@ function initSlotGame() {
     setText("slot-reel-1", "🍒");
     setText("slot-reel-2", "🔔");
     setText("slot-reel-3", "💎");
+    setSlotResultState("");
     setText("slot-result", "点击开转。没中奖会涨压力，压力满了就电。");
     updateSlotView();
 
@@ -1633,8 +1792,10 @@ function startSlotSpin() {
 
     setText("game-status", "角子机高速转动中");
     setText("slot-result", "开奖中...");
+    setSlotResultState("");
     setSlotReelsSpinning(true);
     spinSlotReelsRandomly();
+    vibrateBriefly(18);
 
     // 转动期间只做视觉随机，不提前决定结果，避免界面闪到最终图案后又跳走。
     slotSpinAnimationTimer = setInterval(spinSlotReelsRandomly, 70);
@@ -1656,6 +1817,8 @@ function finishSlotSpin() {
     slotIsSpinning = false;
 
     const resultType = classifySlotResult(reels);
+    setSlotResultState(resultType);
+    vibrateSlotOutcome(resultType);
     const triggered = applySlotResult(resultType, reels);
     if (!triggered) {
         finishSlotRound();
@@ -1708,6 +1871,38 @@ function setSlotReelsSpinning(isSpinning) {
             node.classList.toggle("spinning", isSpinning);
         }
     });
+}
+
+function setSlotResultState(resultType) {
+    const classMap = {
+        miss: "result-miss",
+        small: "result-small",
+        jackpot: "result-jackpot",
+        seven: "result-seven"
+    };
+    const nextClass = classMap[resultType] || "";
+
+    ["slot-reel-1", "slot-reel-2", "slot-reel-3"].forEach((id) => {
+        const node = $(id);
+        if (!node) return;
+
+        Object.values(classMap).forEach((className) => node.classList.remove(className));
+        if (nextClass) {
+            node.classList.add(nextClass);
+        }
+    });
+}
+
+function vibrateSlotOutcome(resultType) {
+    if (resultType === "miss") {
+        vibratePattern([24], 80);
+    } else if (resultType === "small") {
+        vibratePattern([22, 35, 22], 80);
+    } else if (resultType === "jackpot") {
+        vibratePattern([40, 35, 80], 80);
+    } else if (resultType === "seven") {
+        vibratePattern([80, 40, 130], 80);
+    }
 }
 
 function pickSlotSymbol(excluded = []) {
@@ -1818,6 +2013,9 @@ function applySlotResult(resultType, reels) {
     }
 
     const lightText = resultType === "miss" && cfg.lightPunishEnabled ? triggerSlotLightPunish() : "";
+    if (resultType === "miss" && slotPressure >= 72) {
+        vibrateWarning(28, 360);
+    }
     setText("game-status", lightText ? `${lightText} | 压力 ${Math.round(slotPressure)}%` : `压力 ${Math.round(slotPressure)}%`);
     return false;
 }
@@ -1830,6 +2028,9 @@ function triggerSlotLightPunish() {
     const duration = Math.round(cfg.lightShockSeconds * 1000);
     const sent = sendConfiguredShock(cfg.strengthMin, duration);
     slotLightCooldownUntil = now + duration + 150;
+    if (sent) {
+        vibratePattern([30], 80);
+    }
 
     return sent ? `没中奖轻电 ${cfg.strengthMin}` : "App 未绑定，未输出";
 }
@@ -1843,7 +2044,7 @@ function triggerSlotPunish(reason, forceMax) {
 
     setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，App 未绑定`);
     setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | App 未绑定，未输出`);
-    vibrateBriefly(Math.min(900, duration));
+    vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
     if (!sent) {
         finishSlotRound();
@@ -1864,6 +2065,7 @@ function triggerSlotPunish(reason, forceMax) {
         slotPressure = 0;
         slotMissStreak = 0;
         slotCooldownUntil = 0;
+        setSlotResultState("");
         updateSlotView("惩罚结束，压力清零。");
         finishSlotRound();
     }, duration + 500);
@@ -1875,6 +2077,13 @@ function updateSlotView(message) {
     if (fill) {
         fill.style.width = `${safePressure}%`;
         fill.style.backgroundColor = getSlotPressureColor(safePressure);
+        fill.classList.toggle("critical", safePressure >= 90);
+
+        const track = fill.parentElement;
+        if (track) {
+            track.classList.toggle("hot", safePressure >= 72 && safePressure < 90);
+            track.classList.toggle("critical", safePressure >= 90);
+        }
     }
 
     setText("slot-pressure-label", `${Math.round(safePressure)}%`);

@@ -180,17 +180,95 @@
             width: 70px;
             height: 70px;
             border: 1px solid #ffffff;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 2.2rem;
             font-family: monospace;
-            background-color: #000000;
+            font-weight: 800;
+            background: linear-gradient(145deg, #f9f9f9, #d8d8d8);
+            color: #050505;
+            box-shadow: inset -4px -4px 10px rgba(0, 0, 0, 0.22), inset 3px 3px 8px rgba(255, 255, 255, 0.65);
+            position: relative;
+            overflow: hidden;
+            transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease, background 140ms ease;
         }
 
         .dice-row.opponent .dice-box {
             border-color: #555555;
-            color: #bbbbbb;
+            background: linear-gradient(145deg, #202020, #050505);
+            color: #eeeeee;
+            box-shadow: inset -4px -4px 10px rgba(255, 255, 255, 0.05), inset 3px 3px 8px rgba(255, 255, 255, 0.08);
+        }
+
+        .dice-box.empty {
+            background: #030303;
+            color: #666666;
+            border-color: #333333;
+            box-shadow: none;
+        }
+
+        .dice-box.pending {
+            background: #080808;
+            color: #ffffff;
+            border-color: #ff3333;
+            box-shadow: 0 0 18px rgba(255, 51, 51, 0.35);
+            animation: dice-jitter 120ms infinite alternate;
+        }
+
+        .dice-box.pending .dice-pip {
+            background-color: #ffffff;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+        }
+
+        .dice-face-grid {
+            width: 72%;
+            height: 72%;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            align-items: center;
+            justify-items: center;
+        }
+
+        .dice-pip {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background-color: #070707;
+            opacity: 0;
+            box-shadow: 0 1px 1px rgba(255, 255, 255, 0.25);
+        }
+
+        .dice-pip.active {
+            opacity: 1;
+        }
+
+        .dice-row.opponent .dice-pip {
+            background-color: #eeeeee;
+            box-shadow: 0 0 7px rgba(255, 255, 255, 0.32);
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        @keyframes dice-jitter {
+            from {
+                transform: translate(-1px, 1px) rotate(-2deg);
+            }
+            to {
+                transform: translate(1px, -1px) rotate(2deg);
+            }
         }
 
         .slot-machine {
@@ -215,12 +293,41 @@
             font-size: clamp(2.2rem, 16vw, 4.2rem);
             background-color: #030303;
             line-height: 1;
-            transition: border-color 120ms ease, transform 120ms ease;
+            transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
         }
 
         .slot-reel.spinning {
             border-color: #ff3333;
             transform: translateY(-2px);
+            box-shadow: 0 0 16px rgba(255, 51, 51, 0.26);
+            animation: slot-spin-pulse 140ms infinite alternate;
+        }
+
+        .slot-reel.result-miss {
+            border-color: #ff3333;
+            box-shadow: 0 0 18px rgba(255, 51, 51, 0.34);
+        }
+
+        .slot-reel.result-small {
+            border-color: #22c55e;
+            box-shadow: 0 0 16px rgba(34, 197, 94, 0.25);
+        }
+
+        .slot-reel.result-jackpot,
+        .slot-reel.result-seven {
+            border-color: #facc15;
+            background-color: #080704;
+            box-shadow: 0 0 22px rgba(250, 204, 21, 0.38);
+            transform: scale(1.02);
+        }
+
+        @keyframes slot-spin-pulse {
+            from {
+                transform: translateY(-2px) scale(1);
+            }
+            to {
+                transform: translateY(1px) scale(1.03);
+            }
         }
 
         .slot-danger-header {
@@ -236,6 +343,18 @@
             border: 1px solid #333333;
             background-color: #050505;
             overflow: hidden;
+            position: relative;
+            transition: border-color 180ms ease, box-shadow 180ms ease;
+        }
+
+        .slot-danger-track.hot {
+            border-color: #fb923c;
+            box-shadow: 0 0 12px rgba(251, 146, 60, 0.22);
+        }
+
+        .slot-danger-track.critical {
+            border-color: #ff3333;
+            box-shadow: 0 0 18px rgba(255, 51, 51, 0.38);
         }
 
         .slot-danger-fill {
@@ -243,6 +362,19 @@
             height: 100%;
             background-color: #22c55e;
             transition: width 180ms ease, background-color 180ms ease;
+        }
+
+        .slot-danger-fill.critical {
+            animation: pressure-pulse 420ms infinite alternate;
+        }
+
+        @keyframes pressure-pulse {
+            from {
+                filter: brightness(1);
+            }
+            to {
+                filter: brightness(1.45);
+            }
         }
 
         .slot-result-line {
@@ -285,6 +417,11 @@
             .dice-box {
                 width: 58px;
                 height: 58px;
+            }
+
+            .dice-pip {
+                width: 8px;
+                height: 8px;
             }
 
             .slot-reel {
@@ -851,6 +988,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260707-https-wss"></script>
+    <script src="game.js?v=20260707-visual-haptics"></script>
 </body>
 </html>
