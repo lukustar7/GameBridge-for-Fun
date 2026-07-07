@@ -16,7 +16,7 @@
         <!-- Tab 切换 -->
         <div class="tabs">
             <div class="tab active" onclick="switchTab('monitor')">状态监控</div>
-            <div class="tab" onclick="switchTab('cert')">iPhone 证书</div>
+            <div class="tab" onclick="switchTab('cert')">手机证书</div>
             <div class="tab" onclick="switchTab('settings')">参数设置</div>
         </div>
 
@@ -46,40 +46,80 @@
                     <div class="qr-box">
                         <div id="game-qrcode"></div>
                     </div>
-                    <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“iPhone 证书”页安装证书后使用 HTTPS 入口。</p>
+                    <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
             </div>
         </div>
 
-        <!-- iPhone 证书安装引导 -->
+        <!-- 手机 HTTPS 证书安装引导 -->
         <div id="tab-cert" class="tab-content">
             <div class="grid">
                 <div class="panel">
                     <h2>1. 安装本地根证书</h2>
-                    <p class="sub-text" style="margin-bottom: 12px;">iPhone 的动作与方向感应权限需要 HTTPS 页面。先用 iPhone Safari 打开下方地址并安装描述文件。</p>
-                    <p id="cert-profile-url" style="font-family: monospace; font-size: 0.85rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待证书生成...</p>
-                    <div class="qr-box">
-                        <div id="cert-qrcode"></div>
+                    <p class="sub-text" style="margin-bottom: 12px;">手机只需要安装根证书。服务器证书由电脑按当前 IP 自动生成和轮换，不需要手动安装。</p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div>
+                            <p class="sub-text" style="margin-bottom: 8px;">iPhone 扫描描述文件：</p>
+                            <p id="cert-profile-url" style="font-family: monospace; font-size: 0.78rem; color: #888888; margin-bottom: 10px; word-break: break-all;">等待证书生成...</p>
+                            <div class="qr-box">
+                                <div id="cert-qrcode"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="sub-text" style="margin-bottom: 8px;">Android 扫描 .cer 文件：</p>
+                            <p id="cert-cer-url" style="font-family: monospace; font-size: 0.78rem; color: #888888; margin-bottom: 10px; word-break: break-all;">等待证书生成...</p>
+                            <div class="qr-box">
+                                <div id="cert-cer-qrcode"></div>
+                            </div>
+                        </div>
                     </div>
+
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
-                        <a id="cert-profile-link" class="btn" href="#">下载描述文件</a>
-                        <a id="cert-cer-link" class="btn" href="#">备用 .cer</a>
+                        <a id="cert-profile-link" class="btn" href="#">iPhone 描述文件</a>
+                        <a id="cert-cer-link" class="btn" href="#">Android .cer</a>
                     </div>
                 </div>
 
                 <div class="panel">
-                    <h2>2. 开启完全信任</h2>
-                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 18px;">
-                        <li>下载描述文件后，打开 iPhone 设置。</li>
-                        <li>进入“通用”，找到“VPN 与设备管理”或“已下载描述文件”。</li>
-                        <li>安装“DG-LAB 本地 HTTPS 根证书”。</li>
-                        <li>再进入“通用 > 关于本机 > 证书信任设置”。</li>
+                    <h2>2. 信任步骤</h2>
+                    <p class="sub-text" style="margin-bottom: 8px;">iPhone：</p>
+                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 16px;">
+                        <li>用 Safari 下载描述文件。</li>
+                        <li>进入“设置 > 通用 > VPN 与设备管理”安装描述文件。</li>
+                        <li>进入“设置 > 通用 > 关于本机 > 证书信任设置”。</li>
                         <li>打开“DG-LAB Local Root CA”的完全信任。</li>
                     </ol>
-                    <p class="sub-text" style="margin-bottom: 8px;">证书 SHA-256 指纹：</p>
+                    <p class="sub-text" style="margin-bottom: 8px;">Android：</p>
+                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 18px;">
+                        <li>下载 `.cer` 文件。</li>
+                        <li>在系统设置里搜索“CA 证书”或“从存储安装证书”。</li>
+                        <li>安装为 Wi-Fi/VPN 或 CA 证书；不同品牌入口名称可能不同。</li>
+                    </ol>
+
+                    <h2>3. 当前证书状态</h2>
+                    <table class="stats-table" style="margin-bottom: 18px;">
+                        <tr>
+                            <td>签发 IP</td>
+                            <td id="cert-signed-ip">-</td>
+                        </tr>
+                        <tr>
+                            <td>IP 来源</td>
+                            <td id="cert-ip-mode">-</td>
+                        </tr>
+                        <tr>
+                            <td>根证书到期</td>
+                            <td id="cert-root-expiry">-</td>
+                        </tr>
+                        <tr>
+                            <td>服务器证书到期</td>
+                            <td id="cert-server-expiry">-</td>
+                        </tr>
+                    </table>
+                    <p class="sub-text" style="margin-bottom: 8px;">根证书 SHA-256 指纹：</p>
                     <p id="cert-fingerprint" style="font-family: monospace; font-size: 0.8rem; color: #888888; word-break: break-all; margin-bottom: 18px;">-</p>
 
-                    <h2>3. HTTPS 游戏入口</h2>
+                    <h2>4. HTTPS 游戏入口</h2>
                     <p id="secure-game-url-text" style="font-family: monospace; font-size: 0.85rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待 HTTPS 服务...</p>
                     <div class="qr-box">
                         <div id="secure-game-qrcode"></div>
@@ -114,6 +154,18 @@
                         <tr>
                             <td>安全通信 (WSS) 端口</td>
                             <td id="stat-secure-web-ws-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>证书签发 IP</td>
+                            <td id="stat-cert-ip">-</td>
+                        </tr>
+                        <tr>
+                            <td>根证书到期</td>
+                            <td id="stat-root-expiry">-</td>
+                        </tr>
+                        <tr>
+                            <td>服务器证书到期</td>
+                            <td id="stat-server-expiry">-</td>
                         </tr>
                         <tr>
                             <td>App 桥接 (WS) 端口</td>
@@ -183,6 +235,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260707-https-cert-guide"></script>
+    <script src="console.js?v=20260707-mobile-cert-auto-ip"></script>
 </body>
 </html>

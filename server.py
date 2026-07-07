@@ -17,11 +17,22 @@ import subprocess
 import threading
 import uuid
 import webbrowser
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 import websockets
 from pydglab_ws import Channel, RetCode, StrengthOperationType, DGLabWSConnect, DGLabWSServer
+
+
+def read_positive_int_env(name, default_value):
+    """读取正整数环境变量；写错时使用默认值，避免证书策略配置错误导致服务无法启动"""
+    try:
+        value = int(os.environ.get(name, str(default_value)))
+    except (TypeError, ValueError):
+        return default_value
+    return value if value > 0 else default_value
+
 
 # --- 全局状态与配置 ---
 LOCAL_IP = "127.0.0.1"
@@ -34,8 +45,12 @@ HTTPS_PORT = 18443
 SECURE_WEB_WS_PORT = 18444
 GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
 
-# iPhone 传感器权限需要 HTTPS。用户已在路由器中固定 Mac 局域网 IP，证书按这个 IP 签发。
-CERTIFIED_LAN_IP = os.environ.get("DG_LAB_CERT_IP", "192.168.0.14")
+# 手机传感器权限通常需要 HTTPS。默认按当前局域网 IP 自动签发服务器证书；
+# 如现场网络必须固定某个地址，可通过 DG_LAB_CERT_IP 覆盖自动检测结果。
+CERT_IP_OVERRIDE = os.environ.get("DG_LAB_CERT_IP", "").strip()
+CERTIFIED_LAN_IP = CERT_IP_OVERRIDE
+ROOT_CA_VALID_DAYS = read_positive_int_env("DG_LAB_ROOT_CA_DAYS", 90)
+SERVER_CERT_VALID_DAYS = read_positive_int_env("DG_LAB_SERVER_CERT_DAYS", 7)
 CERT_DIR = Path("certs")
 CERT_PRIVATE_DIR = CERT_DIR / "private"
 ROOT_CA_PEM = CERT_DIR / "dg-lab-root-ca.pem"
@@ -47,7 +62,10 @@ SERVER_CERT_KEY = CERT_PRIVATE_DIR / "dg-lab-server-key.pem"
 SERVER_CERT_CSR = CERT_PRIVATE_DIR / "dg-lab-server.csr"
 SERVER_CERT_CONFIG = CERT_PRIVATE_DIR / "dg-lab-server-openssl.cnf"
 CERT_IP_MARKER = CERT_DIR / "dg-lab-cert-ip.txt"
+CERT_POLICY_MARKER = CERT_DIR / "dg-lab-cert-policy.json"
 CERT_SHA256 = ""
+CERT_ROOT_NOT_AFTER = ""
+CERT_SERVER_NOT_AFTER = ""
 HTTPS_ENABLED = False
 
 # 游戏端惩罚的硬边界。前端也会限流，但后端必须自己兜底，不能相信局域网客户端。
@@ -137,8 +155,8 @@ def get_local_ip():
     if candidates:
         # 保持顺序去重，避免重复网卡地址导致日志混乱。
         unique_candidates = list(dict.fromkeys(candidates))
-        if CERTIFIED_LAN_IP in unique_candidates:
-            return CERTIFIED_LAN_IP
+        if CERT_IP_OVERRIDE in unique_candidates:
+            return CERT_IP_OVERRIDE
         return unique_candidates[0]
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -179,8 +197,54 @@ def run_openssl(args):
         raise RuntimeError(detail)
 
 
+def read_certificate_not_after(cert_path):
+    """读取证书到期时间；读不到时返回 None，让调用方按“需要重建”处理"""
+    if not cert_path.exists():
+        return None
+
+    result = subprocess.run(
+        ["openssl", "x509", "-in", str(cert_path), "-noout", "-enddate"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False
+    )
+    if result.returncode != 0:
+        return None
+
+    raw_value = result.stdout.strip().split("=", 1)[-1].strip()
+    try:
+        parsed = datetime.strptime(raw_value, "%b %d %H:%M:%S %Y %Z")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def certificate_expires_within(cert_path, days):
+    """判断证书是否已经过期，或将在指定天数内过期"""
+    not_after = read_certificate_not_after(cert_path)
+    if not_after is None:
+        return True
+    return not_after <= datetime.now(timezone.utc) + timedelta(days=days)
+
+
+def certificate_remaining_days(cert_path):
+    """返回证书剩余天数；证书损坏或不存在时返回 -1"""
+    not_after = read_certificate_not_after(cert_path)
+    if not_after is None:
+        return -1
+    remaining = not_after - datetime.now(timezone.utc)
+    return max(-1, remaining.days)
+
+
+def format_cert_time(cert_path):
+    """把证书到期时间转成前端可解析的 ISO 文本"""
+    not_after = read_certificate_not_after(cert_path)
+    return not_after.isoformat() if not_after else ""
+
+
 def write_server_cert_config():
-    """写入服务端证书 SAN 配置，保证证书明确绑定固定局域网 IP"""
+    """写入服务端证书 SAN 配置，保证证书明确绑定当前局域网 IP"""
     SERVER_CERT_CONFIG.write_text(
         "\n".join([
             "[req]",
@@ -233,9 +297,66 @@ def build_mobileconfig(root_der):
     ROOT_CA_MOBILECONFIG.write_bytes(plistlib.dumps(profile))
 
 
+def generate_root_certificate():
+    """生成本地根证书；根证书会被手机信任，因此有效期短于传统自签 CA"""
+    run_openssl([
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-sha256",
+        "-days",
+        str(ROOT_CA_VALID_DAYS),
+        "-nodes",
+        "-keyout",
+        str(ROOT_CA_KEY),
+        "-out",
+        str(ROOT_CA_PEM),
+        "-subj",
+        "/CN=DG-LAB Local Root CA"
+    ])
+
+
+def generate_server_certificate():
+    """按当前局域网 IP 生成服务器证书；手机浏览器会精确校验证书里的 IP"""
+    run_openssl([
+        "req",
+        "-new",
+        "-nodes",
+        "-newkey",
+        "rsa:2048",
+        "-keyout",
+        str(SERVER_CERT_KEY),
+        "-out",
+        str(SERVER_CERT_CSR),
+        "-config",
+        str(SERVER_CERT_CONFIG)
+    ])
+    run_openssl([
+        "x509",
+        "-req",
+        "-in",
+        str(SERVER_CERT_CSR),
+        "-CA",
+        str(ROOT_CA_PEM),
+        "-CAkey",
+        str(ROOT_CA_KEY),
+        "-CAcreateserial",
+        "-out",
+        str(SERVER_CERT_PEM),
+        "-days",
+        str(SERVER_CERT_VALID_DAYS),
+        "-sha256",
+        "-extfile",
+        str(SERVER_CERT_CONFIG),
+        "-extensions",
+        "req_ext"
+    ])
+
+
 def ensure_local_https_assets():
-    """确保本地 HTTPS 证书存在；证书只签固定 IP，私钥只保存在 certs/private"""
-    global CERT_SHA256
+    """确保本地 HTTPS 证书存在；服务器证书随当前 IP 自动重签，私钥只保存在 certs/private"""
+    global CERT_SHA256, CERT_ROOT_NOT_AFTER, CERT_SERVER_NOT_AFTER
 
     if shutil.which("openssl") is None:
         print("HTTPS 已跳过: 未找到 openssl，无法生成本地证书")
@@ -246,69 +367,62 @@ def ensure_local_https_assets():
 
     try:
         existing_ip = CERT_IP_MARKER.read_text(encoding="utf-8").strip() if CERT_IP_MARKER.exists() else ""
+        try:
+            existing_policy = json.loads(CERT_POLICY_MARKER.read_text(encoding="utf-8")) if CERT_POLICY_MARKER.exists() else {}
+        except (json.JSONDecodeError, OSError):
+            existing_policy = {}
+
         root_exists = ROOT_CA_PEM.exists() and ROOT_CA_KEY.exists()
         server_exists = SERVER_CERT_PEM.exists() and SERVER_CERT_KEY.exists()
 
-        if not root_exists:
-            run_openssl([
-                "req",
-                "-x509",
-                "-newkey",
-                "rsa:2048",
-                "-sha256",
-                "-days",
-                "3650",
-                "-nodes",
-                "-keyout",
-                str(ROOT_CA_KEY),
-                "-out",
-                str(ROOT_CA_PEM),
-                "-subj",
-                "/CN=DG-LAB Local Root CA"
-            ])
+        # 根证书是手机手动信任的“总开关”。旧版本曾生成 10 年证书；
+        # 这里会把明显过长或即将过期的根证书重建为当前策略，降低泄露后的可利用时间。
+        root_remaining_days = certificate_remaining_days(ROOT_CA_PEM) if root_exists else -1
+        root_too_long = root_remaining_days > ROOT_CA_VALID_DAYS + 2
+        root_renew_window_days = min(7, max(1, ROOT_CA_VALID_DAYS // 10))
+        root_expiring = certificate_expires_within(ROOT_CA_PEM, root_renew_window_days) if root_exists else True
+        root_should_regenerate = (not root_exists) or root_too_long or root_expiring
+
+        if root_should_regenerate:
+            if root_exists:
+                print("HTTPS 根证书已按当前安全策略重建；手机需要重新安装并信任根证书")
+            generate_root_certificate()
 
         write_server_cert_config()
 
-        if not server_exists or existing_ip != CERTIFIED_LAN_IP:
-            run_openssl([
-                "req",
-                "-new",
-                "-nodes",
-                "-newkey",
-                "rsa:2048",
-                "-keyout",
-                str(SERVER_CERT_KEY),
-                "-out",
-                str(SERVER_CERT_CSR),
-                "-config",
-                str(SERVER_CERT_CONFIG)
-            ])
-            run_openssl([
-                "x509",
-                "-req",
-                "-in",
-                str(SERVER_CERT_CSR),
-                "-CA",
-                str(ROOT_CA_PEM),
-                "-CAkey",
-                str(ROOT_CA_KEY),
-                "-CAcreateserial",
-                "-out",
-                str(SERVER_CERT_PEM),
-                "-days",
-                "825",
-                "-sha256",
-                "-extfile",
-                str(SERVER_CERT_CONFIG),
-                "-extensions",
-                "req_ext"
-            ])
+        # 服务器证书只证明当前这台电脑的 HTTPS 页面；它可以短期有效并频繁重签。
+        server_policy_changed = existing_policy.get("server_valid_days") != SERVER_CERT_VALID_DAYS
+        server_expiring = certificate_expires_within(SERVER_CERT_PEM, 1) if server_exists else True
+        server_should_regenerate = (
+            root_should_regenerate
+            or (not server_exists)
+            or existing_ip != CERTIFIED_LAN_IP
+            or server_policy_changed
+            or server_expiring
+        )
+
+        if server_should_regenerate:
+            generate_server_certificate()
             CERT_IP_MARKER.write_text(CERTIFIED_LAN_IP, encoding="utf-8")
 
         run_openssl(["x509", "-in", str(ROOT_CA_PEM), "-outform", "DER", "-out", str(ROOT_CA_CER)])
         root_der = ROOT_CA_CER.read_bytes()
         build_mobileconfig(root_der)
         CERT_SHA256 = hashlib.sha256(root_der).hexdigest().upper()
+        CERT_ROOT_NOT_AFTER = format_cert_time(ROOT_CA_PEM)
+        CERT_SERVER_NOT_AFTER = format_cert_time(SERVER_CERT_PEM)
+
+        CERT_POLICY_MARKER.write_text(
+            json.dumps({
+                "certified_ip": CERTIFIED_LAN_IP,
+                "root_valid_days": ROOT_CA_VALID_DAYS,
+                "server_valid_days": SERVER_CERT_VALID_DAYS,
+                "root_not_after": CERT_ROOT_NOT_AFTER,
+                "server_not_after": CERT_SERVER_NOT_AFTER,
+                "generated_at": datetime.now(timezone.utc).isoformat()
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
 
         for key_path in (ROOT_CA_KEY, SERVER_CERT_KEY):
             try:
@@ -425,7 +539,12 @@ async def broadcast_state():
             "https_port": HTTPS_PORT if HTTPS_ENABLED else None,
             "secure_web_ws_port": SECURE_WEB_WS_PORT if HTTPS_ENABLED else None,
             "certified_lan_ip": CERTIFIED_LAN_IP,
+            "cert_ip_mode": "手动指定" if CERT_IP_OVERRIDE else "自动检测",
             "cert_sha256": CERT_SHA256,
+            "cert_root_not_after": CERT_ROOT_NOT_AFTER,
+            "cert_server_not_after": CERT_SERVER_NOT_AFTER,
+            "cert_root_valid_days": ROOT_CA_VALID_DAYS,
+            "cert_server_valid_days": SERVER_CERT_VALID_DAYS,
             "cert_profile_path": f"/{ROOT_CA_MOBILECONFIG.as_posix()}",
             "cert_cer_path": f"/{ROOT_CA_CER.as_posix()}",
             "app_ws_port": APP_WS_PORT,
@@ -854,12 +973,14 @@ async def run_secure_web_ws_server():
 # --- 5. 系统初始化主协程 ---
 
 async def main():
-    global LOCAL_IP
+    global LOCAL_IP, CERTIFIED_LAN_IP
     LOCAL_IP = get_local_ip()
+    CERTIFIED_LAN_IP = CERT_IP_OVERRIDE or LOCAL_IP
     
     print("=" * 45)
     print("DG-LAB 郊狼小游戏选择器中转系统 - 控制台")
     print(f"本地局域网 IP 地址: {LOCAL_IP}")
+    print(f"HTTPS 证书签发 IP: {CERTIFIED_LAN_IP} ({'手动指定' if CERT_IP_OVERRIDE else '自动检测'})")
     print("=" * 45)
 
     # 1. 启动 HTTP 托管线程
@@ -883,8 +1004,8 @@ async def main():
     print("服务已启动")
     webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
     if HTTPS_ENABLED:
-        print(f"iPhone 证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
-        print(f"iPhone HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
+        print(f"手机证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+        print(f"手机 HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
 
     # 6. 挂起主协程，保持服务持久运行
     await asyncio.Event().wait()

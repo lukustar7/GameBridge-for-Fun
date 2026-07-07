@@ -16,6 +16,7 @@ let triedPortsCount = 0;
 let appQR = null;
 let gameQR = null;
 let certQR = null;
+let certCerQR = null;
 let secureGameQR = null;
 
 function setText(id, value) {
@@ -51,6 +52,7 @@ function initQRCodes() {
     const appBox = document.getElementById("app-qrcode");
     const gameBox = document.getElementById("game-qrcode");
     const certBox = document.getElementById("cert-qrcode");
+    const certCerBox = document.getElementById("cert-cer-qrcode");
     const secureGameBox = document.getElementById("secure-game-qrcode");
     
     appQR = new QRCode(appBox, {
@@ -72,8 +74,17 @@ function initQRCodes() {
     });
 
     certQR = new QRCode(certBox, {
-        width: 180,
-        height: 180,
+        width: 150,
+        height: 150,
+        typeNumber: 12,
+        colorDark: "#ffffff",
+        colorLight: "#000000",
+        correctLevel: QRCode.CorrectLevel.M
+    });
+
+    certCerQR = new QRCode(certCerBox, {
+        width: 150,
+        height: 150,
         typeNumber: 12,
         colorDark: "#ffffff",
         colorLight: "#000000",
@@ -180,7 +191,7 @@ function updateUI(data) {
         setText("game-url-text", `二维码生成失败，可手动输入：${gameUrl}`);
     }
 
-    // 4. iPhone 证书安装与 HTTPS 游戏入口。证书用 HTTP 下载，游戏用 HTTPS/WSS 运行。
+    // 4. 手机证书安装与 HTTPS 游戏入口。根证书用 HTTP 下载，游戏用 HTTPS/WSS 运行。
     const certHost = data.local_ip || window.location.hostname || "127.0.0.1";
     const certifiedHost = data.certified_lan_ip || certHost;
     const profilePath = data.cert_profile_path || "/certs/dg-lab-root-ca.mobileconfig";
@@ -189,19 +200,25 @@ function updateUI(data) {
     const cerUrl = `http://${certHost}:${data.http_port}${cerPath}`;
 
     setText("cert-profile-url", profileUrl);
+    setText("cert-cer-url", cerUrl);
+    setText("cert-signed-ip", certifiedHost);
+    setText("cert-ip-mode", data.cert_ip_mode || "-");
+    setText("cert-root-expiry", formatCertificateExpiry(data.cert_root_not_after, data.cert_root_valid_days));
+    setText("cert-server-expiry", formatCertificateExpiry(data.cert_server_not_after, data.cert_server_valid_days));
     setText("cert-fingerprint", formatFingerprint(data.cert_sha256));
     setDownloadLink("cert-profile-link", profileUrl, "dg-lab-root-ca.mobileconfig");
     setDownloadLink("cert-cer-link", cerUrl, "dg-lab-root-ca.cer");
     renderQRCode(certQR, profileUrl, "证书安装");
+    renderQRCode(certCerQR, cerUrl, "Android 证书安装");
 
     if (data.https_enabled && data.https_port && data.secure_web_ws_port) {
         const secureGameUrl = `https://${certifiedHost}:${data.https_port}/static/game.html?ws=${data.secure_web_ws_port}&token=${gameToken}`;
         setText("secure-game-url-text", secureGameUrl);
-        setText("secure-game-hint", `手抖挑战和保持角度请先安装证书，再使用 HTTPS 入口：${secureGameUrl}`);
+        setText("secure-game-hint", `手抖挑战和保持角度请先安装手机证书，再使用 HTTPS 入口：${secureGameUrl}`);
         renderQRCode(secureGameQR, secureGameUrl, "HTTPS 游戏操纵端");
     } else {
         setText("secure-game-url-text", "HTTPS 服务未启用：请确认 openssl 可用并重启服务。");
-        setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战和保持角度可能无法取得 iPhone 感应器权限。");
+        setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战和保持角度可能无法取得手机感应器权限。");
         if (secureGameQR) secureGameQR.clear();
     }
 
@@ -211,6 +228,9 @@ function updateUI(data) {
     document.getElementById("stat-web-ws-port").innerText = data.web_ws_port;
     document.getElementById("stat-https-port").innerText = data.https_enabled ? data.https_port : "未启用";
     document.getElementById("stat-secure-web-ws-port").innerText = data.https_enabled ? data.secure_web_ws_port : "未启用";
+    document.getElementById("stat-cert-ip").innerText = certifiedHost;
+    document.getElementById("stat-root-expiry").innerText = formatCertificateExpiry(data.cert_root_not_after, data.cert_root_valid_days);
+    document.getElementById("stat-server-expiry").innerText = formatCertificateExpiry(data.cert_server_not_after, data.cert_server_valid_days);
     document.getElementById("stat-app-ws-port").innerText = data.app_ws_port;
     
     // 延迟格式化显示 (冷峻标记)
@@ -260,6 +280,22 @@ function formatBatteryLevel(level) {
 function formatFingerprint(value) {
     if (!value) return "-";
     return String(value).match(/.{1,2}/g).join(":");
+}
+
+function formatCertificateExpiry(value, validDays) {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+
+    const formatted = date.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+    });
+    return validDays ? `${formatted}（${validDays} 天策略）` : formatted;
 }
 
 function setDownloadLink(id, href, filename) {
