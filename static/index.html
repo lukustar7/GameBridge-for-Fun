@@ -16,6 +16,7 @@
         <!-- Tab 切换 -->
         <div class="tabs">
             <div class="tab active" onclick="switchTab('monitor')">状态监控</div>
+            <div class="tab" onclick="switchTab('cert')">iPhone 证书</div>
             <div class="tab" onclick="switchTab('settings')">参数设置</div>
         </div>
 
@@ -45,6 +46,44 @@
                     <div class="qr-box">
                         <div id="game-qrcode"></div>
                     </div>
+                    <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“iPhone 证书”页安装证书后使用 HTTPS 入口。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- iPhone 证书安装引导 -->
+        <div id="tab-cert" class="tab-content">
+            <div class="grid">
+                <div class="panel">
+                    <h2>1. 安装本地根证书</h2>
+                    <p class="sub-text" style="margin-bottom: 12px;">iPhone 的动作与方向感应权限需要 HTTPS 页面。先用 iPhone Safari 打开下方地址并安装描述文件。</p>
+                    <p id="cert-profile-url" style="font-family: monospace; font-size: 0.85rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待证书生成...</p>
+                    <div class="qr-box">
+                        <div id="cert-qrcode"></div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
+                        <a id="cert-profile-link" class="btn" href="#">下载描述文件</a>
+                        <a id="cert-cer-link" class="btn" href="#">备用 .cer</a>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>2. 开启完全信任</h2>
+                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 18px;">
+                        <li>下载描述文件后，打开 iPhone 设置。</li>
+                        <li>进入“通用”，找到“VPN 与设备管理”或“已下载描述文件”。</li>
+                        <li>安装“DG-LAB 本地 HTTPS 根证书”。</li>
+                        <li>再进入“通用 > 关于本机 > 证书信任设置”。</li>
+                        <li>打开“DG-LAB Local Root CA”的完全信任。</li>
+                    </ol>
+                    <p class="sub-text" style="margin-bottom: 8px;">证书 SHA-256 指纹：</p>
+                    <p id="cert-fingerprint" style="font-family: monospace; font-size: 0.8rem; color: #888888; word-break: break-all; margin-bottom: 18px;">-</p>
+
+                    <h2>3. HTTPS 游戏入口</h2>
+                    <p id="secure-game-url-text" style="font-family: monospace; font-size: 0.85rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待 HTTPS 服务...</p>
+                    <div class="qr-box">
+                        <div id="secure-game-qrcode"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -67,6 +106,14 @@
                         <tr>
                             <td>网页通信 (WS) 端口</td>
                             <td id="stat-web-ws-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>HTTPS 静态网页端口</td>
+                            <td id="stat-https-port">-</td>
+                        </tr>
+                        <tr>
+                            <td>安全通信 (WSS) 端口</td>
+                            <td id="stat-secure-web-ws-port">-</td>
                         </tr>
                         <tr>
                             <td>App 桥接 (WS) 端口</td>
@@ -136,6 +183,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260706-qr-capacity"></script>
+    <script src="console.js?v=20260707-https-cert-guide"></script>
 </body>
 </html>

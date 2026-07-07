@@ -240,8 +240,9 @@ function persistSettings() {
 
 function connectWebSocket() {
     const host = window.location.hostname || "127.0.0.1";
+    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const tokenQuery = gameToken ? `?token=${encodeURIComponent(gameToken)}` : "";
-    const targetUrl = `ws://${host}:${currentWsPort}/game${tokenQuery}`;
+    const targetUrl = `${wsProtocol}://${host}:${currentWsPort}/game${tokenQuery}`;
 
     suppressReconnect = false;
     clearTimeout(reconnectTimer);

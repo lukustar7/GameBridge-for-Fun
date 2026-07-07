@@ -3,16 +3,23 @@
 DG-LAB 郊狼小游戏选择器中转系统 - 后端核心服务端 (重构适配版)
 """
 import asyncio
+import hashlib
 import ipaddress
 import json
+import os
+import plistlib
 import re
 import secrets
+import shutil
 import socket
+import ssl
 import subprocess
 import threading
+import uuid
 import webbrowser
+from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 import websockets
 from pydglab_ws import Channel, RetCode, StrengthOperationType, DGLabWSConnect, DGLabWSServer
 
@@ -23,7 +30,25 @@ LOCAL_IP = "127.0.0.1"
 HTTP_PORT = 18080
 WEB_WS_PORT = 18081
 APP_WS_PORT = 15678
+HTTPS_PORT = 18443
+SECURE_WEB_WS_PORT = 18444
 GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
+
+# iPhone 传感器权限需要 HTTPS。用户已在路由器中固定 Mac 局域网 IP，证书按这个 IP 签发。
+CERTIFIED_LAN_IP = os.environ.get("DG_LAB_CERT_IP", "192.168.0.14")
+CERT_DIR = Path("certs")
+CERT_PRIVATE_DIR = CERT_DIR / "private"
+ROOT_CA_PEM = CERT_DIR / "dg-lab-root-ca.pem"
+ROOT_CA_CER = CERT_DIR / "dg-lab-root-ca.cer"
+ROOT_CA_MOBILECONFIG = CERT_DIR / "dg-lab-root-ca.mobileconfig"
+ROOT_CA_KEY = CERT_PRIVATE_DIR / "dg-lab-root-ca-key.pem"
+SERVER_CERT_PEM = CERT_DIR / "dg-lab-server.pem"
+SERVER_CERT_KEY = CERT_PRIVATE_DIR / "dg-lab-server-key.pem"
+SERVER_CERT_CSR = CERT_PRIVATE_DIR / "dg-lab-server.csr"
+SERVER_CERT_CONFIG = CERT_PRIVATE_DIR / "dg-lab-server-openssl.cnf"
+CERT_IP_MARKER = CERT_DIR / "dg-lab-cert-ip.txt"
+CERT_SHA256 = ""
+HTTPS_ENABLED = False
 
 # 游戏端惩罚的硬边界。前端也会限流，但后端必须自己兜底，不能相信局域网客户端。
 MIN_SHOCK_DURATION_MS = 100
@@ -32,8 +57,11 @@ MIN_PULSE_INTERVAL_SECONDS = 0.22
 
 # 服务运行实例句柄 (用于端口热重启)
 http_server_instance = None
+https_server_instance = None
 web_ws_server_instance = None
+secure_web_ws_server_instance = None
 http_server_ready = threading.Event()
+https_server_ready = threading.Event()
 
 # app_client 缓存
 dg_app_client = None
@@ -108,7 +136,10 @@ def get_local_ip():
 
     if candidates:
         # 保持顺序去重，避免重复网卡地址导致日志混乱。
-        return list(dict.fromkeys(candidates))[0]
+        unique_candidates = list(dict.fromkeys(candidates))
+        if CERTIFIED_LAN_IP in unique_candidates:
+            return CERTIFIED_LAN_IP
+        return unique_candidates[0]
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -134,10 +165,204 @@ def find_free_port(start_port):
                 port += 1
 
 
+def run_openssl(args):
+    """执行本地 openssl 命令；失败时抛出带原因的异常，方便启动日志定位"""
+    result = subprocess.run(
+        ["openssl", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "unknown openssl error").strip()
+        raise RuntimeError(detail)
+
+
+def write_server_cert_config():
+    """写入服务端证书 SAN 配置，保证证书明确绑定固定局域网 IP"""
+    SERVER_CERT_CONFIG.write_text(
+        "\n".join([
+            "[req]",
+            "default_bits = 2048",
+            "prompt = no",
+            "default_md = sha256",
+            "distinguished_name = dn",
+            "req_extensions = req_ext",
+            "",
+            "[dn]",
+            f"CN = {CERTIFIED_LAN_IP}",
+            "",
+            "[req_ext]",
+            "subjectAltName = @alt_names",
+            "",
+            "[alt_names]",
+            f"IP.1 = {CERTIFIED_LAN_IP}",
+            "IP.2 = 127.0.0.1",
+            "DNS.1 = localhost",
+            ""
+        ]),
+        encoding="utf-8"
+    )
+
+
+def build_mobileconfig(root_der):
+    """生成 iPhone 可直接安装的根证书描述文件"""
+    profile = {
+        "PayloadContent": [
+            {
+                "PayloadCertificateFileName": "dg-lab-root-ca.cer",
+                "PayloadContent": root_der,
+                "PayloadDescription": "DG-LAB 本地 HTTPS 根证书，仅用于信任本机局域网小游戏服务。",
+                "PayloadDisplayName": "DG-LAB Local Root CA",
+                "PayloadIdentifier": "local.dg-lab.root-ca",
+                "PayloadType": "com.apple.security.root",
+                "PayloadUUID": str(uuid.uuid4()).upper(),
+                "PayloadVersion": 1
+            }
+        ],
+        "PayloadDescription": "安装后需在 设置 > 通用 > 关于本机 > 证书信任设置 中手动开启完全信任。",
+        "PayloadDisplayName": "DG-LAB 本地 HTTPS 根证书",
+        "PayloadIdentifier": "local.dg-lab.profile",
+        "PayloadOrganization": "DG-LAB Local",
+        "PayloadRemovalDisallowed": False,
+        "PayloadType": "Configuration",
+        "PayloadUUID": str(uuid.uuid4()).upper(),
+        "PayloadVersion": 1
+    }
+    ROOT_CA_MOBILECONFIG.write_bytes(plistlib.dumps(profile))
+
+
+def ensure_local_https_assets():
+    """确保本地 HTTPS 证书存在；证书只签固定 IP，私钥只保存在 certs/private"""
+    global CERT_SHA256
+
+    if shutil.which("openssl") is None:
+        print("HTTPS 已跳过: 未找到 openssl，无法生成本地证书")
+        return False
+
+    CERT_DIR.mkdir(exist_ok=True)
+    CERT_PRIVATE_DIR.mkdir(exist_ok=True)
+
+    try:
+        existing_ip = CERT_IP_MARKER.read_text(encoding="utf-8").strip() if CERT_IP_MARKER.exists() else ""
+        root_exists = ROOT_CA_PEM.exists() and ROOT_CA_KEY.exists()
+        server_exists = SERVER_CERT_PEM.exists() and SERVER_CERT_KEY.exists()
+
+        if not root_exists:
+            run_openssl([
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-sha256",
+                "-days",
+                "3650",
+                "-nodes",
+                "-keyout",
+                str(ROOT_CA_KEY),
+                "-out",
+                str(ROOT_CA_PEM),
+                "-subj",
+                "/CN=DG-LAB Local Root CA"
+            ])
+
+        write_server_cert_config()
+
+        if not server_exists or existing_ip != CERTIFIED_LAN_IP:
+            run_openssl([
+                "req",
+                "-new",
+                "-nodes",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(SERVER_CERT_KEY),
+                "-out",
+                str(SERVER_CERT_CSR),
+                "-config",
+                str(SERVER_CERT_CONFIG)
+            ])
+            run_openssl([
+                "x509",
+                "-req",
+                "-in",
+                str(SERVER_CERT_CSR),
+                "-CA",
+                str(ROOT_CA_PEM),
+                "-CAkey",
+                str(ROOT_CA_KEY),
+                "-CAcreateserial",
+                "-out",
+                str(SERVER_CERT_PEM),
+                "-days",
+                "825",
+                "-sha256",
+                "-extfile",
+                str(SERVER_CERT_CONFIG),
+                "-extensions",
+                "req_ext"
+            ])
+            CERT_IP_MARKER.write_text(CERTIFIED_LAN_IP, encoding="utf-8")
+
+        run_openssl(["x509", "-in", str(ROOT_CA_PEM), "-outform", "DER", "-out", str(ROOT_CA_CER)])
+        root_der = ROOT_CA_CER.read_bytes()
+        build_mobileconfig(root_der)
+        CERT_SHA256 = hashlib.sha256(root_der).hexdigest().upper()
+
+        for key_path in (ROOT_CA_KEY, SERVER_CERT_KEY):
+            try:
+                key_path.chmod(0o600)
+            except OSError:
+                pass
+
+        return True
+    except Exception as e:
+        print(f"HTTPS 证书准备失败: {e}")
+        return False
+
+
 # --- 1. HTTP 静态文件托管服务 ---
 
-class SilentHTTPRequestHandler(SimpleHTTPRequestHandler):
-    """静默 HTTP 服务处理器，去除多余的冗余日志，保持冷峻风格"""
+class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
+    """静默静态文件处理器；允许下载公开证书，禁止访问任何私钥"""
+
+    CERT_MIME_TYPES = {
+        ".cer": "application/pkix-cert",
+        ".mobileconfig": "application/x-apple-aspen-config",
+        ".pem": "application/x-pem-file"
+    }
+
+    def is_forbidden_path(self):
+        request_path = unquote(urlparse(self.path).path).lstrip("/")
+        normalized = Path(request_path)
+        parts = normalized.parts
+        if len(parts) >= 2 and parts[0] == "certs" and parts[1] == "private":
+            return True
+        if normalized.name.endswith("-key.pem"):
+            return True
+        if normalized.name.endswith(".csr") or normalized.name.endswith(".srl"):
+            return True
+        return False
+
+    def do_GET(self):
+        if self.is_forbidden_path():
+            self.send_error(403, "private certificate material is not downloadable")
+            return
+        super().do_GET()
+
+    def do_HEAD(self):
+        if self.is_forbidden_path():
+            self.send_error(403, "private certificate material is not downloadable")
+            return
+        super().do_HEAD()
+
+    def guess_type(self, path):
+        ext = Path(path).suffix.lower()
+        if ext in self.CERT_MIME_TYPES:
+            return self.CERT_MIME_TYPES[ext]
+        return super().guess_type(path)
+
     def log_message(self, format, *args):
         # 覆写空函数，不输出冗余的 HTTP GET/POST 日志
         pass
@@ -149,12 +374,41 @@ def run_http_server():
     HTTP_PORT = find_free_port(HTTP_PORT)
     
     server_address = ("", HTTP_PORT)
-    http_server_instance = ThreadingHTTPServer(server_address, SilentHTTPRequestHandler)
+    http_server_instance = ThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
     
     # 打印冷峻格式启动日志
     print(f"HTTP 服务已启动: 端口 {HTTP_PORT}")
     http_server_ready.set()
     http_server_instance.serve_forever()
+
+
+def run_https_server():
+    """多线程托管 HTTPS 服务，供 iPhone 传感器玩法使用"""
+    global https_server_instance, HTTPS_PORT, HTTPS_ENABLED
+
+    if not ensure_local_https_assets():
+        HTTPS_ENABLED = False
+        https_server_ready.set()
+        return
+
+    try:
+        HTTPS_PORT = find_free_port(HTTPS_PORT)
+        server_address = ("", HTTPS_PORT)
+        https_server_instance = ThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(str(SERVER_CERT_PEM), str(SERVER_CERT_KEY))
+        https_server_instance.socket = ssl_context.wrap_socket(
+            https_server_instance.socket,
+            server_side=True
+        )
+        HTTPS_ENABLED = True
+        print(f"HTTPS 服务已启动: 端口 {HTTPS_PORT}，证书 IP: {CERTIFIED_LAN_IP}")
+        https_server_ready.set()
+        https_server_instance.serve_forever()
+    except Exception as e:
+        HTTPS_ENABLED = False
+        print(f"HTTPS 服务启动失败: {e}")
+        https_server_ready.set()
 
 
 # --- 2. WebSocket 广播函数 ---
@@ -167,6 +421,13 @@ async def broadcast_state():
             "local_ip": LOCAL_IP,
             "http_port": HTTP_PORT,
             "web_ws_port": WEB_WS_PORT,
+            "https_enabled": HTTPS_ENABLED,
+            "https_port": HTTPS_PORT if HTTPS_ENABLED else None,
+            "secure_web_ws_port": SECURE_WEB_WS_PORT if HTTPS_ENABLED else None,
+            "certified_lan_ip": CERTIFIED_LAN_IP,
+            "cert_sha256": CERT_SHA256,
+            "cert_profile_path": f"/{ROOT_CA_MOBILECONFIG.as_posix()}",
+            "cert_cer_path": f"/{ROOT_CA_CER.as_posix()}",
             "app_ws_port": APP_WS_PORT,
             "game_token": GAME_ACCESS_TOKEN,
             "app_connected": state["app_connected"],
@@ -571,6 +832,25 @@ async def run_web_ws_server():
     print(f"网页 WS 交互服务已启动: 端口 {WEB_WS_PORT}")
 
 
+async def run_secure_web_ws_server():
+    """启动 HTTPS 页面专用的 WSS 服务器"""
+    global secure_web_ws_server_instance, SECURE_WEB_WS_PORT
+    if not HTTPS_ENABLED:
+        return
+
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(str(SERVER_CERT_PEM), str(SERVER_CERT_KEY))
+    SECURE_WEB_WS_PORT = find_free_port(SECURE_WEB_WS_PORT)
+
+    secure_web_ws_server_instance = await websockets.serve(
+        web_ws_handler,
+        "0.0.0.0",
+        SECURE_WEB_WS_PORT,
+        ssl=ssl_context
+    )
+    print(f"网页 WSS 安全通信服务已启动: 端口 {SECURE_WEB_WS_PORT}")
+
+
 # --- 5. 系统初始化主协程 ---
 
 async def main():
@@ -587,17 +867,26 @@ async def main():
     http_thread.start()
     await asyncio.get_running_loop().run_in_executor(None, http_server_ready.wait)
 
-    # 2. 启动网页 WebSocket 交互服务
-    await run_web_ws_server()
+    # 2. 启动 HTTPS 托管线程。iPhone 传感器权限依赖安全页面，失败时不影响普通 HTTP 玩法。
+    https_thread = threading.Thread(target=run_https_server, daemon=True)
+    https_thread.start()
+    await asyncio.get_running_loop().run_in_executor(None, https_server_ready.wait)
 
-    # 3. 后台启动官方 App 远控网关及绑定桥接
+    # 3. 启动网页 WebSocket 交互服务
+    await run_web_ws_server()
+    await run_secure_web_ws_server()
+
+    # 4. 后台启动官方 App 远控网关及绑定桥接
     asyncio.create_task(app_bridge_runner())
 
-    # 4. 运行环境就绪后，在电脑端自动打开浏览器控制台
+    # 5. 运行环境就绪后，在电脑端自动打开浏览器控制台
     print("服务已启动")
     webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+    if HTTPS_ENABLED:
+        print(f"iPhone 证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+        print(f"iPhone HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
 
-    # 5. 挂起主协程，保持服务持久运行
+    # 6. 挂起主协程，保持服务持久运行
     await asyncio.Event().wait()
 
 
