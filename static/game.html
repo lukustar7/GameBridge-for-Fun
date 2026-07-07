@@ -776,6 +776,15 @@
                         </div>
 
                         <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">满槽后压力</label>
+                            <select id="slot-pressure-after-punish" onchange="saveSelectedSettings(true)">
+                                <option value="clear">清空压力</option>
+                                <option value="keep">保留 100%</option>
+                            </select>
+                            <p class="field-help">清空就是电完从 0% 重新攒；保留就是继续停在满槽，下一轮如果没有中奖降压，会再次触发。</p>
+                        </div>
+
+                        <div>
                             <label class="switch-row">
                                 <span>没中奖轻电</span>
                                 <input type="checkbox" id="slot-light-punish-enabled" onchange="saveSelectedSettings(true)">
@@ -988,6 +997,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260707-visual-haptics"></script>
+    <script src="game.js?v=20260707-slot-pressure-after"></script>
 </body>
 </html>

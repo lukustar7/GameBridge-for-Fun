@@ -73,7 +73,8 @@ const DEFAULT_SETTINGS = {
         smallWinDrop: 14,
         jackpotDrop: 70,
         winRate: "normal",
-        sevenRule: "fill"
+        sevenRule: "fill",
+        pressureAfterPunish: "clear"
     }
 };
 
@@ -120,7 +121,7 @@ const GAME_META = {
         primaryValue: (cfg) => cfg.lightPunishEnabled ? cfg.strengthMin : "关闭",
         secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => `没中 +${cfg.missGain}% | 小奖 -${cfg.smallWinDrop}%`,
-        triggerLabel: (cfg) => `${cfg.spinMs}ms 开奖 | 满槽 ${cfg.shockSeconds.toFixed(1)}s`
+        triggerLabel: (cfg) => `${cfg.spinMs}ms 开奖 | ${formatSlotPressureAfterPunish(cfg)}`
     }
 };
 
@@ -753,6 +754,9 @@ function populateSettingsForm(gameName) {
         $("slot-auto-spin").checked = cfg.autoSpin;
         $("slot-win-rate").value = cfg.winRate;
         $("slot-seven-rule").value = cfg.sevenRule;
+        $("slot-pressure-after-punish").value = ["clear", "keep"].includes(cfg.pressureAfterPunish)
+            ? cfg.pressureAfterPunish
+            : DEFAULT_SETTINGS.slot.pressureAfterPunish;
     }
 
     populateOutputSettings(cfg);
@@ -904,7 +908,10 @@ function collectSettingsFromForm(gameName) {
             smallWinDrop: clamp(readNumber("slot-small-win-drop", 14), 0, 35),
             jackpotDrop: clamp(readNumber("slot-jackpot-drop", 70), 20, 100),
             winRate: $("slot-win-rate").value,
-            sevenRule: $("slot-seven-rule").value
+            sevenRule: $("slot-seven-rule").value,
+            pressureAfterPunish: ["clear", "keep"].includes($("slot-pressure-after-punish").value)
+                ? $("slot-pressure-after-punish").value
+                : DEFAULT_SETTINGS.slot.pressureAfterPunish
         };
     }
 
@@ -1145,6 +1152,11 @@ function formatOutputLabel(cfg) {
     }
 
     return "只用 A";
+}
+
+function formatSlotPressureAfterPunish(cfg) {
+    const mode = cfg.pressureAfterPunish === "keep" ? "保留 100%" : "清空压力";
+    return `满槽 ${cfg.shockSeconds.toFixed(1)}s 后${mode}`;
 }
 
 function vibrateBriefly(duration) {
@@ -2041,12 +2053,14 @@ function triggerSlotPunish(reason, forceMax) {
     const ratio = forceMax ? 1 : clamp(slotPressure / 100, 0, 1);
     const strength = Math.round(cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio);
     const sent = sendConfiguredShock(strength, duration);
+    const shouldClearPressure = cfg.pressureAfterPunish !== "keep";
 
     setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，App 未绑定`);
     setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | App 未绑定，未输出`);
     vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
     if (!sent) {
+        settleSlotPressureAfterPunish(shouldClearPressure, `${reason} | App 未绑定，${shouldClearPressure ? "压力清零" : "压力保留 100%"}`);
         finishSlotRound();
         return;
     }
@@ -2062,13 +2076,21 @@ function triggerSlotPunish(reason, forceMax) {
     slotCooldownTimer = setTimeout(() => {
         if (activeGame !== "slot") return;
 
-        slotPressure = 0;
-        slotMissStreak = 0;
         slotCooldownUntil = 0;
         setSlotResultState("");
-        updateSlotView("惩罚结束，压力清零。");
+        settleSlotPressureAfterPunish(
+            shouldClearPressure,
+            shouldClearPressure ? "惩罚结束，压力清零。" : "惩罚结束，压力保留 100%。"
+        );
         finishSlotRound();
     }, duration + 500);
+}
+
+function settleSlotPressureAfterPunish(shouldClearPressure, message) {
+    // 满槽惩罚结算后只处理角子机自己的压力条，不改变硬件输出规则。
+    slotPressure = shouldClearPressure ? 0 : 100;
+    slotMissStreak = 0;
+    updateSlotView(message);
 }
 
 function updateSlotView(message) {
