@@ -477,6 +477,19 @@
                         <div class="tech-row"><span>设备电量</span><span id="tech-battery">未接入</span></div>
                     </div>
                 </div>
+
+                <div class="notice-panel">
+                    <h2>连接测试</h2>
+                    <p class="sub-text" style="margin-bottom: 12px;">建议正式开始前先自检，再用低强度短时长试一下通道。</p>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px;">
+                        <button onclick="runMobileSelfCheck()">自检</button>
+                        <button onclick="stopMobileOutput()">停止输出</button>
+                        <button onclick="sendMobileTestShock('a')">试 A</button>
+                        <button onclick="sendMobileTestShock('b')">试 B</button>
+                    </div>
+                    <button onclick="sendMobileTestShock('ab')" style="width: 100%; margin-bottom: 12px;">试 A+B</button>
+                    <p id="mobile-test-result" class="sub-text">等待自检。</p>
+                </div>
             </div>
             <div class="game-select-container">
                 <div class="game-card" onclick="openGameSettings('shake')">
@@ -489,7 +502,7 @@
                 </div>
                 <div class="game-card" onclick="openGameSettings('dice')">
                     <h3>摇骰子对决</h3>
-                    <p class="sub-text" style="margin-top: 5px;">你和对手比总点数，输几点就电几下，自己豹子按倍率结算</p>
+                    <p class="sub-text" style="margin-top: 5px;">你和对手比总点数，输几点就电几下，任意一方豹子直接按倍率结算</p>
                 </div>
                 <div class="game-card" onclick="openGameSettings('slot')">
                     <h3>极速角子机</h3>
@@ -604,6 +617,15 @@
                             <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
                             <p class="field-help">离开安全区后先等多久。给手抖和手机误差留一点反应时间。</p>
                         </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>电完休息</span>
+                                <span id="val-shake-rest-ms">250ms</span>
+                            </div>
+                            <input type="range" id="shake-rest-ms" min="200" max="2000" step="50" value="250" oninput="updateSettingValue('shake-rest-ms')">
+                            <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到安全区会立即停止。</p>
+                        </div>
                     </div>
 
                     <div class="settings-actions">
@@ -667,6 +689,15 @@
                             <input type="range" id="angle-ramp-degrees" min="5" max="60" value="28" oninput="updateSettingValue('angle-ramp-degrees')">
                             <p class="field-help">超过允许误差后，再偏多少度会从开始强度升到最高强度。</p>
                         </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>电完休息</span>
+                                <span id="val-angle-rest-ms">250ms</span>
+                            </div>
+                            <input type="range" id="angle-rest-ms" min="200" max="2000" step="50" value="250" oninput="updateSettingValue('angle-rest-ms')">
+                            <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到允许范围会立即停止。</p>
+                        </div>
                     </div>
 
                     <div class="settings-actions">
@@ -697,11 +728,20 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
+                                <span>每下间隔</span>
+                                <span id="val-dice-gap-seconds">0.5s</span>
+                            </div>
+                            <input type="range" id="dice-gap-seconds" min="0.2" max="3.0" step="0.1" value="0.5" oninput="updateSettingValue('dice-gap-seconds')">
+                            <p class="field-help">每一下结束后休息多久再执行下一下。页面会按它估算本局最长时间。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
                                 <span>豹子倍率</span>
                                 <span id="val-dice-leopard-multiplier">3</span>
                             </div>
                             <input type="range" id="dice-leopard-multiplier" min="1" max="6" value="3" oninput="updateSettingValue('dice-leopard-multiplier')">
-                            <p class="field-help">你自己摇出三个一样时使用。比如三个 5，倍率 3，就是 5 × 3 = 15 下。</p>
+                            <p class="field-help">你或对手任意一方摇出三个一样时使用。比如三个 5，倍率 3，就是 5 × 3 = 15 下。</p>
                         </div>
 
                         <div class="slider-container">
@@ -772,7 +812,7 @@
                                 <span id="val-slot-shock-seconds">2.0s</span>
                             </div>
                             <input type="range" id="slot-shock-seconds" min="0.5" max="8.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
-                            <p class="field-help">压力条满格后单次输出多久；触发后会进入短冷却，避免自动连转叠得太密。</p>
+                            <p class="field-help">压力条满格后单次输出多久；输出结束后还会按“电完休息”等一段时间。</p>
                         </div>
 
                         <div>
@@ -803,6 +843,15 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
+                                <span>电完休息</span>
+                                <span id="val-slot-rest-ms">800ms</span>
+                            </div>
+                            <input type="range" id="slot-rest-ms" min="300" max="3000" step="100" value="800" oninput="updateSettingValue('slot-rest-ms')">
+                            <p class="field-help">本局触发轻电或满槽电后，下一局至少等待多久再开始；自动连转也会遵守。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
                                 <span>转多久开奖</span>
                                 <span id="val-slot-spin-ms">700ms</span>
                             </div>
@@ -824,7 +873,7 @@
                                 <span id="val-slot-auto-interval-ms">650ms</span>
                             </div>
                             <input type="range" id="slot-auto-interval-ms" min="300" max="1800" step="50" value="650" oninput="updateSettingValue('slot-auto-interval-ms')">
-                            <p class="field-help">自动连转时两次开奖之间等待多久；惩罚触发后的冷却时间会额外加上满槽持续时间。</p>
+                            <p class="field-help">自动连转时两次开奖之间等待多久；如果刚刚电过，会和“电完休息”取更慢的那个。</p>
                         </div>
 
                         <div class="slider-container">
@@ -997,6 +1046,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260707-slot-pressure-after"></script>
+    <script src="game.js?v=20260709-test-output-rhythm-2"></script>
 </body>
 </html>

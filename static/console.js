@@ -18,6 +18,7 @@ let gameQR = null;
 let certQR = null;
 let certCerQR = null;
 let secureGameQR = null;
+let latestState = null;
 
 function setText(id, value) {
     const node = document.getElementById(id);
@@ -123,6 +124,8 @@ function connectWebSocket() {
             updateUI(data);
         } else if (data.type === "game_latency") {
             updateGameLatency(data.latency);
+        } else if (data.type === "test_feedback") {
+            setConsoleTestResult(data.message || "测试请求已处理", data.ok);
         } else if (data.type === "button_feedback") {
             console.log(`收到设备物理按键: ${data.button}`);
         }
@@ -159,6 +162,8 @@ function connectWebSocket() {
 
 // 渲染并刷新设备状态和技术参数 UI
 function updateUI(data) {
+    latestState = data;
+
     // 1. 更新连接状态
     const statusSpan = document.getElementById("conn-status");
     if (data.app_connected) {
@@ -256,6 +261,68 @@ function updateUI(data) {
     document.getElementById("input-http-port").value = data.http_port;
     document.getElementById("input-web-ws-port").value = data.web_ws_port;
     document.getElementById("input-app-ws-port").value = data.app_ws_port;
+}
+
+function updateConsoleTestLabels() {
+    const strength = Number(document.getElementById("console-test-strength")?.value || 5);
+    const duration = Number(document.getElementById("console-test-duration")?.value || 0.3);
+    setText("val-console-test-strength", Number.isFinite(strength) ? Math.round(strength) : "5");
+    setText("val-console-test-duration", Number.isFinite(duration) ? `${duration.toFixed(1)}s` : "0.3s");
+}
+
+function setConsoleTestResult(message, ok = true) {
+    const node = document.getElementById("console-test-result");
+    if (!node) return;
+    node.innerText = message;
+    node.style.color = ok ? "#888888" : "#ff3333";
+}
+
+function runConsoleSelfCheck() {
+    if (!latestState) {
+        setConsoleTestResult("后台状态尚未同步，请稍等。", false);
+        return;
+    }
+
+    const checks = [
+        ws && ws.readyState === WebSocket.OPEN ? "控制台已连接" : "控制台未连接",
+        latestState.app_connected ? "App 已绑定" : "App 未绑定",
+        latestState.game_connected ? "手机游戏页已连接" : "手机游戏页未连接",
+        latestState.https_enabled ? "HTTPS 已启用" : "HTTPS 未启用",
+        `A 限幅 ${latestState.limit_a || "-"}`,
+        `B 限幅 ${latestState.limit_b || "-"}`
+    ];
+    const ok = Boolean(ws && ws.readyState === WebSocket.OPEN && latestState.app_connected);
+    setConsoleTestResult(`自检结果：${checks.join("；")}`, ok);
+}
+
+function sendConsoleTestShock() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        setConsoleTestResult("后台通信未连接，不能试电。", false);
+        return;
+    }
+
+    const outputMode = document.getElementById("console-test-output-mode")?.value || "a";
+    const strength = Math.round(Number(document.getElementById("console-test-strength")?.value || 5));
+    const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 0.3);
+    ws.send(JSON.stringify({
+        type: "test_shock",
+        outputMode,
+        bStrengthMode: "same",
+        bStrengthPercent: 100,
+        strength,
+        duration: Math.round(durationSeconds * 1000)
+    }));
+    setConsoleTestResult("已发送测试请求，等待后台确认。");
+}
+
+function stopConsoleOutput() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        setConsoleTestResult("后台通信未连接，不能发送停止请求。", false);
+        return;
+    }
+
+    ws.send(JSON.stringify({ type: "stop_shock" }));
+    setConsoleTestResult("已请求停止 A/B 输出。");
 }
 
 function updateGameLatency(rtt) {
@@ -359,6 +426,7 @@ function applyPorts() {
 // 页面加载就绪后执行
 window.addEventListener("DOMContentLoaded", () => {
     setConnectionHint("控制台脚本已启动，正在连接后台...");
+    updateConsoleTestLabels();
 
     /*
        二维码库只负责“画图”，不能决定后台是否连接。

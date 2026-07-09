@@ -72,6 +72,9 @@ HTTPS_ENABLED = False
 MIN_SHOCK_DURATION_MS = 100
 MAX_SHOCK_DURATION_MS = 60000
 MIN_PULSE_INTERVAL_SECONDS = 0.22
+TEST_MAX_STRENGTH = 30
+TEST_MAX_DURATION_MS = 1000
+TEST_COOLDOWN_SECONDS = 1.5
 
 # 服务运行实例句柄 (用于端口热重启)
 http_server_instance = None
@@ -109,6 +112,7 @@ shock_lock = asyncio.Lock()
 # 记录每个游戏 WebSocket 最近一次惩罚请求时间，用于抑制疯狂点击或恶意刷包。
 game_connection_last_pulse_at = {}
 shock_generation = 0
+last_test_shock_at = 0
 
 
 # --- 工具函数：网络与端口探测 ---
@@ -813,6 +817,48 @@ async def handle_game_shock(
         print(f"脉冲下发失败: {e}")
 
 
+async def send_test_feedback(websocket, ok, message):
+    """向发起测试的网页单独返回结果，避免把测试按钮状态广播给所有页面"""
+    try:
+        await websocket.send(json.dumps({
+            "type": "test_feedback",
+            "ok": ok,
+            "message": message
+        }))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
+async def handle_test_shock_request(websocket, data):
+    """处理连接测试的低强度试电请求；后端强制限幅，不能被前端参数绕过"""
+    global last_test_shock_at
+
+    now = asyncio.get_running_loop().time()
+    remaining = TEST_COOLDOWN_SECONDS - (now - last_test_shock_at)
+    if remaining > 0:
+        await send_test_feedback(websocket, False, f"测试冷却中，约 {remaining:.1f}s 后再试")
+        return
+
+    if not state["app_connected"] or not dg_app_client:
+        await send_test_feedback(websocket, False, "官方 App 未绑定，无法试电")
+        return
+
+    strength = clamp_int(data.get("strength", 5), 1, TEST_MAX_STRENGTH, fallback=5)
+    duration = clamp_int(data.get("duration", 300), MIN_SHOCK_DURATION_MS, TEST_MAX_DURATION_MS, fallback=300)
+    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+    last_test_shock_at = now
+
+    asyncio.create_task(handle_game_shock(
+        strength,
+        duration,
+        output_mode,
+        b_strength_mode,
+        b_strength_percent,
+        clear_after=True
+    ))
+    await send_test_feedback(websocket, True, f"已发送安全试电：{strength} 强度，{duration / 1000:.1f}s")
+
+
 async def web_ws_handler(websocket, path):
     """处理来自电脑控制台网页 (/console) 与手机小游戏网页 (/game) 的连接"""
     global state
@@ -838,6 +884,11 @@ async def web_ws_handler(websocket, path):
                         "type": "port_change_unsupported",
                         "message": "当前版本不支持运行中热切端口"
                     }))
+                elif data.get("type") == "test_shock":
+                    await handle_test_shock_request(websocket, data)
+                elif data.get("type") == "stop_shock":
+                    await stop_all_output()
+                    await send_test_feedback(websocket, True, "已请求停止 A/B 输出")
                     
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -881,6 +932,9 @@ async def web_ws_handler(websocket, path):
                     if console_connections:
                         await asyncio.gather(*(c.send(report_msg) for c in console_connections), return_exceptions=True)
                     await broadcast_state()
+
+                elif data.get("type") == "test_shock":
+                    await handle_test_shock_request(websocket, data)
                 
                 # 游戏 1 / 游戏 2 的持续线性惩罚数据上报 (每 100ms 触发一次)
                 elif data.get("type") == "game_pulse":

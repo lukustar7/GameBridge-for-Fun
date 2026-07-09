@@ -49,6 +49,41 @@
                     <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
             </div>
+
+            <div class="panel" style="margin-top: 30px;">
+                <h2>3. 连接测试</h2>
+                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用低强度短时长试电。测试强度和时长会被后端硬限制。</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                    <div>
+                        <label class="slider-label" style="margin-bottom: 5px;">测试通道</label>
+                        <select id="console-test-output-mode">
+                            <option value="a">只测 A</option>
+                            <option value="b">只测 B</option>
+                            <option value="ab">A+B 同时</option>
+                        </select>
+                    </div>
+                    <div class="slider-container" style="margin: 0;">
+                        <div class="slider-label">
+                            <span>测试强度</span>
+                            <span id="val-console-test-strength">5</span>
+                        </div>
+                        <input type="range" id="console-test-strength" min="1" max="30" value="5" oninput="updateConsoleTestLabels()">
+                    </div>
+                    <div class="slider-container" style="margin: 0;">
+                        <div class="slider-label">
+                            <span>测试时长</span>
+                            <span id="val-console-test-duration">0.3s</span>
+                        </div>
+                        <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="0.3" oninput="updateConsoleTestLabels()">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                    <button style="flex: 1;" onclick="runConsoleSelfCheck()">连接自检</button>
+                    <button style="flex: 1; border-color: #ffffff;" onclick="sendConsoleTestShock()">安全试电</button>
+                    <button style="flex: 1;" onclick="stopConsoleOutput()">停止输出</button>
+                </div>
+                <p id="console-test-result" class="sub-text">等待自检。</p>
+            </div>
         </div>
 
         <!-- 手机 HTTPS 证书安装引导 -->
@@ -235,6 +270,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260707-mobile-cert-auto-ip"></script>
+    <script src="console.js?v=20260709-test-output-rhythm"></script>
 </body>
 </html>
