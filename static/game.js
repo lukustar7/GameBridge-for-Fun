@@ -310,12 +310,18 @@ function connectWebSocket() {
         }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
         clearInterval(latencyTimer);
         latestGameLatency = null;
         setText("ping-badge", "网速延迟: 离线");
         setText("tech-game-status", "离线");
         updateLocalGameLatency();
+
+        if (event.code === 1008) {
+            suppressReconnect = true;
+            setMobileTestResult("游戏链接无效或已过期，请回到电脑控制台重新扫码。", false);
+            return;
+        }
 
         if (suppressReconnect) {
             return;
@@ -367,9 +373,35 @@ function formatBatteryLevel(level) {
 }
 
 function formatHardwareReading(value, appConnected) {
+    if (value === null || value === undefined || value === "") return "未读取";
     const number = Number(value);
     if (!appConnected || !Number.isFinite(number)) return "未读取";
-    return String(number);
+    return String(Math.round(number));
+}
+
+function getConfiguredOutputMode() {
+    const cfg = gameSettings[activeGame] || gameSettings[selectedGame] || DEFAULT_OUTPUT_SETTINGS;
+    return cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
+}
+
+function isConfiguredOutputReady() {
+    if (!latestTechState || !latestAppConnected) return false;
+
+    const mode = getConfiguredOutputMode();
+    const limitA = Number(latestTechState.limit_a);
+    const limitB = Number(latestTechState.limit_b);
+    const aReady = Number.isFinite(limitA) && limitA > 0;
+    const bReady = Number.isFinite(limitB) && limitB > 0;
+    if (mode === "a") return aReady;
+    if (mode === "b") return bReady;
+    return aReady && bReady;
+}
+
+function getOutputBlockReason() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return "后台未连接";
+    if (!latestAppConnected) return "App 未绑定";
+    if (!isConfiguredOutputReady()) return "所选通道限幅未读取或已设为 0";
+    return "";
 }
 
 function updateLocalGameLatency() {
@@ -417,8 +449,8 @@ function runMobileSelfCheck() {
         latestTechState.app_connected ? "App 已绑定" : "App 未绑定",
         `App 延迟 ${formatLatency(latestTechState.app_latency)}`,
         `浏览器延迟 ${formatLatency(latestGameLatency ?? latestTechState.game_latency)}`,
-        `A 限幅 ${latestTechState.limit_a || "-"}`,
-        `B 限幅 ${latestTechState.limit_b || "-"}`
+        `A 限幅 ${formatHardwareReading(latestTechState.limit_a, latestTechState.app_connected)}`,
+        `B 限幅 ${formatHardwareReading(latestTechState.limit_b, latestTechState.app_connected)}`
     ];
     setMobileTestResult(`自检结果：${parts.join("；")}`, browserConnected && latestTechState.app_connected);
 }
@@ -1163,6 +1195,7 @@ function canPunish(requiresOrientation = true) {
     if (requiresOrientation && !orientationReady) return false;
     // App 未绑定时直接拦截，避免按钮进入“正在电”的假状态。
     if (!latestAppConnected) return false;
+    if (!isConfiguredOutputReady()) return false;
     if (Date.now() - gameStartedAt < 1200) return false;
     return ws && ws.readyState === WebSocket.OPEN;
 }
@@ -1199,7 +1232,7 @@ function sendConfiguredShock(strength, duration) {
     const safeStrength = clamp(Math.round(strength), 0, 200);
     if (safeStrength <= 0) return false;
     // 发送前再次确认 App 绑定状态，防止状态刷新延迟导致空发。
-    if (!latestAppConnected) return false;
+    if (!latestAppConnected || !isConfiguredOutputReady()) return false;
 
     return sendGameMessage({
         type: "game_shock_trigger",
@@ -1777,9 +1810,10 @@ function startDicePunishQueue(rawCount, reason) {
         return;
     }
 
-    if (!latestAppConnected) {
+    const outputBlockReason = getOutputBlockReason();
+    if (outputBlockReason) {
         dicePunishRemaining = 0;
-        setText("dice-instruction", `${reason} | App 未绑定，未输出`);
+        setText("dice-instruction", `${reason} | ${outputBlockReason}，未输出`);
         $("dice-instruction").style.color = "#ff3333";
         $("btn-roll").disabled = !gameSettings.dice.manualRoll;
         return;
@@ -1809,7 +1843,7 @@ function runNextDicePunish(generation) {
         "dice-instruction",
         sent
             ? `正在电 | 剩余 ${currentIndex} 下，每下 ${cfg.singleSeconds.toFixed(1)}s，间隔 ${cfg.gapSeconds.toFixed(1)}s`
-            : `App 未绑定 | 剩余 ${currentIndex} 下`
+            : `${getOutputBlockReason() || "输出忙"} | 剩余 ${currentIndex} 下`
     );
     $("dice-instruction").style.color = "#ff3333";
 
@@ -2126,7 +2160,9 @@ function triggerSlotLightPunish() {
         vibratePattern([30], 80);
     }
 
-    return sent ? `没中奖轻电 ${cfg.strengthMin}，休息 ${cfg.restMs}ms` : "App 未绑定，未输出";
+    return sent
+        ? `没中奖轻电 ${cfg.strengthMin}，休息 ${cfg.restMs}ms`
+        : `${getOutputBlockReason() || "输出忙"}，未输出`;
 }
 
 function triggerSlotPunish(reason, forceMax) {
@@ -2136,13 +2172,14 @@ function triggerSlotPunish(reason, forceMax) {
     const strength = Math.round(cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio);
     const sent = sendConfiguredShock(strength, duration);
     const shouldClearPressure = cfg.pressureAfterPunish !== "keep";
+    const outputBlockReason = getOutputBlockReason() || "输出忙";
 
-    setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，App 未绑定`);
-    setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | App 未绑定，未输出`);
+    setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，${outputBlockReason}`);
+    setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | ${outputBlockReason}，未输出`);
     vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
     if (!sent) {
-        settleSlotPressureAfterPunish(shouldClearPressure, `${reason} | App 未绑定，${shouldClearPressure ? "压力清零" : "压力保留 100%"}`);
+        settleSlotPressureAfterPunish(shouldClearPressure, `${reason} | ${outputBlockReason}，${shouldClearPressure ? "压力清零" : "压力保留 100%"}`);
         finishSlotRound();
         return;
     }

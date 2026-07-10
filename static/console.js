@@ -131,7 +131,12 @@ function connectWebSocket() {
         }
     };
     
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+        if (event.code === 1008) {
+            setConnectionHint("控制台只允许在运行服务的这台电脑上打开，请使用终端显示的 127.0.0.1 地址。");
+            return;
+        }
+
         setConnectionHint("后台通信离线：请确认 start.command 终端窗口仍在运行，然后刷新本页。");
 
         if ((isSecurePage && hasPinnedSecureWsPort) || (!isSecurePage && hasPinnedWsPort)) {
@@ -251,10 +256,10 @@ function updateUI(data) {
 
     updateGameLatency(data.game_latency);
     document.getElementById("stat-game-connected").innerText = data.game_connected ? "已连接" : "未连接";
-    document.getElementById("stat-strength-a").innerText = data.strength_a;
-    document.getElementById("stat-strength-b").innerText = data.strength_b;
-    document.getElementById("stat-limit-a").innerText = data.limit_a;
-    document.getElementById("stat-limit-b").innerText = data.limit_b;
+    document.getElementById("stat-strength-a").innerText = formatHardwareReading(data.strength_a, data.app_connected);
+    document.getElementById("stat-strength-b").innerText = formatHardwareReading(data.strength_b, data.app_connected);
+    document.getElementById("stat-limit-a").innerText = formatHardwareReading(data.limit_a, data.app_connected);
+    document.getElementById("stat-limit-b").innerText = formatHardwareReading(data.limit_b, data.app_connected);
     document.getElementById("stat-battery-level").innerText = formatBatteryLevel(data.battery_level);
 
     // 6. 更新 Settings 面板输入框
@@ -288,8 +293,8 @@ function runConsoleSelfCheck() {
         latestState.app_connected ? "App 已绑定" : "App 未绑定",
         latestState.game_connected ? "手机游戏页已连接" : "手机游戏页未连接",
         latestState.https_enabled ? "HTTPS 已启用" : "HTTPS 未启用",
-        `A 限幅 ${latestState.limit_a || "-"}`,
-        `B 限幅 ${latestState.limit_b || "-"}`
+        `A 限幅 ${formatHardwareReading(latestState.limit_a, latestState.app_connected)}`,
+        `B 限幅 ${formatHardwareReading(latestState.limit_b, latestState.app_connected)}`
     ];
     const ok = Boolean(ws && ws.readyState === WebSocket.OPEN && latestState.app_connected);
     setConsoleTestResult(`自检结果：${checks.join("；")}`, ok);
@@ -342,6 +347,13 @@ function formatBatteryLevel(level) {
     const value = Number(level);
     if (!Number.isFinite(value)) return "未接入";
     return `${Math.round(value)}%`;
+}
+
+function formatHardwareReading(value, appConnected) {
+    // null 表示 App 尚未回传该字段；不能把它格式化成 0，否则用户会误判通道限幅已经生效。
+    if (!appConnected || value === null || value === undefined || value === "") return "未读取";
+    const number = Number(value);
+    return Number.isFinite(number) ? String(Math.round(number)) : "未读取";
 }
 
 function formatFingerprint(value) {

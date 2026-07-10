@@ -35,6 +35,8 @@ def read_positive_int_env(name, default_value):
 
 
 # --- 全局状态与配置 ---
+PROJECT_ROOT = Path(__file__).resolve().parent
+STATIC_ROOT = PROJECT_ROOT / "static"
 LOCAL_IP = "127.0.0.1"
 
 # 默认端口定义 (五位数起步)
@@ -51,7 +53,7 @@ CERT_IP_OVERRIDE = os.environ.get("DG_LAB_CERT_IP", "").strip()
 CERTIFIED_LAN_IP = CERT_IP_OVERRIDE
 ROOT_CA_VALID_DAYS = read_positive_int_env("DG_LAB_ROOT_CA_DAYS", 90)
 SERVER_CERT_VALID_DAYS = read_positive_int_env("DG_LAB_SERVER_CERT_DAYS", 7)
-CERT_DIR = Path("certs")
+CERT_DIR = PROJECT_ROOT / "certs"
 CERT_PRIVATE_DIR = CERT_DIR / "private"
 ROOT_CA_PEM = CERT_DIR / "dg-lab-root-ca.pem"
 ROOT_CA_CER = CERT_DIR / "dg-lab-root-ca.cer"
@@ -63,6 +65,8 @@ SERVER_CERT_CSR = CERT_PRIVATE_DIR / "dg-lab-server.csr"
 SERVER_CERT_CONFIG = CERT_PRIVATE_DIR / "dg-lab-server-openssl.cnf"
 CERT_IP_MARKER = CERT_DIR / "dg-lab-cert-ip.txt"
 CERT_POLICY_MARKER = CERT_DIR / "dg-lab-cert-policy.json"
+ROOT_CA_CER_URL_PATH = "/certs/dg-lab-root-ca.cer"
+ROOT_CA_MOBILECONFIG_URL_PATH = "/certs/dg-lab-root-ca.mobileconfig"
 CERT_SHA256 = ""
 CERT_ROOT_NOT_AFTER = ""
 CERT_SERVER_NOT_AFTER = ""
@@ -72,6 +76,8 @@ HTTPS_ENABLED = False
 MIN_SHOCK_DURATION_MS = 100
 MAX_SHOCK_DURATION_MS = 60000
 MIN_PULSE_INTERVAL_SECONDS = 0.22
+MAX_WEB_MESSAGE_BYTES = 4096
+MAX_WEB_MESSAGE_QUEUE = 8
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
@@ -95,8 +101,9 @@ state = {
     "app_qrcode_url": "",        # 手机 App 绑定扫码 URL
     "client_strength_a": 0,      # A 通道当前实际强度
     "client_strength_b": 0,      # B 通道当前实际强度
-    "limit_a": 0,                # A 通道硬件上限限制
-    "limit_b": 0,                # B 通道硬件上限限制
+    # None 表示 App 还没有回传限幅。未知限幅不能按 200 处理，否则刚绑定时可能越过用户在 App 内设定的安全上限。
+    "limit_a": None,             # A 通道硬件上限限制
+    "limit_b": None,             # B 通道硬件上限限制
     "battery_level": None,       # V3 文档有电量特征位；当前 pydglab-ws 桥接层未暴露读取接口
     "game_client_connected": False # 手机小游戏网页是否已连入
 }
@@ -113,6 +120,7 @@ shock_lock = asyncio.Lock()
 game_connection_last_pulse_at = {}
 shock_generation = 0
 last_test_shock_at = 0
+active_output_task = None
 
 
 # --- 工具函数：网络与端口探测 ---
@@ -442,38 +450,131 @@ def ensure_local_https_assets():
 
 # --- 1. HTTP 静态文件托管服务 ---
 
+def is_loopback_host(host):
+    """判断主机名是否明确指向本机，供电脑控制台 WebSocket 鉴权使用"""
+    if not host:
+        return False
+    if str(host).lower() == "localhost":
+        return True
+
+    try:
+        return ipaddress.ip_address(str(host).split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def is_valid_game_token(token):
+    """使用恒定时间字节比较校验 token；非 ASCII 输入也只返回失败，不触发类型异常"""
+    if not isinstance(token, str):
+        return False
+    return secrets.compare_digest(token.encode("utf-8"), GAME_ACCESS_TOKEN.encode("ascii"))
+
+
+def is_console_request_authorized(websocket):
+    """只允许本机控制台页面连接，防止同网段设备读取游戏 token 或直接发送试电命令"""
+    remote_address = getattr(websocket, "remote_address", None)
+    remote_host = remote_address[0] if remote_address else ""
+    if not is_loopback_host(remote_host):
+        return False
+
+    request_headers = getattr(websocket, "request_headers", None)
+    if not request_headers:
+        return False
+    try:
+        # 浏览器只应发送一个 Origin；重复头可能让不同代理层产生不同理解，直接拒绝最稳妥。
+        if hasattr(request_headers, "get_all"):
+            origins = request_headers.get_all("Origin")
+            if len(origins) != 1:
+                return False
+            origin = origins[0]
+        else:
+            origin = request_headers.get("Origin", "")
+    except Exception:
+        return False
+    try:
+        parsed_origin = urlparse(origin)
+        origin_port = parsed_origin.port
+    except (TypeError, ValueError):
+        return False
+
+    if not is_loopback_host(parsed_origin.hostname):
+        return False
+
+    # 控制台默认由本机 HTTP 页面打开；同时兼容用户主动用本机 HTTPS 地址访问控制台。
+    allowed_http = parsed_origin.scheme == "http" and origin_port == HTTP_PORT
+    allowed_https = HTTPS_ENABLED and parsed_origin.scheme == "https" and origin_port == HTTPS_PORT
+    return allowed_http or allowed_https
+
+
 class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
-    """静默静态文件处理器；允许下载公开证书，禁止访问任何私钥"""
+    """只公开网页资源与两份可安装证书，项目源码、Git 元数据和私钥全部不可访问"""
 
     CERT_MIME_TYPES = {
         ".cer": "application/pkix-cert",
         ".mobileconfig": "application/x-apple-aspen-config",
         ".pem": "application/x-pem-file"
     }
+    PUBLIC_CERTIFICATE_FILES = {
+        ROOT_CA_CER.resolve(),
+        ROOT_CA_MOBILECONFIG.resolve()
+    }
 
-    def is_forbidden_path(self):
-        request_path = unquote(urlparse(self.path).path).lstrip("/")
-        normalized = Path(request_path)
-        parts = normalized.parts
-        if len(parts) >= 2 and parts[0] == "certs" and parts[1] == "private":
-            return True
-        if normalized.name.endswith("-key.pem"):
-            return True
-        if normalized.name.endswith(".csr") or normalized.name.endswith(".srl"):
-            return True
-        return False
+    def __init__(self, *args, **kwargs):
+        # 固定服务根目录，避免从其他目录执行 python3 server.py 时公开到错误位置。
+        super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
 
-    def do_GET(self):
-        if self.is_forbidden_path():
-            self.send_error(403, "private certificate material is not downloadable")
-            return
-        super().do_GET()
+    def resolve_public_path(self, request_target=None):
+        """把 URL 映射到允许公开的真实文件；路径穿越和符号链接越界都会被拒绝"""
+        raw_path = unquote(urlparse(request_target or self.path).path)
+        if raw_path in {"", "/"}:
+            raw_path = "/static/index.html"
+        if "\x00" in raw_path:
+            return None
 
-    def do_HEAD(self):
-        if self.is_forbidden_path():
-            self.send_error(403, "private certificate material is not downloadable")
-            return
-        super().do_HEAD()
+        try:
+            candidate = (PROJECT_ROOT / raw_path.lstrip("/")).resolve()
+            candidate.relative_to(STATIC_ROOT.resolve())
+            return candidate
+        except (OSError, RuntimeError, ValueError):
+            pass
+
+        try:
+            candidate = (PROJECT_ROOT / raw_path.lstrip("/")).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return candidate if candidate in self.PUBLIC_CERTIFICATE_FILES else None
+
+    def translate_path(self, path):
+        """让标准库继续负责文件传输，但文件位置只能来自上面的公开清单"""
+        target = self.resolve_public_path(path)
+        return str(target) if target else str(PROJECT_ROOT / ".http-not-found")
+
+    def send_head(self):
+        parsed_request = urlparse(self.path)
+        if parsed_request.path in {"", "/"}:
+            # 必须跳转而不是直接返回 HTML，否则相对引用的 style.css/console.js 会错误地请求到项目根目录。
+            query_suffix = f"?{parsed_request.query}" if parsed_request.query else ""
+            self.send_response(302)
+            self.send_header("Location", f"/static/index.html{query_suffix}")
+            self.end_headers()
+            return None
+
+        if self.resolve_public_path() is None:
+            self.send_error(404, "resource is not public")
+            return None
+        return super().send_head()
+
+    def list_directory(self, path):
+        # 即使访问 static/ 之类的目录，也不向局域网暴露文件清单。
+        self.send_error(404, "directory listing is disabled")
+        return None
+
+    def end_headers(self):
+        # token 存在于游戏页 URL；禁止浏览器把完整来源地址转发给后续资源或外部页面。
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def guess_type(self, path):
         ext = Path(path).suffix.lower()
@@ -549,8 +650,8 @@ async def broadcast_state():
             "cert_server_not_after": CERT_SERVER_NOT_AFTER,
             "cert_root_valid_days": ROOT_CA_VALID_DAYS,
             "cert_server_valid_days": SERVER_CERT_VALID_DAYS,
-            "cert_profile_path": f"/{ROOT_CA_MOBILECONFIG.as_posix()}",
-            "cert_cer_path": f"/{ROOT_CA_CER.as_posix()}",
+            "cert_profile_path": ROOT_CA_MOBILECONFIG_URL_PATH,
+            "cert_cer_path": ROOT_CA_CER_URL_PATH,
             "app_ws_port": APP_WS_PORT,
             "game_token": GAME_ACCESS_TOKEN,
             "app_connected": state["app_connected"],
@@ -590,6 +691,33 @@ async def monitor_app_latency(client):
         await asyncio.sleep(2)
 
 
+def update_hardware_state_from_data(data):
+    """兼容 pydglab-ws 当前与可能的旧字段名，并把硬件回读压入协议允许范围"""
+    if hasattr(data, "a") and hasattr(data, "b"):
+        state["client_strength_a"] = clamp_int(getattr(data, "a"), 0, 200, fallback=0)
+        state["client_strength_b"] = clamp_int(getattr(data, "b"), 0, 200, fallback=0)
+
+    # pydglab-ws 1.1.0 的真实字段是 a_limit / b_limit。旧代码误读成 limit_a / limit_b，
+    # 导致页面一直显示 0，后端又错误地把 0 当成 200 使用，实际绕开了 App 内的限幅设置。
+    limit_a = getattr(data, "a_limit", None)
+    limit_b = getattr(data, "b_limit", None)
+    if limit_a is None:
+        limit_a = getattr(data, "limit_a", None)
+    if limit_b is None:
+        limit_b = getattr(data, "limit_b", None)
+    if limit_a is not None:
+        state["limit_a"] = clamp_int(limit_a, 0, 200, fallback=0)
+    if limit_b is not None:
+        state["limit_b"] = clamp_int(limit_b, 0, 200, fallback=0)
+
+    # 当前 1.1.0 尚未公开电量字段；保留兼容读取，未来升级依赖后无需修改页面协议。
+    battery_value = getattr(data, "battery_level", None)
+    if battery_value is None:
+        battery_value = getattr(data, "battery", None)
+    if battery_value is not None:
+        state["battery_level"] = clamp_int(battery_value, 0, 100, fallback=0)
+
+
 async def read_app_data_stream(client):
     """持续读取 App 回传的硬件状态更新数据流"""
     global state
@@ -601,6 +729,8 @@ async def read_app_data_stream(client):
                 state["app_latency"] = -1
                 state["client_strength_a"] = 0
                 state["client_strength_b"] = 0
+                state["limit_a"] = None
+                state["limit_b"] = None
                 state["battery_level"] = None
                 await broadcast_state()
                 return
@@ -610,23 +740,8 @@ async def read_app_data_stream(client):
                 state["app_connected"] = True
                 print("手机 App 绑定已建立")
             
-            # 解析强度与硬件硬上限设置
-            # 因为 data_generator 回传的可能是 StrengthData 或 FeedbackButton
-            if hasattr(data, 'a') and hasattr(data, 'b'):
-                state["client_strength_a"] = data.a
-                state["client_strength_b"] = data.b
-            if hasattr(data, 'limit_a') and hasattr(data, 'limit_b'):
-                state["limit_a"] = data.limit_a
-                state["limit_b"] = data.limit_b
-            # 当前 pydglab-ws 1.1.0 没有公开电量数据类型；这里兼容后续版本可能新增的字段。
-            battery_value = getattr(data, 'battery_level', None)
-            if battery_value is None:
-                battery_value = getattr(data, 'battery', None)
-            if battery_value is not None:
-                try:
-                    state["battery_level"] = max(0, min(100, int(battery_value)))
-                except (TypeError, ValueError):
-                    pass
+            # data_generator 可能回传强度数据、物理按键或心跳；只有存在对应字段时才更新硬件读数。
+            update_hardware_state_from_data(data)
                 
             # 若是收到设备端按钮被按下的通知，向控制台和游戏广播
             if hasattr(data, 'name'):
@@ -641,6 +756,10 @@ async def read_app_data_stream(client):
         print(f"与 App 的连接断开: {e}")
         state["app_connected"] = False
         state["app_latency"] = -1
+        state["client_strength_a"] = 0
+        state["client_strength_b"] = 0
+        state["limit_a"] = None
+        state["limit_b"] = None
         state["battery_level"] = None
         await broadcast_state()
 
@@ -683,6 +802,8 @@ async def app_bridge_runner():
             state["app_latency"] = -1
             state["client_strength_a"] = 0
             state["client_strength_b"] = 0
+            state["limit_a"] = None
+            state["limit_b"] = None
             state["battery_level"] = None
             dg_app_client = None
             await broadcast_state()
@@ -696,7 +817,7 @@ def clamp_int(value, minimum, maximum, fallback=0):
     """把外部输入压成安全整数，防止字符串、空值、超大值直接进入硬件控制逻辑"""
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         number = fallback
     return max(minimum, min(maximum, number))
 
@@ -734,8 +855,14 @@ def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_stren
     if base <= 0:
         return []
 
-    limit_a = state["limit_a"] if state["limit_a"] > 0 else 200
-    limit_b = state["limit_b"] if state["limit_b"] > 0 else 200
+    # 限幅未回传或明确为 0 时，该通道保持关闭。这里采用“未知即拒绝”，不能擅自回退到协议最大值 200。
+    limit_a = clamp_int(state.get("limit_a"), 0, 200, fallback=0)
+    limit_b = clamp_int(state.get("limit_b"), 0, 200, fallback=0)
+    if output_mode in {"a", "ab"} and limit_a <= 0:
+        return []
+    if output_mode in {"b", "ab"} and limit_b <= 0:
+        return []
+
     targets = []
 
     if output_mode in {"a", "ab"}:
@@ -748,21 +875,75 @@ def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_stren
     return [(channel, strength, state_key) for channel, strength, state_key in targets if strength > 0]
 
 
-async def stop_all_output():
-    """尽量清空 A/B 两路输出，用于返回列表、断线或用户点击停止输出"""
-    global dg_app_client, shock_generation
-    shock_generation += 1
+async def clear_all_output_locked():
+    """在持有 shock_lock 时逐路清空；单路失败也必须继续尝试停止另一通道"""
+    state["client_strength_a"] = 0
+    state["client_strength_b"] = 0
     if not dg_app_client or not state["app_connected"]:
         return
 
-    try:
-        for channel in (Channel.A, Channel.B):
+    errors = []
+    for channel in (Channel.A, Channel.B):
+        try:
             await dg_app_client.clear_pulses(channel)
             await dg_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0)
-        state["client_strength_a"] = 0
-        state["client_strength_b"] = 0
-    except Exception as e:
-        print(f"停止输出失败: {e}")
+        except Exception as error:
+            errors.append(f"{channel}: {error}")
+    if errors:
+        print(f"停止输出未全部成功: {'; '.join(errors)}")
+
+
+def on_output_task_done(task):
+    """释放当前任务引用；任务内部已记录异常，这里只处理正常取消"""
+    global active_output_task
+    if active_output_task is task:
+        active_output_task = None
+
+
+def schedule_game_shock(
+    strength,
+    duration_ms,
+    output_mode="a",
+    b_strength_mode="percent",
+    b_strength_percent=50,
+    clear_after=True
+):
+    """最多保留一个硬件输出任务，防止异常页面把 60 秒任务无限堆进内存"""
+    global active_output_task
+    if not state["app_connected"] or not dg_app_client:
+        return False
+    if not build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent):
+        return False
+    if active_output_task and not active_output_task.done():
+        return False
+
+    active_output_task = asyncio.create_task(handle_game_shock(
+        strength,
+        duration_ms,
+        output_mode,
+        b_strength_mode,
+        b_strength_percent,
+        clear_after
+    ))
+    active_output_task.add_done_callback(on_output_task_done)
+    return True
+
+
+async def stop_all_output():
+    """立即取消当前任务并串行清空 A/B 两路，避免停止命令与脉冲下发交叉执行"""
+    global shock_generation, active_output_task
+    shock_generation += 1
+
+    running_task = active_output_task
+    current_task = asyncio.current_task()
+    if running_task and running_task is not current_task and not running_task.done():
+        running_task.cancel()
+        await asyncio.gather(running_task, return_exceptions=True)
+        if active_output_task is running_task:
+            active_output_task = None
+
+    async with shock_lock:
+        await clear_all_output_locked()
 
 
 async def handle_game_shock(
@@ -773,7 +954,7 @@ async def handle_game_shock(
     b_strength_percent=50,
     clear_after=True
 ):
-    """向 App 客户端下发电击脉冲任务的公共逻辑"""
+    """向 App 客户端下发一段受限脉冲；所有硬件写入都在同一把锁内串行执行"""
     global dg_app_client, state, shock_generation
     if not state["app_connected"] or not dg_app_client:
         return
@@ -810,11 +991,17 @@ async def handle_game_shock(
                     await dg_app_client.add_pulses(channel, pulse_unit)
                 await asyncio.sleep(0.1)
 
-            # 结算型惩罚结束后主动清空，避免设备端队列里残留后续波形；持续型脉冲由下一帧覆盖。
+            # 结算型惩罚结束后在同一把锁内清空，避免结束动作和下一条硬件写入交叉。
             if clear_after:
-                await stop_all_output()
+                await clear_all_output_locked()
+    except asyncio.CancelledError:
+        # 紧急停止会取消当前任务，再取得同一把锁清空硬件；取消必须继续向上传递，不能伪装成正常结束。
+        raise
     except Exception as e:
         print(f"脉冲下发失败: {e}")
+        # 任一步硬件写入失败都进入停止流程，不能让已成功设置的另一通道留在非零强度。
+        async with shock_lock:
+            await clear_all_output_locked()
 
 
 async def send_test_feedback(websocket, ok, message):
@@ -846,16 +1033,19 @@ async def handle_test_shock_request(websocket, data):
     strength = clamp_int(data.get("strength", 5), 1, TEST_MAX_STRENGTH, fallback=5)
     duration = clamp_int(data.get("duration", 300), MIN_SHOCK_DURATION_MS, TEST_MAX_DURATION_MS, fallback=300)
     output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
-    last_test_shock_at = now
-
-    asyncio.create_task(handle_game_shock(
+    scheduled = schedule_game_shock(
         strength,
         duration,
         output_mode,
         b_strength_mode,
         b_strength_percent,
         clear_after=True
-    ))
+    )
+    if not scheduled:
+        await send_test_feedback(websocket, False, "输出忙，或所选通道限幅尚未读取/已设为 0")
+        return
+
+    last_test_shock_at = now
     await send_test_feedback(websocket, True, f"已发送安全试电：{strength} 强度，{duration / 1000:.1f}s")
 
 
@@ -867,6 +1057,13 @@ async def web_ws_handler(websocket, path):
     route = parsed_path.path
 
     if route == "/console":
+        if not is_console_request_authorized(websocket):
+            try:
+                await websocket.close(code=1008, reason="console is local only")
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            return
+
         console_connections.add(websocket)
         # 连入后立即同步一次最新状态
         await broadcast_state()
@@ -875,6 +1072,8 @@ async def web_ws_handler(websocket, path):
                 try:
                     data = json.loads(message)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
                     continue
                 
                 # 如果收到端口更改命令，提示重载 (由于是在后台修改，我们输出指令)
@@ -898,7 +1097,7 @@ async def web_ws_handler(websocket, path):
     elif route == "/game":
         query = parse_qs(parsed_path.query)
         token = query.get("token", [""])[0]
-        if token != GAME_ACCESS_TOKEN:
+        if not is_valid_game_token(token):
             try:
                 # 无 token 页面会被立即拒绝；如果浏览器已经主动断开，不再把正常拒绝打印成异常栈。
                 await websocket.close(code=1008, reason="invalid game token")
@@ -915,6 +1114,8 @@ async def web_ws_handler(websocket, path):
                 try:
                     data = json.loads(message)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
                     continue
                 
                 # 网页自定义应用层 Ping 延迟包，原样回复
@@ -948,14 +1149,14 @@ async def web_ws_handler(websocket, path):
                     duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
-                        asyncio.create_task(handle_game_shock(
+                        schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
                             b_strength_mode,
                             b_strength_percent,
                             clear_after=False
-                        ))
+                        )
                         
                 # 结算型惩罚上报：骰子、角子机满槽和角子机轻惩罚都走这里。
                 elif data.get("type") == "game_shock_trigger":
@@ -968,15 +1169,15 @@ async def web_ws_handler(websocket, path):
                     )
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
-                        # 开启一个后台异步任务执行指定时长的电击
-                        asyncio.create_task(handle_game_shock(
+                        # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
+                        schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
                             b_strength_mode,
                             b_strength_percent,
                             clear_after=True
-                        ))
+                        )
 
                 elif data.get("type") == "stop_shock":
                     await stop_all_output()
@@ -1000,7 +1201,14 @@ async def run_web_ws_server():
     global web_ws_server_instance, WEB_WS_PORT
     WEB_WS_PORT = find_free_port(WEB_WS_PORT)
     
-    server = await websockets.serve(web_ws_handler, "0.0.0.0", WEB_WS_PORT)
+    server = await websockets.serve(
+        web_ws_handler,
+        "0.0.0.0",
+        WEB_WS_PORT,
+        compression=None,
+        max_size=MAX_WEB_MESSAGE_BYTES,
+        max_queue=MAX_WEB_MESSAGE_QUEUE
+    )
     web_ws_server_instance = server
     print(f"网页 WS 交互服务已启动: 端口 {WEB_WS_PORT}")
 
@@ -1019,7 +1227,10 @@ async def run_secure_web_ws_server():
         web_ws_handler,
         "0.0.0.0",
         SECURE_WEB_WS_PORT,
-        ssl=ssl_context
+        ssl=ssl_context,
+        compression=None,
+        max_size=MAX_WEB_MESSAGE_BYTES,
+        max_queue=MAX_WEB_MESSAGE_QUEUE
     )
     print(f"网页 WSS 安全通信服务已启动: 端口 {SECURE_WEB_WS_PORT}")
 

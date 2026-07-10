@@ -11,6 +11,7 @@
 - `./start.command` performs the macOS dependency check and starts the service.
 - `python3 -m py_compile server.py` checks Python syntax without starting hardware connections.
 - `node --check static/console.js` and `node --check static/game.js` check JavaScript syntax when Node.js is available.
+- `python3 -m unittest discover -s tests -v` runs the HTTP, WebSocket, limit, and output-scheduler regression suite.
 
 There is no separate compilation step. The service normally opens the console; otherwise visit `http://localhost:18080`.
 
@@ -20,7 +21,7 @@ Use four spaces in Python and JavaScript. Use Python `snake_case`, `UPPER_SNAKE_
 
 ## Testing Guidelines
 
-There is no automated suite or coverage threshold. Every change must pass Python and JavaScript syntax checks, followed by a service smoke test. For UI changes, check mobile and desktop widths, reconnection, empty states, and rapid input. For output changes, verify disconnected-App behavior, A/B selection, duration and strength limits, cooldowns, and emergency stop before using hardware.
+There is no coverage threshold. Every change must pass the automated suite and Python/JavaScript syntax checks, followed by a service smoke test. For UI changes, check mobile and desktop widths, reconnection, empty states, and rapid input. For output changes, verify disconnected-App behavior, A/B selection, duration and strength limits, cooldowns, and emergency stop before using hardware.
 
 ## Commit & Pull Request Guidelines
 
