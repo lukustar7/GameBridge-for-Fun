@@ -11,6 +11,7 @@
 - 手抖挑战、保持角度、摇骰子对决和极速角子机均支持按玩法配置输出节奏，避免连续输出叠得过密。
 - 后端通过已锁定版本的第三方桥接库接入设备 App，统一执行 A/B 通道强度限幅、时长限制、请求限流和停止输出。
 - 后端只允许本机控制台读取运行 token；静态服务仅公开 `static/` 与两份根证书下载文件，不公开源码、Git 元数据或证书私钥。
+- Android APK 使用原生动作传感器打开同一套网页游戏逻辑，通过私有局域网 HTTP/WS 连接电脑，不需要安装网页根证书。
 
 ## 启动方式
 
@@ -48,6 +49,18 @@ node --check static/console.js
 node --check static/game.js
 ```
 
+## Android APK
+
+APK 要求 Android 15 或更高版本，包名为 `app.gamebridgeforfun.mobile`。电脑控制台会生成 `gamebridgeforfun://connect` 配对二维码，APK 只接受私有 IPv4、固定游戏路径、合法端口和一次性 token。
+
+使用 Android Studio 打开 `android/`，或在 macOS 执行：
+
+```bash
+./android/build-debug.command
+```
+
+Debug APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。使用时需要电脑桥接服务、设备 App 和 GameBridge for Fun APK 同时在线；APK 必须保持前台，切后台或锁屏会立即断开并请求停止输出。
+
 ## 手机 HTTPS 证书
 
 手抖挑战和保持角度依赖手机动作与方向感应权限，手机端建议使用 HTTPS 游戏入口。
@@ -66,6 +79,7 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 - `static/index.html`：电脑端控制台。
 - `static/game.html`：手机端小游戏和独立设置页。
 - `static/game.js`：游戏逻辑、传感器处理、参数持久化与惩罚上报。
+- `android/`：Android APK、原生传感器桥接、安全 WebView 和地址校验测试。
 - `tests/test_server.py`：HTTP/WS 访问边界、硬件限幅与输出调度回归测试。
 - `USER_GUIDE.md`：面向使用者的完整操作手册。
 - `coyote/`：兼容设备的脉冲协议参考文档。

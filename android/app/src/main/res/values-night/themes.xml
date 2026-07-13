@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.GameBridgeForFun" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#D0BCFF</item>
+        <item name="colorOnPrimary">#381E72</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#1C1B1F</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

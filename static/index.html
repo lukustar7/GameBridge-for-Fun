@@ -48,10 +48,21 @@
                     </div>
                     <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
+
+                <!-- Android APK 使用普通 HTTP/WS，传感器由原生层提供，不需要安装网页根证书。 -->
+                <div class="panel">
+                    <h2>3. Android APK</h2>
+                    <p class="sub-text" style="margin-bottom: 10px;">先安装 GameBridge for Fun APK，再用手机系统相机扫描。APK 必须和电脑处于同一局域网。</p>
+                    <p id="apk-url-text" style="font-family: monospace; font-size: 0.8rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待本地服务获取 IP...</p>
+                    <div class="qr-box">
+                        <div id="apk-qrcode"></div>
+                    </div>
+                    <p class="sub-text">该入口不使用 HTTPS 证书；每次重启电脑服务后需要重新扫码。</p>
+                </div>
             </div>
 
             <div class="panel" style="margin-top: 30px;">
-                <h2>3. 连接测试</h2>
+                <h2>4. 连接测试</h2>
                 <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用低强度短时长试电。测试强度和时长会被后端硬限制。</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
                     <div>

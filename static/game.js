@@ -139,6 +139,7 @@ let sensorsBound = false;
 let orientationReady = false;
 let motionReady = false;
 let lastSensorPermissionMessage = "";
+let nativeSensorHostEnabled = false;
 let phoneBeta = 0;   // 前后倾斜，单位为度。
 let phoneGamma = 0;  // 左右倾斜，单位为度。
 let shakeAcc = 0;    // 三轴加速度合成值，摇骰子时用于判断晃动强度。
@@ -568,6 +569,12 @@ async function requestSensorPermission() {
     if (sensorsAllowed) return true;
     lastSensorPermissionMessage = "";
 
+    // Android APK 由原生 SensorManager 单向注入数据，不再受网页安全上下文限制。
+    if (nativeSensorHostEnabled) {
+        sensorsAllowed = true;
+        return true;
+    }
+
     const needsSecureHint = isIOSLikeDevice() && !window.isSecureContext;
     const permissionRequests = [];
 
@@ -685,6 +692,12 @@ function getSensorNotReadyMessage(gameName) {
         return lastSensorPermissionMessage;
     }
 
+    if (nativeSensorHostEnabled) {
+        return gameName === "dice"
+            ? "还没有收到 Android 摇晃数据；请保持 APK 在前台，或先用手动摇号"
+            : "还没有收到 Android 倾斜数据；请保持 APK 在前台并确认手机具备动作传感器";
+    }
+
     if (gameName === "dice") {
         return "还没有收到摇晃感应数据；可以先用手动摇号，或检查浏览器动作感应权限";
     }
@@ -715,6 +728,39 @@ function handleMotion(event) {
         triggerDiceShake(shakeAcc);
     }
 }
+
+// Android 原生壳只调用这组纯数据入口，不向网页开放任何系统对象或高权限方法。
+window.GameBridgeForFunNative = {
+    enable() {
+        nativeSensorHostEnabled = true;
+        sensorsAllowed = true;
+    },
+    receiveSensorFrame(beta, gamma, x, y, z, hasOrientation, hasMotion) {
+        if (!nativeSensorHostEnabled) return;
+        if (hasOrientation) {
+            handleOrientation({ beta: Number(beta), gamma: Number(gamma) });
+        }
+        if (hasMotion) {
+            handleMotion({
+                acceleration: {
+                    x: Number(x),
+                    y: Number(y),
+                    z: Number(z)
+                }
+            });
+        }
+    },
+    pause(reason = "android_pause") {
+        emergencyStop(reason);
+        closeGameSocketForEmergency();
+    },
+    resume() {
+        suppressReconnect = false;
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+            connectWebSocket();
+        }
+    }
+};
 
 function initAudio() {
     if (!audioCtx) {

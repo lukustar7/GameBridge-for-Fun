@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      桥接服务的 IP 会随局域网变化，无法在清单里预写固定域名。
+      因此网络层允许明文，但 MainActivity 会再次强制校验私有 IPv4、端口和固定页面路径。
+    -->
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>

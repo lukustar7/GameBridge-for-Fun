@@ -15,6 +15,7 @@ let triedPortsCount = 0;
 
 let appQR = null;
 let gameQR = null;
+let apkQR = null;
 let certQR = null;
 let certCerQR = null;
 let secureGameQR = null;
@@ -52,6 +53,7 @@ function initQRCodes() {
 
     const appBox = document.getElementById("app-qrcode");
     const gameBox = document.getElementById("game-qrcode");
+    const apkBox = document.getElementById("apk-qrcode");
     const certBox = document.getElementById("cert-qrcode");
     const certCerBox = document.getElementById("cert-cer-qrcode");
     const secureGameBox = document.getElementById("secure-game-qrcode");
@@ -66,6 +68,15 @@ function initQRCodes() {
     });
 
     gameQR = new QRCode(gameBox, {
+        width: 180,
+        height: 180,
+        typeNumber: 12,
+        colorDark: "#ffffff",
+        colorLight: "#000000",
+        correctLevel: QRCode.CorrectLevel.M
+    });
+
+    apkQR = new QRCode(apkBox, {
         width: 180,
         height: 180,
         typeNumber: 12,
@@ -199,6 +210,14 @@ function updateUI(data) {
     const gameRendered = renderQRCode(gameQR, gameUrl, "游戏操纵端");
     if (!gameRendered) {
         setText("game-url-text", `二维码生成失败，可手动输入：${gameUrl}`);
+    }
+
+    // APK 读取同一个普通游戏地址，但由 Android 原生层提供传感器，因此无需 HTTPS 证书。
+    const apkConnectUrl = `gamebridgeforfun://connect?url=${encodeURIComponent(gameUrl)}`;
+    setText("apk-url-text", apkConnectUrl);
+    const apkRendered = renderQRCode(apkQR, apkConnectUrl, "Android APK 配对");
+    if (!apkRendered) {
+        setText("apk-url-text", `二维码生成失败，可复制到 APK：${gameUrl}`);
     }
 
     // 4. 手机证书安装与 HTTPS 游戏入口。根证书用 HTTP 下载，游戏用 HTTPS/WSS 运行。

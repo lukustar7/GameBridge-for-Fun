@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GameBridge for Fun</string>
+    <string name="connect_title">连接电脑桥接服务</string>
+    <string name="connect_description">先在电脑运行 start.command，再扫描控制台中的“Android APK”二维码。二维码无法唤起时，可粘贴普通 HTTP 游戏地址。</string>
+    <string name="game_url_hint">http://192.168.x.x:18080/static/game.html?ws=…</string>
+    <string name="connect_action">连接</string>
+    <string name="clear_action">清除地址</string>
+    <string name="safety_notice">安全规则：APK 切到后台、锁屏或关闭时会立即断开游戏连接并请求停止输出。</string>
+    <string name="back_to_connect">返回连接页</string>
+</resources>

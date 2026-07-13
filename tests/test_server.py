@@ -148,6 +148,7 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
             body = response.read().decode("utf-8")
 
         self.assertIn("GameBridge for Fun 控制台", body)
+        self.assertIn("apk-qrcode", body)
         self.assertTrue(response.geturl().endswith("/static/index.html"))
         self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
