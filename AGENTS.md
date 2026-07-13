@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`server.py` is the Python entry point for static delivery, HTTP/HTTPS and WebSocket endpoints, certificates, and DG-LAB bridging. Browser code lives in `static/`: `index.html` and `console.js` implement the desktop console; `game.html` and `game.js` implement the mobile games. Shared styles are in `style.css`. Treat `qrcode.min.js` as vendored code. `coyote/` contains protocol references, not runtime code. User instructions belong in `README.md` and `USER_GUIDE.md`.
+`server.py` is the Python entry point for static delivery, HTTP/HTTPS and WebSocket endpoints, certificates, and device-App bridging. Browser code lives in `static/`: `index.html` and `console.js` implement the desktop console; `game.html` and `game.js` implement the mobile games. Shared styles are in `style.css`. Treat `qrcode.min.js` as vendored code. `coyote/` contains protocol references, not runtime code. User instructions belong in `README.md` and `USER_GUIDE.md`.
 
 ## Build, Test, and Development Commands
 
@@ -29,4 +29,4 @@ History follows Conventional Commits: `feat:`, `fix:`, `docs:`, and `refactor:`.
 
 ## Security & Configuration Tips
 
-Never commit `certs/`, keys, tokens, or generated QR data. Server-side strength, duration, rate, and token checks remain authoritative. Document new `DG_LAB_*` variables in `README.md`.
+Never commit `certs/`, keys, tokens, or generated QR data. Server-side strength, duration, rate, and token checks remain authoritative. Document new `GAME_BRIDGE_FOR_FUN_*` variables in `README.md`.

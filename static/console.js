@@ -204,8 +204,8 @@ function updateUI(data) {
     // 4. 手机证书安装与 HTTPS 游戏入口。根证书用 HTTP 下载，游戏用 HTTPS/WSS 运行。
     const certHost = data.local_ip || window.location.hostname || "127.0.0.1";
     const certifiedHost = data.certified_lan_ip || certHost;
-    const profilePath = data.cert_profile_path || "/certs/dg-lab-root-ca.mobileconfig";
-    const cerPath = data.cert_cer_path || "/certs/dg-lab-root-ca.cer";
+    const profilePath = data.cert_profile_path || "/certs/gamebridge-for-fun-root-ca.mobileconfig";
+    const cerPath = data.cert_cer_path || "/certs/gamebridge-for-fun-root-ca.cer";
     const profileUrl = `http://${certHost}:${data.http_port}${profilePath}`;
     const cerUrl = `http://${certHost}:${data.http_port}${cerPath}`;
 
@@ -216,8 +216,8 @@ function updateUI(data) {
     setText("cert-root-expiry", formatCertificateExpiry(data.cert_root_not_after, data.cert_root_valid_days));
     setText("cert-server-expiry", formatCertificateExpiry(data.cert_server_not_after, data.cert_server_valid_days));
     setText("cert-fingerprint", formatFingerprint(data.cert_sha256));
-    setDownloadLink("cert-profile-link", profileUrl, "dg-lab-root-ca.mobileconfig");
-    setDownloadLink("cert-cer-link", cerUrl, "dg-lab-root-ca.cer");
+    setDownloadLink("cert-profile-link", profileUrl, "gamebridge-for-fun-root-ca.mobileconfig");
+    setDownloadLink("cert-cer-link", cerUrl, "gamebridge-for-fun-root-ca.cer");
     renderQRCode(certQR, profileUrl, "证书安装");
     renderQRCode(certCerQR, cerUrl, "Android 证书安装");
 

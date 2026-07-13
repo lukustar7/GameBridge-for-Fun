@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-DG-LAB 郊狼小游戏选择器中转系统 - 后端核心服务端 (重构适配版)
-"""
+"""GameBridge for Fun 后端核心服务。"""
 import asyncio
 import hashlib
 import ipaddress
@@ -22,7 +20,13 @@ from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 import websockets
-from pydglab_ws import Channel, RetCode, StrengthOperationType, DGLabWSConnect, DGLabWSServer
+from pydglab_ws import (
+    Channel,
+    DGLabWSConnect as DeviceWSConnect,
+    DGLabWSServer as DeviceWSServer,
+    RetCode,
+    StrengthOperationType,
+)
 
 
 def read_positive_int_env(name, default_value):
@@ -48,25 +52,25 @@ SECURE_WEB_WS_PORT = 18444
 GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
 
 # 手机传感器权限通常需要 HTTPS。默认按当前局域网 IP 自动签发服务器证书；
-# 如现场网络必须固定某个地址，可通过 DG_LAB_CERT_IP 覆盖自动检测结果。
-CERT_IP_OVERRIDE = os.environ.get("DG_LAB_CERT_IP", "").strip()
+# 如现场网络必须固定某个地址，可通过品牌独立的环境变量覆盖自动检测结果。
+CERT_IP_OVERRIDE = os.environ.get("GAME_BRIDGE_FOR_FUN_CERT_IP", "").strip()
 CERTIFIED_LAN_IP = CERT_IP_OVERRIDE
-ROOT_CA_VALID_DAYS = read_positive_int_env("DG_LAB_ROOT_CA_DAYS", 90)
-SERVER_CERT_VALID_DAYS = read_positive_int_env("DG_LAB_SERVER_CERT_DAYS", 7)
+ROOT_CA_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS", 90)
+SERVER_CERT_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS", 7)
 CERT_DIR = PROJECT_ROOT / "certs"
 CERT_PRIVATE_DIR = CERT_DIR / "private"
-ROOT_CA_PEM = CERT_DIR / "dg-lab-root-ca.pem"
-ROOT_CA_CER = CERT_DIR / "dg-lab-root-ca.cer"
-ROOT_CA_MOBILECONFIG = CERT_DIR / "dg-lab-root-ca.mobileconfig"
-ROOT_CA_KEY = CERT_PRIVATE_DIR / "dg-lab-root-ca-key.pem"
-SERVER_CERT_PEM = CERT_DIR / "dg-lab-server.pem"
-SERVER_CERT_KEY = CERT_PRIVATE_DIR / "dg-lab-server-key.pem"
-SERVER_CERT_CSR = CERT_PRIVATE_DIR / "dg-lab-server.csr"
-SERVER_CERT_CONFIG = CERT_PRIVATE_DIR / "dg-lab-server-openssl.cnf"
-CERT_IP_MARKER = CERT_DIR / "dg-lab-cert-ip.txt"
-CERT_POLICY_MARKER = CERT_DIR / "dg-lab-cert-policy.json"
-ROOT_CA_CER_URL_PATH = "/certs/dg-lab-root-ca.cer"
-ROOT_CA_MOBILECONFIG_URL_PATH = "/certs/dg-lab-root-ca.mobileconfig"
+ROOT_CA_PEM = CERT_DIR / "gamebridge-for-fun-root-ca.pem"
+ROOT_CA_CER = CERT_DIR / "gamebridge-for-fun-root-ca.cer"
+ROOT_CA_MOBILECONFIG = CERT_DIR / "gamebridge-for-fun-root-ca.mobileconfig"
+ROOT_CA_KEY = CERT_PRIVATE_DIR / "gamebridge-for-fun-root-ca-key.pem"
+SERVER_CERT_PEM = CERT_DIR / "gamebridge-for-fun-server.pem"
+SERVER_CERT_KEY = CERT_PRIVATE_DIR / "gamebridge-for-fun-server-key.pem"
+SERVER_CERT_CSR = CERT_PRIVATE_DIR / "gamebridge-for-fun-server.csr"
+SERVER_CERT_CONFIG = CERT_PRIVATE_DIR / "gamebridge-for-fun-server-openssl.cnf"
+CERT_IP_MARKER = CERT_DIR / "gamebridge-for-fun-cert-ip.txt"
+CERT_POLICY_MARKER = CERT_DIR / "gamebridge-for-fun-cert-policy.json"
+ROOT_CA_CER_URL_PATH = "/certs/gamebridge-for-fun-root-ca.cer"
+ROOT_CA_MOBILECONFIG_URL_PATH = "/certs/gamebridge-for-fun-root-ca.mobileconfig"
 CERT_SHA256 = ""
 CERT_ROOT_NOT_AFTER = ""
 CERT_SERVER_NOT_AFTER = ""
@@ -91,11 +95,11 @@ http_server_ready = threading.Event()
 https_server_ready = threading.Event()
 
 # app_client 缓存
-dg_app_client = None
+device_app_client = None
 
 # 系统连接状态
 state = {
-    "app_connected": False,      # 手机官方 App 是否已绑定
+    "app_connected": False,      # 手机设备 App 是否已绑定
     "app_latency": -1,           # 电脑到手机 App 的网速延迟 (ms)
     "game_latency": -1,          # 电脑到手机浏览器小游戏页的应用层延迟 (ms)
     "app_qrcode_url": "",        # 手机 App 绑定扫码 URL
@@ -104,7 +108,7 @@ state = {
     # None 表示 App 还没有回传限幅。未知限幅不能按 200 处理，否则刚绑定时可能越过用户在 App 内设定的安全上限。
     "limit_a": None,             # A 通道硬件上限限制
     "limit_b": None,             # B 通道硬件上限限制
-    "battery_level": None,       # V3 文档有电量特征位；当前 pydglab-ws 桥接层未暴露读取接口
+    "battery_level": None,       # V3 文档有电量特征位；当前第三方桥接层未暴露读取接口
     "game_client_connected": False # 手机小游戏网页是否已连入
 }
 
@@ -287,20 +291,20 @@ def build_mobileconfig(root_der):
     profile = {
         "PayloadContent": [
             {
-                "PayloadCertificateFileName": "dg-lab-root-ca.cer",
+                "PayloadCertificateFileName": "gamebridge-for-fun-root-ca.cer",
                 "PayloadContent": root_der,
-                "PayloadDescription": "DG-LAB 本地 HTTPS 根证书，仅用于信任本机局域网小游戏服务。",
-                "PayloadDisplayName": "DG-LAB Local Root CA",
-                "PayloadIdentifier": "local.dg-lab.root-ca",
+                "PayloadDescription": "GameBridge for Fun 本地 HTTPS 根证书，仅用于信任本机局域网小游戏服务。",
+                "PayloadDisplayName": "GameBridge for Fun Local Root CA",
+                "PayloadIdentifier": "local.gamebridgeforfun.root-ca",
                 "PayloadType": "com.apple.security.root",
                 "PayloadUUID": str(uuid.uuid4()).upper(),
                 "PayloadVersion": 1
             }
         ],
         "PayloadDescription": "安装后需在 设置 > 通用 > 关于本机 > 证书信任设置 中手动开启完全信任。",
-        "PayloadDisplayName": "DG-LAB 本地 HTTPS 根证书",
-        "PayloadIdentifier": "local.dg-lab.profile",
-        "PayloadOrganization": "DG-LAB Local",
+        "PayloadDisplayName": "GameBridge for Fun 本地 HTTPS 根证书",
+        "PayloadIdentifier": "local.gamebridgeforfun.profile",
+        "PayloadOrganization": "GameBridge for Fun",
         "PayloadRemovalDisallowed": False,
         "PayloadType": "Configuration",
         "PayloadUUID": str(uuid.uuid4()).upper(),
@@ -325,7 +329,7 @@ def generate_root_certificate():
         "-out",
         str(ROOT_CA_PEM),
         "-subj",
-        "/CN=DG-LAB Local Root CA"
+        "/CN=GameBridge for Fun Local Root CA"
     ])
 
 
@@ -671,7 +675,7 @@ async def broadcast_state():
         await asyncio.gather(*(c.send(payload) for c in targets), return_exceptions=True)
 
 
-# --- 3. 官方 App 桥接后台协程 (基于 pydglab-ws) ---
+# --- 3. 设备 App 桥接后台协程 ---
 
 async def monitor_app_latency(client):
     """周期性测量电脑到手机 App 的标准 RFC 6455 Ping/Pong 延迟"""
@@ -692,12 +696,12 @@ async def monitor_app_latency(client):
 
 
 def update_hardware_state_from_data(data):
-    """兼容 pydglab-ws 当前与可能的旧字段名，并把硬件回读压入协议允许范围"""
+    """兼容第三方桥接库当前与可能的旧字段名，并把硬件回读压入协议允许范围"""
     if hasattr(data, "a") and hasattr(data, "b"):
         state["client_strength_a"] = clamp_int(getattr(data, "a"), 0, 200, fallback=0)
         state["client_strength_b"] = clamp_int(getattr(data, "b"), 0, 200, fallback=0)
 
-    # pydglab-ws 1.1.0 的真实字段是 a_limit / b_limit。旧代码误读成 limit_a / limit_b，
+    # 当前桥接库的真实字段是 a_limit / b_limit。旧代码误读成 limit_a / limit_b，
     # 导致页面一直显示 0，后端又错误地把 0 当成 200 使用，实际绕开了 App 内的限幅设置。
     limit_a = getattr(data, "a_limit", None)
     limit_b = getattr(data, "b_limit", None)
@@ -766,18 +770,18 @@ async def read_app_data_stream(client):
 
 async def app_bridge_runner():
     """异步长久运行 App 服务端和控制客户端，断线后自动重建绑定入口"""
-    global dg_app_client, state, APP_WS_PORT
+    global device_app_client, state, APP_WS_PORT
 
     while True:
         APP_WS_PORT = find_free_port(APP_WS_PORT)
 
         try:
             # 启动远控网关，并在 App 掉线后退出上下文释放端口，下一轮重新生成二维码。
-            async with DGLabWSServer("0.0.0.0", APP_WS_PORT) as server:
+            async with DeviceWSServer("0.0.0.0", APP_WS_PORT) as server:
                 print(f"App 远控网关已启动: 端口 {APP_WS_PORT}")
 
-                async with DGLabWSConnect(f"ws://127.0.0.1:{APP_WS_PORT}") as client:
-                    dg_app_client = client
+                async with DeviceWSConnect(f"ws://127.0.0.1:{APP_WS_PORT}") as client:
+                    device_app_client = client
                     state["app_qrcode_url"] = client.get_qrcode(f"ws://{LOCAL_IP}:{APP_WS_PORT}")
                     await broadcast_state()
 
@@ -805,7 +809,7 @@ async def app_bridge_runner():
             state["limit_a"] = None
             state["limit_b"] = None
             state["battery_level"] = None
-            dg_app_client = None
+            device_app_client = None
             await broadcast_state()
 
         await asyncio.sleep(1)
@@ -823,8 +827,8 @@ def clamp_int(value, minimum, maximum, fallback=0):
 
 
 def build_pulse_operation(channel_strength):
-    """构造 pydglab-ws 需要的 V3 单组 100ms 波形数据"""
-    # pydglab-ws 的 PulseOperation 是 ((4 个频率值), (4 个波形强度值))，
+    """构造第三方桥接库需要的 V3 单组 100ms 波形数据"""
+    # PulseOperation 是 ((4 个频率值), (4 个波形强度值))，
     # 不是旧代码里误写的 4 元组。波形强度上限是 100，通道强度上限是 200。
     wave_strength = clamp_int(round(channel_strength / 2), 1, 100, fallback=1)
     return ((100, 100, 100, 100), (wave_strength, wave_strength, wave_strength, wave_strength))
@@ -879,14 +883,14 @@ async def clear_all_output_locked():
     """在持有 shock_lock 时逐路清空；单路失败也必须继续尝试停止另一通道"""
     state["client_strength_a"] = 0
     state["client_strength_b"] = 0
-    if not dg_app_client or not state["app_connected"]:
+    if not device_app_client or not state["app_connected"]:
         return
 
     errors = []
     for channel in (Channel.A, Channel.B):
         try:
-            await dg_app_client.clear_pulses(channel)
-            await dg_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0)
+            await device_app_client.clear_pulses(channel)
+            await device_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0)
         except Exception as error:
             errors.append(f"{channel}: {error}")
     if errors:
@@ -910,7 +914,7 @@ def schedule_game_shock(
 ):
     """最多保留一个硬件输出任务，防止异常页面把 60 秒任务无限堆进内存"""
     global active_output_task
-    if not state["app_connected"] or not dg_app_client:
+    if not state["app_connected"] or not device_app_client:
         return False
     if not build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent):
         return False
@@ -955,8 +959,8 @@ async def handle_game_shock(
     clear_after=True
 ):
     """向 App 客户端下发一段受限脉冲；所有硬件写入都在同一把锁内串行执行"""
-    global dg_app_client, state, shock_generation
-    if not state["app_connected"] or not dg_app_client:
+    global device_app_client, state, shock_generation
+    if not state["app_connected"] or not device_app_client:
         return
     
     try:
@@ -980,7 +984,7 @@ async def handle_game_shock(
 
             pulse_targets = []
             for channel, safe_strength, state_key in channel_targets:
-                await dg_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength)
+                await device_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength)
                 state[state_key] = safe_strength
                 pulse_targets.append((channel, build_pulse_operation(safe_strength)))
 
@@ -988,7 +992,7 @@ async def handle_game_shock(
                 if not state["app_connected"] or generation != shock_generation:
                     break
                 for channel, pulse_unit in pulse_targets:
-                    await dg_app_client.add_pulses(channel, pulse_unit)
+                    await device_app_client.add_pulses(channel, pulse_unit)
                 await asyncio.sleep(0.1)
 
             # 结算型惩罚结束后在同一把锁内清空，避免结束动作和下一条硬件写入交叉。
@@ -1026,8 +1030,8 @@ async def handle_test_shock_request(websocket, data):
         await send_test_feedback(websocket, False, f"测试冷却中，约 {remaining:.1f}s 后再试")
         return
 
-    if not state["app_connected"] or not dg_app_client:
-        await send_test_feedback(websocket, False, "官方 App 未绑定，无法试电")
+    if not state["app_connected"] or not device_app_client:
+        await send_test_feedback(websocket, False, "设备 App 未绑定，无法试电")
         return
 
     strength = clamp_int(data.get("strength", 5), 1, TEST_MAX_STRENGTH, fallback=5)
@@ -1243,7 +1247,7 @@ async def main():
     CERTIFIED_LAN_IP = CERT_IP_OVERRIDE or LOCAL_IP
     
     print("=" * 45)
-    print("DG-LAB 郊狼小游戏选择器中转系统 - 控制台")
+    print("GameBridge for Fun - 控制台")
     print(f"本地局域网 IP 地址: {LOCAL_IP}")
     print(f"HTTPS 证书签发 IP: {CERTIFIED_LAN_IP} ({'手动指定' if CERT_IP_OVERRIDE else '自动检测'})")
     print("=" * 45)
@@ -1262,7 +1266,7 @@ async def main():
     await run_web_ws_server()
     await run_secure_web_ws_server()
 
-    # 4. 后台启动官方 App 远控网关及绑定桥接
+    # 4. 后台启动设备 App 远控网关及绑定桥接
     asyncio.create_task(app_bridge_runner())
 
     # 5. 运行环境就绪后，在电脑端自动打开浏览器控制台

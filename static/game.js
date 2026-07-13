@@ -14,7 +14,7 @@ const gameToken = urlParams.get("token") || "";
 let currentWsPort = hasPinnedWsPort ? pinnedWsPort : 18081;
 let triedPortsCount = 0;
 const maxPortPortion = 10;
-// 记录官方 App 是否已经绑定。没有 App 时，游戏只能演示结算，不能假装已经下发电击。
+// 记录设备 App 是否已经绑定。没有 App 时，游戏只能演示结算，不能假装已经下发电击。
 let latestAppConnected = false;
 let latestTechState = null;
 
@@ -23,7 +23,7 @@ let selectedGame = null;
 let activeGame = null;
 
 // 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
-const SETTINGS_STORAGE_KEY = "dg_lab_game_settings_v2";
+const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const DEFAULT_OUTPUT_SETTINGS = {
     outputMode: "a",
     bStrengthMode: "percent",

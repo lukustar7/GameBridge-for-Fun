@@ -1,6 +1,6 @@
-# DG-LAB 小游戏中转系统
+# GameBridge for Fun
 
-本项目提供一个本地局域网中转服务，用于将手机网页小游戏的判定结果转发到 DG-LAB App 远控网关。
+本项目提供一个本地局域网游戏桥接服务，用于将手机网页小游戏的判定结果转发到兼容设备 App。
 
 ## 功能范围
 
@@ -9,7 +9,7 @@
 - 电脑端和手机选择页提供连接自检、安全试电和停止输出入口；试电由后端强制限制强度、时长和冷却。
 - 手机端包含手抖挑战、保持角度、摇骰子对决、极速角子机四个小游戏，每个游戏拥有独立参数配置、输出通道选择、字段说明和玩法说明。
 - 手抖挑战、保持角度、摇骰子对决和极速角子机均支持按玩法配置输出节奏，避免连续输出叠得过密。
-- 后端通过 `pydglab-ws` 接入 DG-LAB App，统一执行 A/B 通道强度限幅、时长限制、请求限流和停止输出。
+- 后端通过已锁定版本的第三方桥接库接入设备 App，统一执行 A/B 通道强度限幅、时长限制、请求限流和停止输出。
 - 后端只允许本机控制台读取运行 token；静态服务仅公开 `static/` 与两份根证书下载文件，不公开源码、Git 元数据或证书私钥。
 
 ## 启动方式
@@ -33,6 +33,12 @@ python3 server.py
 
 详细使用流程、玩法规则、证书安装和安全事项见 `USER_GUIDE.md`。
 
+可选环境变量：
+
+- `GAME_BRIDGE_FOR_FUN_CERT_IP`：覆盖自动检测到的证书签发 IP。
+- `GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS`：设置本地根证书有效天数，默认 `90`。
+- `GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS`：设置服务器证书有效天数，默认 `7`。
+
 本地校验：
 
 ```bash
@@ -50,19 +56,19 @@ node --check static/game.js
 
 控制台“手机证书”页提供 iPhone 描述文件、Android `.cer` 文件、证书指纹、到期时间和 HTTPS 游戏二维码。
 
-iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > 证书信任设置`，手动开启 `DG-LAB Local Root CA` 的完全信任。
+iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > 证书信任设置`，手动开启 `GameBridge for Fun Local Root CA` 的完全信任。
 
 证书私钥保存在 `certs/private/`，不得复制到手机或发送给他人；该目录已被 Git 忽略。
 
 ## 目录
 
-- `server.py`：HTTP 静态服务、WebSocket 中转、DG-LAB App 桥接与脉冲下发。
+- `server.py`：HTTP 静态服务、WebSocket 中转、设备 App 桥接与脉冲下发。
 - `static/index.html`：电脑端控制台。
 - `static/game.html`：手机端小游戏和独立设置页。
 - `static/game.js`：游戏逻辑、传感器处理、参数持久化与惩罚上报。
 - `tests/test_server.py`：HTTP/WS 访问边界、硬件限幅与输出调度回归测试。
 - `USER_GUIDE.md`：面向使用者的完整操作手册。
-- `coyote/`：郊狼脉冲主机协议参考文档。
+- `coyote/`：兼容设备的脉冲协议参考文档。
 
 ## 安全边界
 

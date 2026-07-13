@@ -21,8 +21,8 @@ class FakeWebSocket:
         self.request_headers = {"Origin": origin} if origin is not None else {}
 
 
-class FakeDGLabClient:
-    """记录硬件调用顺序，不连接真实 DG-LAB App 或设备。"""
+class FakeDeviceAppClient:
+    """记录硬件调用顺序，不连接真实设备 App 或硬件。"""
 
     def __init__(self, fail_clear_channel=None):
         self.events = []
@@ -56,8 +56,8 @@ class ServerLogicTests(unittest.TestCase):
         server.HTTPS_PORT = self.original_https_port
         server.HTTPS_ENABLED = self.original_https_enabled
 
-    def test_reads_real_pydglab_limit_field_names(self):
-        """pydglab-ws 1.1.0 使用 a_limit/b_limit，必须读取到真实限幅。"""
+    def test_reads_real_bridge_limit_field_names(self):
+        """当前桥接库使用 a_limit/b_limit，必须读取到真实限幅。"""
         packet = SimpleNamespace(a=12, b=34, a_limit=80, b_limit=65)
 
         server.update_hardware_state_from_data(packet)
@@ -147,7 +147,7 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
         with urlopen(f"{self.base_url}/", timeout=2) as response:
             body = response.read().decode("utf-8")
 
-        self.assertIn("DG-LAB 控制台", body)
+        self.assertIn("GameBridge for Fun 控制台", body)
         self.assertTrue(response.geturl().endswith("/static/index.html"))
         self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
@@ -158,7 +158,7 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
             "/server.py",
             "/.git/config",
             "/coyote/README.md",
-            "/certs/private/dg-lab-root-ca-key.pem",
+            "/certs/private/gamebridge-for-fun-root-ca-key.pem",
             "/static/%2e%2e/server.py",
         )
 
@@ -182,7 +182,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.original_state = server.state.copy()
-        self.original_client = server.dg_app_client
+        self.original_client = server.device_app_client
         self.original_task = server.active_output_task
         self.original_generation = server.shock_generation
 
@@ -192,13 +192,13 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.state["client_strength_a"] = 0
         server.state["client_strength_b"] = 0
         server.active_output_task = None
-        server.dg_app_client = FakeDGLabClient()
+        server.device_app_client = FakeDeviceAppClient()
 
     async def asyncTearDown(self):
         await server.stop_all_output()
         server.state.clear()
         server.state.update(self.original_state)
-        server.dg_app_client = self.original_client
+        server.device_app_client = self.original_client
         server.active_output_task = self.original_task
         server.shock_generation = self.original_generation
 
@@ -215,8 +215,8 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.state["client_strength_a"], 0)
 
     async def test_stop_continues_with_b_when_a_clear_fails(self):
-        fake_client = FakeDGLabClient(fail_clear_channel=server.Channel.A)
-        server.dg_app_client = fake_client
+        fake_client = FakeDeviceAppClient(fail_clear_channel=server.Channel.A)
+        server.device_app_client = fake_client
 
         # 这里故意制造 A 通道失败；屏蔽预期日志，测试结果只关注 B 是否仍被清空。
         with patch("builtins.print"):
@@ -226,7 +226,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
         self.assertEqual(server.state["client_strength_a"], 0)
         self.assertEqual(server.state["client_strength_b"], 0)
-        server.dg_app_client = FakeDGLabClient()
+        server.device_app_client = FakeDeviceAppClient()
 
 
 if __name__ == "__main__":
