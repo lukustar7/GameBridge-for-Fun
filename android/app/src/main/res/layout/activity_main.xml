@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  原生层只负责连接、错误恢复和系统边界；游戏内容继续复用网页，避免维护两套玩法逻辑。
+  所有主要操作保持至少 48dp 高，并通过系统窗口边距适配 Android 15 的全面屏区域。
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -16,13 +20,21 @@
             android:gravity="center_horizontal"
             android:orientation="vertical"
             android:paddingStart="24dp"
-            android:paddingTop="48dp"
+            android:paddingTop="28dp"
             android:paddingEnd="24dp"
             android:paddingBottom="32dp">
+
+            <ImageView
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:contentDescription="@string/app_icon_description"
+                android:src="@mipmap/ic_launcher" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:gravity="center"
                 android:text="@string/app_name"
                 android:textAppearance="?attr/textAppearanceHeadlineMedium"
                 android:textStyle="bold" />
@@ -30,7 +42,8 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
                 android:text="@string/connect_title"
                 android:textAppearance="?attr/textAppearanceTitleLarge" />
 
@@ -38,6 +51,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
+                android:gravity="center"
                 android:text="@string/connect_description"
                 android:textAppearance="?attr/textAppearanceBodyLarge" />
 
@@ -46,15 +60,19 @@
                 style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:hint="@string/game_url_hint">
+                android:layout_marginTop="26dp"
+                android:hint="@string/game_url_label"
+                app:helperText="@string/game_url_helper">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/gameUrlInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:hint="@string/game_url_hint"
+                    android:imeOptions="actionGo"
                     android:inputType="textUri"
-                    android:maxLines="5" />
+                    android:maxLines="4"
+                    android:selectAllOnFocus="false" />
             </com.google.android.material.textfield.TextInputLayout>
 
             <LinearLayout
@@ -84,39 +102,140 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:textColor="@color/brand_error"
+                android:accessibilityLiveRegion="polite"
                 android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="@color/brand_error"
                 android:visibility="gone" />
 
-            <TextView
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:text="@string/safety_notice"
-                android:textAppearance="?attr/textAppearanceBodyMedium" />
+                android:layout_marginTop="24dp"
+                app:cardBackgroundColor="@color/brand_surface_variant"
+                app:cardCornerRadius="16dp"
+                app:strokeColor="@color/brand_outline"
+                app:strokeWidth="1dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:text="@string/safety_notice"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </ScrollView>
 
-    <FrameLayout
+    <!-- 工具栏独占一行，避免旧版悬浮按钮盖住网页右上角的停止操作。 -->
+    <LinearLayout
         android:id="@+id/gameContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:orientation="vertical"
         android:visibility="gone">
 
-        <WebView
-            android:id="@+id/gameWebView"
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/gameToolbar"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/brand_surface"
+            android:elevation="3dp"
+            app:navigationContentDescription="@string/back_to_connect"
+            app:navigationIcon="@drawable/ic_arrow_back"
+            app:title="@string/game_toolbar_title" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/backToConnectButton"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|end"
-            android:layout_margin="8dp"
-            android:text="@string/back_to_connect"
-            app:icon="@android:drawable/ic_media_previous" />
-    </FrameLayout>
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <WebView
+                android:id="@+id/gameWebView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/webview_background" />
+
+            <LinearLayout
+                android:id="@+id/pageLoadingOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:background="@color/brand_surface">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/pageLoadingIndicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/loading_game" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/loading_game"
+                    android:textAppearance="?attr/textAppearanceBodyLarge" />
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/pageErrorPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_margin="24dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/brand_surface_variant"
+                app:cardCornerRadius="20dp"
+                app:strokeColor="@color/brand_outline"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/load_error_title"
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/pageErrorText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:accessibilityLiveRegion="assertive"
+                        android:text="@string/load_error_default"
+                        android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/retryButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/retry_action" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/backToConnectButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:text="@string/back_to_connect" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </FrameLayout>
+    </LinearLayout>
 
 </FrameLayout>

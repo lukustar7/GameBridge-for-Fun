@@ -230,6 +230,13 @@ function setText(id, value) {
     }
 }
 
+function setConnectionClass(id, connected) {
+    const node = $(id);
+    if (node) {
+        node.classList.toggle("connected", connected);
+    }
+}
+
 function loadSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -270,6 +277,9 @@ function connectWebSocket() {
         console.log(`游戏端连接成功: ${targetUrl}`);
         triedPortsCount = 0;
         setText("tech-game-status", "已连接");
+        setConnectionClass("tech-game-status", true);
+        $("ping-badge")?.classList.add("online");
+        $("ping-badge")?.classList.remove("offline");
         setText("ping-badge", "网速延迟: --ms");
 
         clearInterval(latencyTimer);
@@ -316,6 +326,9 @@ function connectWebSocket() {
         latestGameLatency = null;
         setText("ping-badge", "网速延迟: 离线");
         setText("tech-game-status", "离线");
+        setConnectionClass("tech-game-status", false);
+        $("ping-badge")?.classList.remove("online");
+        $("ping-badge")?.classList.add("offline");
         updateLocalGameLatency();
 
         if (event.code === 1008) {
@@ -389,6 +402,12 @@ function isConfiguredOutputReady() {
     if (!latestTechState || !latestAppConnected) return false;
 
     const mode = getConfiguredOutputMode();
+    return isOutputModeReady(mode);
+}
+
+function isOutputModeReady(mode) {
+    if (!latestTechState || !latestAppConnected) return false;
+
     const limitA = Number(latestTechState.limit_a);
     const limitB = Number(latestTechState.limit_b);
     const aReady = Number.isFinite(limitA) && limitA > 0;
@@ -421,6 +440,8 @@ function updateTechStatus(data) {
     setText("tech-app-ws-port", data.app_ws_port || "-");
     setText("tech-app-status", appConnected ? "已绑定" : "等待绑定");
     setText("tech-game-status", data.game_connected ? "已连接" : "未连接");
+    setConnectionClass("tech-app-status", appConnected);
+    setConnectionClass("tech-game-status", Boolean(data.game_connected));
     setText("tech-app-latency", formatLatency(data.app_latency));
     const shownGameLatency = latestGameLatency !== null ? latestGameLatency : data.game_latency;
     setText("tech-game-latency", formatLatency(shownGameLatency));
@@ -435,7 +456,7 @@ function setMobileTestResult(message, ok = true) {
     const node = $("mobile-test-result");
     if (!node) return;
     node.innerText = message;
-    node.style.color = ok ? "#888888" : "#ff3333";
+    node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
 }
 
 function runMobileSelfCheck() {
@@ -462,6 +483,15 @@ function sendMobileTestShock(outputMode) {
         return;
     }
 
+    if (!latestAppConnected) {
+        setMobileTestResult("设备 App 尚未绑定，不能试电。", false);
+        return;
+    }
+    if (!isOutputModeReady(outputMode)) {
+        setMobileTestResult("所选通道限幅尚未读取或已设为 0，不能试电。", false);
+        return;
+    }
+
     sendGameMessage({
         type: "test_shock",
         outputMode,
@@ -475,7 +505,7 @@ function sendMobileTestShock(outputMode) {
 
 function stopMobileOutput() {
     if (!sendGameMessage({ type: "stop_shock" })) {
-        setMobileTestResult("后台通信未连接，停止请求没有发出去。", false);
+        setMobileTestResult("后台连接已断开；服务端会按断线规则兜底停止输出。", false);
         return;
     }
     setMobileTestResult("已请求停止 A/B 输出。");
@@ -521,8 +551,7 @@ async function releaseScreenWakeLock() {
 }
 
 function emergencyStop(reason) {
-    if (!activeGame && !isDiceShaking) return;
-
+    // 即使只在做“安全试电”，页面离开前台也必须触发同一套停机和断线兜底。
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
@@ -2288,11 +2317,27 @@ function getSlotPressureColor(value) {
 
 // --- 11. 初始化入口 ---
 
+function enhanceControlAccessibility() {
+    // 旧页面的大量滑块只在视觉上有标题；这里统一补齐读屏名称，避免逐项复制绑定代码。
+    document.querySelectorAll("input[type='range'], select").forEach((control) => {
+        if (control.hasAttribute("aria-label")) return;
+
+        const container = control.closest(".slider-container") || control.parentElement;
+        const visualLabel = container?.querySelector(".slider-label");
+        const firstLabelPart = visualLabel?.querySelector("span")?.textContent?.trim();
+        const labelText = firstLabelPart || visualLabel?.textContent?.trim();
+        if (labelText) {
+            control.setAttribute("aria-label", labelText);
+        }
+    });
+}
+
 window.onload = () => {
     populateSettingsForm("shake");
     populateSettingsForm("angle");
     populateSettingsForm("dice");
     populateSettingsForm("slot");
+    enhanceControlAccessibility();
     bindEmergencyStopEvents();
     connectWebSocket();
 };

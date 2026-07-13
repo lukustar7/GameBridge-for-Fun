@@ -32,6 +32,33 @@ function setConnectionHint(message) {
     setText("game-url-text", message);
 }
 
+function setBackendStatus(mode, message) {
+    const status = document.getElementById("backend-status");
+    if (status) {
+        status.classList.toggle("online", mode === "online");
+        status.classList.toggle("offline", mode === "offline");
+    }
+    setText("backend-status-text", message);
+}
+
+/** 复制当前运行生成的地址；失败时保留原文，方便用户手动选中复制。 */
+async function copyAddress(sourceId, resultId) {
+    const source = document.getElementById(sourceId);
+    const value = source?.innerText?.trim() || "";
+    if (!value || value.startsWith("等待") || value.startsWith("正在")) {
+        setText(resultId, "地址尚未生成，请稍等。");
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(value);
+        setText(resultId, "已复制，可以到手机或 APK 中粘贴。");
+    } catch (error) {
+        console.warn("复制地址失败:", error);
+        setText(resultId, "浏览器拒绝自动复制，请手动选中上方地址复制。");
+    }
+}
+
 function renderQRCode(instance, text, targetName) {
     if (!instance || !text) return false;
 
@@ -62,8 +89,8 @@ function initQRCodes() {
         width: 180,
         height: 180,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 
@@ -71,8 +98,8 @@ function initQRCodes() {
         width: 180,
         height: 180,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 
@@ -80,8 +107,8 @@ function initQRCodes() {
         width: 180,
         height: 180,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 
@@ -89,8 +116,8 @@ function initQRCodes() {
         width: 150,
         height: 150,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 
@@ -98,8 +125,8 @@ function initQRCodes() {
         width: 150,
         height: 150,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 
@@ -107,8 +134,8 @@ function initQRCodes() {
         width: 180,
         height: 180,
         typeNumber: 12,
-        colorDark: "#ffffff",
-        colorLight: "#000000",
+        colorDark: "#07101f",
+        colorLight: "#ffffff",
         correctLevel: QRCode.CorrectLevel.M
     });
 }
@@ -125,11 +152,18 @@ function connectWebSocket() {
     ws.onopen = () => {
         console.log(`控制台连接成功: ${targetUrl}`);
         triedPortsCount = 0;
+        setBackendStatus("online", "后台已连接");
         setConnectionHint("后台通信已连接，正在等待二维码数据...");
     };
     
     ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        let data = null;
+        try {
+            data = JSON.parse(event.data);
+        } catch (error) {
+            console.warn("收到无法解析的后台消息:", error);
+            return;
+        }
         
         if (data.type === "state_update") {
             updateUI(data);
@@ -143,6 +177,7 @@ function connectWebSocket() {
     };
     
     ws.onclose = (event) => {
+        setBackendStatus("offline", "后台已离线");
         if (event.code === 1008) {
             setConnectionHint("控制台只允许在运行服务的这台电脑上打开，请使用终端显示的 127.0.0.1 地址。");
             return;
@@ -184,10 +219,10 @@ function updateUI(data) {
     const statusSpan = document.getElementById("conn-status");
     if (data.app_connected) {
         statusSpan.innerText = "已绑定";
-        statusSpan.style.color = "#ffffff";
+        statusSpan.classList.add("connected");
     } else {
         statusSpan.innerText = "等待绑定";
-        statusSpan.style.color = "#444444";
+        statusSpan.classList.remove("connected");
     }
 
     // 2. 更新 App 扫码绑定二维码
@@ -281,10 +316,6 @@ function updateUI(data) {
     document.getElementById("stat-limit-b").innerText = formatHardwareReading(data.limit_b, data.app_connected);
     document.getElementById("stat-battery-level").innerText = formatBatteryLevel(data.battery_level);
 
-    // 6. 更新 Settings 面板输入框
-    document.getElementById("input-http-port").value = data.http_port;
-    document.getElementById("input-web-ws-port").value = data.web_ws_port;
-    document.getElementById("input-app-ws-port").value = data.app_ws_port;
 }
 
 function updateConsoleTestLabels() {
@@ -298,7 +329,7 @@ function setConsoleTestResult(message, ok = true) {
     const node = document.getElementById("console-test-result");
     if (!node) return;
     node.innerText = message;
-    node.style.color = ok ? "#888888" : "#ff3333";
+    node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
 }
 
 function runConsoleSelfCheck() {
@@ -326,6 +357,25 @@ function sendConsoleTestShock() {
     }
 
     const outputMode = document.getElementById("console-test-output-mode")?.value || "a";
+    if (!latestState?.app_connected) {
+        setConsoleTestResult("设备 App 尚未绑定，不能试电。", false);
+        return;
+    }
+
+    const limitA = Number(latestState.limit_a);
+    const limitB = Number(latestState.limit_b);
+    const aReady = Number.isFinite(limitA) && limitA > 0;
+    const bReady = Number.isFinite(limitB) && limitB > 0;
+    const selectedLimitReady = outputMode === "a"
+        ? aReady
+        : outputMode === "b"
+            ? bReady
+            : aReady && bReady;
+    if (!selectedLimitReady) {
+        setConsoleTestResult("所选通道限幅尚未读取或已设为 0，不能试电。", false);
+        return;
+    }
+
     const strength = Math.round(Number(document.getElementById("console-test-strength")?.value || 5));
     const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 0.3);
     ws.send(JSON.stringify({
@@ -409,54 +459,24 @@ function getLatencyClass(rtt) {
     return "latency-bad";
 }
 
-// 极简 Tab 切换
+// Tab 状态由 data-tab 驱动，不再依赖按钮排列顺序，后续调整页面顺序不会切错内容。
 function switchTab(tabName) {
     const tabs = document.querySelectorAll(".tab");
     const contents = document.querySelectorAll(".tab-content");
 
-    tabs.forEach(t => t.classList.remove("active"));
+    tabs.forEach((tab) => {
+        const active = tab.dataset.tab === tabName;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", String(active));
+    });
     contents.forEach(c => c.classList.remove("active"));
-
-    if (tabName === "monitor") {
-        tabs[0].classList.add("active");
-        document.getElementById("tab-monitor").classList.add("active");
-    } else if (tabName === "cert") {
-        tabs[1].classList.add("active");
-        document.getElementById("tab-cert").classList.add("active");
-    } else {
-        tabs[2].classList.add("active");
-        document.getElementById("tab-settings").classList.add("active");
-    }
-}
-
-// 随机端口更换
-function randomizePorts() {
-    const randomPort = () => Math.floor(Math.random() * (29999 - 10000 + 1)) + 10000;
-    document.getElementById("input-http-port").value = randomPort();
-    document.getElementById("input-web-ws-port").value = randomPort();
-    document.getElementById("input-app-ws-port").value = randomPort();
-}
-
-// 保存端口设置 (发送给后端热重启)
-function applyPorts() {
-    const httpPort = parseInt(document.getElementById("input-http-port").value);
-    const webWSPort = parseInt(document.getElementById("input-web-ws-port").value);
-    const appWSPort = parseInt(document.getElementById("input-app-ws-port").value);
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            "type": "change_ports",
-            "http_port": httpPort,
-            "web_ws_port": webWSPort,
-            "app_ws_port": appWSPort
-        }));
-        alert("当前版本不支持运行中热切端口，请重启服务后再使用新端口。");
-    }
+    document.getElementById(`tab-${tabName}`)?.classList.add("active");
 }
 
 // 页面加载就绪后执行
 window.addEventListener("DOMContentLoaded", () => {
     setConnectionHint("控制台脚本已启动，正在连接后台...");
+    setBackendStatus("", "后台连接中");
     updateConsoleTestLabels();
 
     /*

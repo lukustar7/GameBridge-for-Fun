@@ -43,7 +43,11 @@ object GameUrlValidator {
                 if (!outerUri.host.equals(CONNECT_HOST, ignoreCase = true)) {
                     return GameUrlResult.Error("APK 配对链接格式不正确。")
                 }
-                parseQuery(outerUri.rawQuery)["url"]
+                val outerQuery = parseQuery(outerUri.rawQuery)
+                if (outerQuery.keys != setOf("url")) {
+                    return GameUrlResult.Error("APK 配对链接包含多余或重复字段，请重新扫码。")
+                }
+                outerQuery["url"]
                     ?: return GameUrlResult.Error("APK 配对链接缺少游戏地址。")
             } else {
                 trimmed
@@ -82,7 +86,10 @@ object GameUrlValidator {
         val query = try {
             parseQuery(uri.rawQuery)
         } catch (_: IllegalArgumentException) {
-            return GameUrlResult.Error("游戏地址包含损坏的转义字符，请重新扫码。")
+            return GameUrlResult.Error("游戏地址包含损坏或重复字段，请重新扫码。")
+        }
+        if (query.keys != setOf("ws", "token")) {
+            return GameUrlResult.Error("游戏地址字段不完整或被修改，请重新扫码。")
         }
         val webSocketPort = query["ws"]?.toIntOrNull()
             ?: return GameUrlResult.Error("游戏地址缺少网页通信端口。")
@@ -95,7 +102,7 @@ object GameUrlValidator {
             return GameUrlResult.Error("游戏链接已损坏或缺少一次性 token，请重新扫码。")
         }
 
-        // 重新构造地址，丢弃未知参数和任何非标准写法，确保 WebView 只收到可信字段。
+        // 重新构造地址并规范化字段顺序，确保 WebView 只收到已经逐项校验的可信内容。
         val canonicalUrl = "http://$host:$httpPort$GAME_PATH" +
             "?ws=$webSocketPort&token=${encode(token)}"
         return GameUrlResult.Success(
@@ -118,13 +125,18 @@ object GameUrlValidator {
 
     private fun parseQuery(rawQuery: String?): Map<String, String> {
         if (rawQuery.isNullOrBlank()) return emptyMap()
-        return rawQuery.split('&').mapNotNull { pair ->
+        val result = linkedMapOf<String, String>()
+        rawQuery.split('&').forEach { pair ->
             val separator = pair.indexOf('=')
-            if (separator <= 0) return@mapNotNull null
+            if (separator <= 0) throw IllegalArgumentException("查询字段格式错误")
             val key = decode(pair.substring(0, separator))
             val value = decode(pair.substring(separator + 1))
-            key to value
-        }.toMap()
+            // 重复字段在不同解析层可能产生“取第一个”或“取最后一个”的歧义，直接拒绝最安全。
+            if (key.isBlank() || result.put(key, value) != null) {
+                throw IllegalArgumentException("查询字段重复或为空")
+            }
+        }
+        return result
     }
 
     private fun decode(value: String): String =

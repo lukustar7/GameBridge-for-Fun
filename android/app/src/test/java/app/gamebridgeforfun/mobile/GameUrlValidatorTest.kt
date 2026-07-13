@@ -59,4 +59,26 @@ class GameUrlValidatorTest {
 
         assertTrue(result is GameUrlResult.Error)
     }
+
+    @Test
+    fun rejectsDuplicateAndUnknownQueryFields() {
+        val duplicateToken = GameUrlValidator.parse(
+            "$validUrl&token=anotherabcdefghijklmnop"
+        )
+        val unknownField = GameUrlValidator.parse(
+            "$validUrl&redirect=https%3A%2F%2Fexample.com"
+        )
+
+        assertTrue(duplicateToken is GameUrlResult.Error)
+        assertTrue(unknownField is GameUrlResult.Error)
+    }
+
+    @Test
+    fun rejectsLoopbackAddressThatPhoneCannotReach() {
+        val result = GameUrlValidator.parse(
+            "http://127.0.0.1:18080/static/game.html?ws=18081&token=abcdefghijklmnopqrstuvwx"
+        )
+
+        assertTrue(result is GameUrlResult.Error)
+    }
 }

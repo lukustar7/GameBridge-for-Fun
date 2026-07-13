@@ -27,7 +27,12 @@ class NativeSensorDispatcher(
     private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val linearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
     private val accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-    private val motionSensor = linearAccelerationSensor ?: accelerometerSensor
+    // 没有旋转矢量时必须选加速度计，因为它同时承担倾斜角兜底；只选线性加速度会永远算不出方向。
+    private val motionSensor = if (rotationSensor == null) {
+        accelerometerSensor
+    } else {
+        linearAccelerationSensor ?: accelerometerSensor
+    }
 
     private val rotationMatrix = FloatArray(9)
     private val adjustedRotationMatrix = FloatArray(9)

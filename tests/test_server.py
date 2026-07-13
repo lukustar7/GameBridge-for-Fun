@@ -152,7 +152,11 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
         self.assertTrue(response.geturl().endswith("/static/index.html"))
         self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(response.headers["Cross-Origin-Resource-Policy"], "same-origin")
+        self.assertIn("camera=()", response.headers["Permissions-Policy"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertNotIn("Python", response.headers["Server"])
 
     def test_project_and_private_files_are_not_public(self):
         blocked_paths = (

@@ -513,6 +513,10 @@ def is_console_request_authorized(websocket):
 class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
     """只公开网页资源与两份可安装证书，项目源码、Git 元数据和私钥全部不可访问"""
 
+    # 不向局域网响应暴露 Python 版本，减少无意义的运行环境指纹。
+    server_version = "GameBridgeForFun"
+    sys_version = ""
+
     CERT_MIME_TYPES = {
         ".cer": "application/pkix-cert",
         ".mobileconfig": "application/x-apple-aspen-config",
@@ -577,6 +581,9 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         # token 存在于游戏页 URL；禁止浏览器把完整来源地址转发给后续资源或外部页面。
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 

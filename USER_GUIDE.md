@@ -162,13 +162,15 @@ APK 支持 Android 15 或更高版本，不兼容 Android 14 及更早系统。
 
 APK 模式需要三个部分同时在线：设备 App 在手机后台维持硬件连接，电脑运行桥接服务，GameBridge for Fun APK 在手机前台读取动作并运行小游戏。
 
-1. 安装并打开 GameBridge for Fun APK。
+1. 安装项目 `APK/GameBridgeForFun-Android15-debug.apk` 并打开；该包已使用 Android 调试证书签名，不需要安装网页 HTTPS 根证书。
 2. 在电脑运行 `start.command`，并先完成设备 App 远控绑定。
 3. 在电脑控制台扫描 `Android APK` 二维码，系统会自动唤起 APK 并连接普通 HTTP/WS 游戏入口。
 4. 如果系统相机只显示二维码文本，可复制电脑控制台的普通 HTTP 游戏地址，粘贴到 APK 连接页。
 5. 每次重启电脑服务后 token 都会变化，必须重新扫码。
 
 APK 不需要手机 HTTPS 根证书。APK 只允许连接 `10.x`、`172.16-31.x` 或 `192.168.x` 私有地址，并拒绝公网地址、错误页面路径、非法端口和缺失 token 的链接。
+
+如果 APK 页面持续显示“无法打开游戏页面”，先确认电脑服务仍在运行且手机与电脑处于同一 Wi-Fi，再点击“重新连接”；电脑服务重启后必须重新扫码。
 
 ## 7. 连接测试与安全试电
 

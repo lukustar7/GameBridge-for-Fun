@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GameBridge for Fun</string>
-    <string name="connect_title">连接电脑桥接服务</string>
-    <string name="connect_description">先在电脑运行 start.command，再扫描控制台中的“Android APK”二维码。二维码无法唤起时，可粘贴普通 HTTP 游戏地址。</string>
+    <string name="app_icon_description">GameBridge for Fun 应用图标</string>
+    <string name="connect_title">连接电脑服务</string>
+    <string name="connect_description">先在电脑运行 start.command，再扫描控制台的“Android APK”二维码。扫码没有自动唤起时，把配对地址粘贴到下方。</string>
+    <string name="game_url_label">APK 配对地址</string>
     <string name="game_url_hint">http://192.168.x.x:18080/static/game.html?ws=…</string>
-    <string name="connect_action">连接</string>
-    <string name="clear_action">清除地址</string>
-    <string name="safety_notice">安全规则：APK 切到后台、锁屏或关闭时会立即断开游戏连接并请求停止输出。</string>
-    <string name="back_to_connect">返回连接页</string>
+    <string name="game_url_helper">只接受电脑控制台生成的私有局域网地址</string>
+    <string name="connect_action">连接并进入游戏</string>
+    <string name="clear_action">清除</string>
+    <string name="safety_notice">安全规则：APK 切到后台、锁屏或关闭时会立即断开游戏连接，并由服务端兜底停止 A/B 两路输出。</string>
+    <string name="back_to_connect">返回连接</string>
+    <string name="game_toolbar_title">游戏控制器</string>
+    <string name="loading_game">正在连接电脑服务…</string>
+    <string name="load_error_title">无法打开游戏页面</string>
+    <string name="load_error_default">请确认电脑服务仍在运行，并检查手机和电脑是否处于同一 Wi-Fi。</string>
+    <string name="retry_action">重新连接</string>
 </resources>

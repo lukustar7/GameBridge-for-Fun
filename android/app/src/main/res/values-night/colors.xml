@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 夜间模式与网页的深蓝色视觉保持一致，同时维持正文和错误信息的可读对比。 -->
+    <color name="brand_primary">#67E8F9</color>
+    <color name="brand_on_primary">#04202A</color>
+    <color name="brand_surface">#080C17</color>
+    <color name="brand_surface_variant">#121C31</color>
+    <color name="brand_outline">#33445F</color>
+    <color name="brand_error">#FDA4AF</color>
+    <color name="webview_background">#070A12</color>
+    <color name="icon_background">#071225</color>
+</resources>

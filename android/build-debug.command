@@ -25,4 +25,15 @@ fi
 cd "$SCRIPT_DIR"
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
-echo "构建完成: $SCRIPT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+# 把 Gradle 深层目录里的产物复制到项目根目录，非技术用户无需再逐层寻找 build 文件夹。
+OUTPUT_DIR="$SCRIPT_DIR/../APK"
+OUTPUT_NAME="GameBridgeForFun-Android15-debug.apk"
+SOURCE_APK="$SCRIPT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+mkdir -p "$OUTPUT_DIR"
+cp "$SOURCE_APK" "$OUTPUT_DIR/$OUTPUT_NAME"
+(
+    cd "$OUTPUT_DIR"
+    shasum -a 256 "$OUTPUT_NAME" > SHA256.txt
+)
+
+echo "构建完成: $OUTPUT_DIR/$OUTPUT_NAME"

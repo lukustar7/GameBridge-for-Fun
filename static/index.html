@@ -2,66 +2,94 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 控制台</title>
     <link rel="stylesheet" href="style.css">
     <script src="qrcode.min.js?v=20260706-valid"></script>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>GameBridge for Fun 控制台</h1>
-            <p class="sub-text">极简纯黑 OLED 桥接中心</p>
+        <header class="app-header">
+            <div>
+                <p class="eyebrow">Local Bridge Console</p>
+                <h1>GameBridge for Fun 控制台</h1>
+                <p class="sub-text">设备绑定、手机入口和安全测试集中管理</p>
+            </div>
+            <div id="backend-status" class="header-status" role="status" aria-live="polite">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="backend-status-text">后台连接中</span>
+            </div>
         </header>
 
-        <!-- Tab 切换 -->
-        <div class="tabs">
-            <div class="tab active" onclick="switchTab('monitor')">状态监控</div>
-            <div class="tab" onclick="switchTab('cert')">手机证书</div>
-            <div class="tab" onclick="switchTab('settings')">参数设置</div>
-        </div>
+        <!-- 使用真实按钮和 ARIA 状态，让键盘操作与读屏软件都能正确识别分页。 -->
+        <nav class="tabs" aria-label="控制台页面">
+            <button type="button" class="tab active" data-tab="monitor" aria-controls="tab-monitor" aria-selected="true" onclick="switchTab('monitor')">状态监控</button>
+            <button type="button" class="tab" data-tab="cert" aria-controls="tab-cert" aria-selected="false" onclick="switchTab('cert')">手机证书</button>
+            <button type="button" class="tab" data-tab="settings" aria-controls="tab-settings" aria-selected="false" onclick="switchTab('settings')">技术信息</button>
+        </nav>
 
         <!-- 状态监控面版 -->
         <div id="tab-monitor" class="tab-content active">
             <div class="status-badge">
-                <div class="status-label">连接状态</div>
-                <span id="conn-status" style="color: #444444;">等待绑定</span>
+                <div>
+                    <div class="status-label">设备 App 连接</div>
+                    <span id="conn-status">等待绑定</span>
+                </div>
+                <p class="sub-text">依次完成设备 App 绑定和 Android APK 配对，再开始游戏。</p>
             </div>
 
             <div class="grid">
                 <!-- App 绑定二维码区 -->
                 <div class="panel">
-                    <h2>1. App 远控绑定</h2>
-                    <p class="sub-text" style="margin-bottom: 15px;">使用设备 App 扫描下方二维码建立网关连接</p>
-                    <p id="app-url-text" style="font-family: monospace; font-size: 0.8rem; color: #666666; margin-bottom: 15px; word-break: break-all;">等待后台生成绑定二维码...</p>
+                    <div class="panel-heading">
+                        <h2>1. 绑定设备 App</h2>
+                        <span class="panel-badge">必需</span>
+                    </div>
+                    <p class="sub-text">先用设备 App 扫描二维码，让电脑成为远控网关。</p>
                     <div class="qr-box">
                         <div id="app-qrcode"></div>
                     </div>
+                    <p id="app-url-text" class="sub-text" aria-live="polite">等待后台生成绑定二维码...</p>
                 </div>
 
-                <!-- 游戏操纵端二维码区 -->
-                <div class="panel">
-                    <h2>2. 游戏操纵端</h2>
-                    <p class="sub-text" style="margin-bottom: 10px;">用手机浏览器扫描二维码，或在同一局域网下输入：</p>
-                    <p id="game-url-text" style="font-family: monospace; font-size: 0.9rem; color: #888888; margin-bottom: 15px;">等待本地服务获取 IP...</p>
-                    <div class="qr-box">
-                        <div id="game-qrcode"></div>
+                <!-- Android APK 是 Android 15+ 用户的主入口，不需要安装网页根证书。 -->
+                <div class="panel panel-featured">
+                    <div class="panel-heading">
+                        <h2>2. 连接 Android APK</h2>
+                        <span class="panel-badge">推荐</span>
                     </div>
-                    <p id="secure-game-hint" class="sub-text" style="margin-top: 10px;">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
-                </div>
-
-                <!-- Android APK 使用普通 HTTP/WS，传感器由原生层提供，不需要安装网页根证书。 -->
-                <div class="panel">
-                    <h2>3. Android APK</h2>
-                    <p class="sub-text" style="margin-bottom: 10px;">先安装 GameBridge for Fun APK，再用手机系统相机扫描。APK 必须和电脑处于同一局域网。</p>
-                    <p id="apk-url-text" style="font-family: monospace; font-size: 0.8rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待本地服务获取 IP...</p>
+                    <p class="sub-text">安装 APK 后用手机系统相机扫描；APK 与电脑必须处于同一局域网。</p>
                     <div class="qr-box">
                         <div id="apk-qrcode"></div>
                     </div>
-                    <p class="sub-text">该入口不使用 HTTPS 证书；每次重启电脑服务后需要重新扫码。</p>
+                    <p id="apk-url-text" class="address-text">等待本地服务获取 IP...</p>
+                    <div class="compact-actions">
+                        <button type="button" class="primary-button" onclick="copyAddress('apk-url-text', 'apk-copy-result')">复制 APK 配对地址</button>
+                    </div>
+                    <p id="apk-copy-result" class="sub-text" aria-live="polite"></p>
+                    <p class="sub-text">每次重启电脑服务后，配对地址都会更新，需要重新扫码。</p>
+                </div>
+
+                <!-- 浏览器入口保留给 iPhone 与不安装 APK 的用户。 -->
+                <div class="panel">
+                    <div class="panel-heading">
+                        <h2>3. 浏览器备用入口</h2>
+                        <span class="panel-badge">可选</span>
+                    </div>
+                    <p class="sub-text">手机浏览器可以直接打开；感应玩法应使用“手机证书”页的 HTTPS 入口。</p>
+                    <div class="qr-box">
+                        <div id="game-qrcode"></div>
+                    </div>
+                    <p id="game-url-text" class="address-text">等待本地服务获取 IP...</p>
+                    <div class="compact-actions">
+                        <button type="button" onclick="copyAddress('game-url-text', 'game-copy-result')">复制网页地址</button>
+                    </div>
+                    <p id="game-copy-result" class="sub-text" aria-live="polite"></p>
+                    <p id="secure-game-hint" class="sub-text">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
             </div>
 
-            <div class="panel" style="margin-top: 30px;">
+            <div class="panel section-gap">
                 <h2>4. 连接测试</h2>
                 <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用低强度短时长试电。测试强度和时长会被后端硬限制。</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
@@ -88,12 +116,12 @@
                         <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="0.3" oninput="updateConsoleTestLabels()">
                     </div>
                 </div>
-                <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <div class="button-row" style="margin-bottom: 12px;">
                     <button style="flex: 1;" onclick="runConsoleSelfCheck()">连接自检</button>
-                    <button style="flex: 1; border-color: #ffffff;" onclick="sendConsoleTestShock()">安全试电</button>
-                    <button style="flex: 1;" onclick="stopConsoleOutput()">停止输出</button>
+                    <button class="primary-button" style="flex: 1;" onclick="sendConsoleTestShock()">安全试电</button>
+                    <button class="danger-button" style="flex: 1;" onclick="stopConsoleOutput()">停止输出</button>
                 </div>
-                <p id="console-test-result" class="sub-text">等待自检。</p>
+                <p id="console-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
             </div>
         </div>
 
@@ -252,35 +280,20 @@
                     </table>
                 </div>
 
-                <!-- 端口管理 -->
-                <div class="panel" style="display: flex; flex-direction: column; justify-content: space-between;">
-                    <div>
-                        <h2>端口管理</h2>
-                        <p class="sub-text" style="margin-bottom: 20px;">更改端口需要重新访问网页。如发生占用，系统会自动递增分配。</p>
-                        
-                        <div style="margin-bottom: 15px;">
-                            <label class="slider-label" style="margin-bottom: 5px;">HTTP 端口</label>
-                            <input type="number" id="input-http-port" min="10000" max="65535">
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label class="slider-label" style="margin-bottom: 5px;">网页 WS 端口</label>
-                            <input type="number" id="input-web-ws-port" min="10000" max="65535">
-                        </div>
-                        <div style="margin-bottom: 20px;">
-                            <label class="slider-label" style="margin-bottom: 5px;">App WS 端口</label>
-                            <input type="number" id="input-app-ws-port" min="10000" max="65535">
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px;">
-                        <button style="flex: 1;" onclick="randomizePorts()">随机更换</button>
-                        <button style="flex: 1; border-color: #ffffff;" onclick="applyPorts()">保存配置</button>
-                    </div>
+                <!-- 旧版“保存端口”实际不支持热切换，改为只读说明，避免用户误以为设置已经生效。 -->
+                <div class="panel">
+                    <h2>连接说明</h2>
+                    <ul class="info-list" style="padding-left: 20px;">
+                        <li>端口由服务启动时统一分配；遇到占用会自动向后寻找可用端口。</li>
+                        <li>电脑服务重启后，以本页刚生成的二维码和地址为准，不使用旧截图。</li>
+                        <li>Android APK 使用普通 HTTP/WS，但只接受私有局域网 IP 和带 token 的固定游戏地址。</li>
+                        <li>浏览器感应玩法使用 HTTPS/WSS；APK 原生读取感应器，不需要安装网页证书。</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="console.js?v=20260709-test-output-rhythm"></script>
+    <script src="console.js?v=20260713-ux-audit"></script>
 </body>
 </html>

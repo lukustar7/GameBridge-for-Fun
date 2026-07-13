@@ -59,7 +59,7 @@ APK 要求 Android 15 或更高版本，包名为 `app.gamebridgeforfun.mobile`�
 ./android/build-debug.command
 ```
 
-Debug APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。使用时需要电脑桥接服务、设备 App 和 GameBridge for Fun APK 同时在线；APK 必须保持前台，切后台或锁屏会立即断开并请求停止输出。
+可安装 APK 输出到 `APK/GameBridgeForFun-Android15-debug.apk`，SHA-256 校验值位于 `APK/SHA256.txt`。使用时需要电脑桥接服务、设备 App 和 GameBridge for Fun APK 同时在线；APK 必须保持前台，切后台或锁屏会立即断开并请求停止输出。
 
 ## 手机 HTTPS 证书
 
@@ -80,6 +80,7 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 - `static/game.html`：手机端小游戏和独立设置页。
 - `static/game.js`：游戏逻辑、传感器处理、参数持久化与惩罚上报。
 - `android/`：Android APK、原生传感器桥接、安全 WebView 和地址校验测试。
+- `APK/`：可直接安装的 Android 15+ 调试包、校验值和简要安装说明。
 - `tests/test_server.py`：HTTP/WS 访问边界、硬件限幅与输出调度回归测试。
 - `USER_GUIDE.md`：面向使用者的完整操作手册。
 - `coyote/`：兼容设备的脉冲协议参考文档。

@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.SafeBrowsingResponse
@@ -21,6 +22,9 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import app.gamebridgeforfun.mobile.databinding.ActivityMainBinding
 import java.io.ByteArrayInputStream
@@ -33,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sensorDispatcher: NativeSensorDispatcher
     private var trustedConnection: GameConnection? = null
     private var pageReady = false
+    private var pageLoadFailed = false
     private var activityResumed = false
     private var reloadAfterResume = false
 
@@ -41,6 +46,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        configureSystemInsets()
         configureWebView()
         sensorDispatcher = NativeSensorDispatcher(this, binding.gameWebView) {
             pageReady && activityResumed && trustedConnection != null
@@ -110,6 +116,14 @@ class MainActivity : AppCompatActivity() {
             getPreferences(MODE_PRIVATE).edit { remove(PREF_LAST_GAME_URL) }
         }
         binding.backToConnectButton.setOnClickListener { returnToConnectionScreen() }
+        binding.gameToolbar.setNavigationOnClickListener { returnToConnectionScreen() }
+        binding.retryButton.setOnClickListener { retryCurrentConnection() }
+        binding.gameUrlInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId != EditorInfo.IME_ACTION_GO) return@setOnEditorActionListener false
+            hideKeyboard()
+            connectFromInput(binding.gameUrlInput.text?.toString().orEmpty())
+            true
+        }
     }
 
     private fun installBackHandler() {
@@ -142,7 +156,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun connectFromInput(input: String) {
         when (val result = GameUrlValidator.parse(input)) {
-            is GameUrlResult.Error -> showConnectionError(result.message)
+            is GameUrlResult.Error -> {
+                // 无效深链可能在游戏进行中抵达；先回连接页，确保错误不会被隐藏在 WebView 后面。
+                if (binding.gameContainer.isVisible) returnToConnectionScreen()
+                showConnectionError(result.message)
+            }
             is GameUrlResult.Success -> showGame(result.connection)
         }
     }
@@ -152,6 +170,7 @@ class MainActivity : AppCompatActivity() {
         sensorDispatcher.stop()
         trustedConnection = connection
         pageReady = false
+        pageLoadFailed = false
         reloadAfterResume = false
         binding.connectionError.visibility = View.GONE
         binding.gameUrlInput.setText(connection.pageUrl)
@@ -161,6 +180,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.connectionScroll.visibility = View.GONE
         binding.gameContainer.visibility = View.VISIBLE
+        showPageLoading()
         binding.gameWebView.loadUrl(connection.pageUrl)
     }
 
@@ -168,11 +188,14 @@ class MainActivity : AppCompatActivity() {
         if (pageReady) evaluateNativeCommand("pause", "android_back")
         sensorDispatcher.stop()
         pageReady = false
+        pageLoadFailed = false
         reloadAfterResume = false
         trustedConnection = null
         binding.gameWebView.stopLoading()
         binding.gameWebView.loadUrl("about:blank")
         binding.gameWebView.clearHistory()
+        binding.pageLoadingOverlay.visibility = View.GONE
+        binding.pageErrorPanel.visibility = View.GONE
         binding.gameContainer.visibility = View.GONE
         binding.connectionScroll.visibility = View.VISIBLE
     }
@@ -180,6 +203,43 @@ class MainActivity : AppCompatActivity() {
     private fun showConnectionError(message: String) {
         binding.connectionError.text = message
         binding.connectionError.visibility = View.VISIBLE
+    }
+
+    private fun retryCurrentConnection() {
+        val connection = trustedConnection ?: run {
+            returnToConnectionScreen()
+            return
+        }
+        pageReady = false
+        pageLoadFailed = false
+        showPageLoading()
+        binding.gameWebView.stopLoading()
+        binding.gameWebView.loadUrl(connection.pageUrl)
+    }
+
+    private fun showPageLoading() {
+        binding.pageErrorPanel.visibility = View.GONE
+        binding.pageLoadingOverlay.visibility = View.VISIBLE
+    }
+
+    private fun showPageError(message: String = getString(R.string.load_error_default)) {
+        pageReady = false
+        pageLoadFailed = true
+        sensorDispatcher.stop()
+        binding.pageLoadingOverlay.visibility = View.GONE
+        binding.pageErrorText.text = message
+        binding.pageErrorPanel.visibility = View.VISIBLE
+    }
+
+    private fun configureSystemInsets() {
+        // Android 15 默认使用全面屏；把系统状态栏和导航栏空间交还给根视图统一处理。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -219,22 +279,35 @@ class MainActivity : AppCompatActivity() {
         manager.hideSoftInputFromWindow(binding.gameUrlInput.windowToken, 0)
     }
 
-    private fun isAllowedWebResource(uri: Uri): Boolean {
-        val connection = trustedConnection ?: return false
+    private fun hasTrustedOrigin(uri: Uri, connection: GameConnection): Boolean {
         val port = if (uri.port == -1) 80 else uri.port
         return uri.scheme.equals("http", ignoreCase = true) &&
             uri.host == connection.host &&
-            port == connection.httpPort &&
-            (uri.path == "/static/game.html" || uri.path?.startsWith("/static/") == true)
+            port == connection.httpPort
+    }
+
+    private fun isAllowedMainFrame(uri: Uri): Boolean {
+        val connection = trustedConnection ?: return false
+        // 主文档必须与校验器重建出的规范地址完全一致，不能跳到同源控制台或其他静态页面。
+        return hasTrustedOrigin(uri, connection) && uri.toString() == connection.pageUrl
+    }
+
+    private fun isAllowedStaticResource(uri: Uri): Boolean {
+        val connection = trustedConnection ?: return false
+        return hasTrustedOrigin(uri, connection) && uri.path in ALLOWED_STATIC_RESOURCES
+    }
+
+    private fun isAllowedWebRequest(uri: Uri): Boolean {
+        return isAllowedMainFrame(uri) || isAllowedStaticResource(uri)
     }
 
     private inner class RestrictedGameWebViewClient : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            return !isAllowedWebResource(request.url)
+            return request.isForMainFrame && !isAllowedMainFrame(request.url)
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            if (isAllowedWebResource(request.url)) return null
+            if (isAllowedWebRequest(request.url)) return null
             return WebResourceResponse(
                 "text/plain",
                 "utf-8",
@@ -243,14 +316,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+            if (trustedConnection?.pageUrl != url) return
             pageReady = false
+            pageLoadFailed = false
             sensorDispatcher.stop()
+            showPageLoading()
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             val connection = trustedConnection ?: return
             if (url != connection.pageUrl) return
+            // 部分 WebView 在主文档失败后仍回调 onPageFinished，失败状态不能被这个迟到回调覆盖。
+            if (pageLoadFailed) return
             pageReady = true
+            binding.pageLoadingOverlay.visibility = View.GONE
+            binding.pageErrorPanel.visibility = View.GONE
             evaluateNativeCommand("enable")
             if (activityResumed) sensorDispatcher.start()
         }
@@ -261,16 +341,25 @@ class MainActivity : AppCompatActivity() {
             error: WebResourceError,
         ) {
             if (!request.isForMainFrame) return
-            Toast.makeText(
-                this@MainActivity,
-                "无法连接电脑服务，请确认 start.command 正在运行且手机处于同一 Wi-Fi。",
-                Toast.LENGTH_LONG,
-            ).show()
+            if (!activityResumed || trustedConnection == null) return
+            showPageError()
+        }
+
+        override fun onReceivedHttpError(
+            view: WebView,
+            request: WebResourceRequest,
+            errorResponse: WebResourceResponse,
+        ) {
+            if (!request.isForMainFrame || !activityResumed || trustedConnection == null) return
+            showPageError("电脑服务返回 ${errorResponse.statusCode}，配对地址可能已经过期，请重新扫码。")
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
             // APK 不使用 HTTPS 自签证书；意外跳转到 HTTPS 时绝不绕过系统校验。
             handler.cancel()
+            if (activityResumed && trustedConnection != null) {
+                showPageError("APK 不接受 HTTPS 页面，请回到电脑控制台重新扫描 Android APK 二维码。")
+            }
         }
 
         override fun onSafeBrowsingHit(
@@ -286,6 +375,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this@MainActivity, "游戏页面异常退出，已停止连接。", Toast.LENGTH_LONG).show()
             sensorDispatcher.stop()
             pageReady = false
+            pageLoadFailed = true
             reloadAfterResume = false
             trustedConnection = null
             // 渲染进程已经死亡，旧 WebView 不能安全复用；重建 Activity 得到全新实例。
@@ -296,5 +386,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PREF_LAST_GAME_URL = "last_game_url"
+        private val ALLOWED_STATIC_RESOURCES = setOf(
+            "/static/game.js",
+            "/static/style.css",
+        )
     }
 }

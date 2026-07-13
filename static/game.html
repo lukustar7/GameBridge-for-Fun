@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 小游戏操纵端</title>
     <link rel="stylesheet" href="style.css">
     <style>
@@ -29,13 +29,81 @@
         }
 
         .game-card {
-            border: 1px solid #222222;
-            padding: 20px;
+            width: 100%;
+            min-height: 0;
+            display: block;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-medium);
+            color: var(--text);
+            background: linear-gradient(145deg, rgba(18, 28, 49, 0.94), rgba(10, 16, 29, 0.92));
             cursor: pointer;
+            text-align: left;
         }
 
+        .game-card:hover,
         .game-card:active {
-            border-color: #ffffff;
+            border-color: var(--border-strong);
+            background: linear-gradient(145deg, rgba(24, 41, 70, 0.96), rgba(11, 20, 36, 0.94));
+        }
+
+        .game-card-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .game-card-index {
+            color: var(--accent);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.76rem;
+            font-weight: 800;
+        }
+
+        .game-card-title {
+            color: var(--text);
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+
+        .selection-title {
+            margin-bottom: 6px;
+            color: var(--text);
+            font-size: 1.25rem;
+            letter-spacing: -0.01em;
+            text-transform: none;
+        }
+
+        .mobile-status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 16px 0 12px;
+        }
+
+        .mobile-status-card {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-small);
+            background: rgba(3, 7, 15, 0.54);
+        }
+
+        .mobile-status-card span {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.72rem;
+        }
+
+        .mobile-status-card strong {
+            display: block;
+            margin-top: 3px;
+            color: var(--warning);
+            font-size: 0.94rem;
+        }
+
+        .mobile-status-card strong.connected {
+            color: var(--success);
         }
 
         .back-btn {
@@ -79,19 +147,19 @@
 
         .inline-note {
             min-height: 22px;
-            color: #888888;
+            color: var(--text-muted);
             font-size: 0.85rem;
             margin-top: 12px;
         }
 
         .notice-panel {
-            border: 1px solid #222222;
-            padding: 16px;
-            background-color: #000000;
+            border: 1px solid var(--border);
+            padding: 17px;
+            background: linear-gradient(155deg, rgba(18, 28, 49, 0.92), rgba(10, 16, 29, 0.91));
         }
 
         .info-list {
-            color: #777777;
+            color: var(--text-muted);
             font-size: 0.85rem;
             padding-left: 18px;
         }
@@ -111,26 +179,26 @@
             justify-content: space-between;
             gap: 12px;
             padding: 7px 0;
-            border-bottom: 1px solid #111111;
-            color: #777777;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.11);
+            color: var(--text-muted);
             font-size: 0.82rem;
         }
 
         .tech-row span:last-child {
-            color: #ffffff;
+            color: var(--text);
             font-family: monospace;
             text-align: right;
         }
 
         .field-help {
-            color: #666666;
+            color: var(--text-muted);
             font-size: 0.78rem;
             line-height: 1.45;
             margin-top: 5px;
         }
 
         .game-help {
-            color: #888888;
+            color: var(--text-secondary);
             font-size: 0.9rem;
             margin-bottom: 15px;
         }
@@ -140,7 +208,7 @@
             justify-content: space-between;
             align-items: center;
             gap: 14px;
-            color: #888888;
+            color: var(--text-secondary);
             font-size: 0.9rem;
             margin: 15px 0;
         }
@@ -150,10 +218,10 @@
         }
 
         .common-settings {
-            border: 1px solid #222222;
+            border: 1px solid var(--border);
             padding: 16px;
             margin-bottom: 20px;
-            background-color: #000000;
+            background: rgba(3, 7, 15, 0.48);
         }
 
         .dice-area {
@@ -393,8 +461,7 @@
 
         @media (max-width: 420px) {
             .flex-row {
-                align-items: flex-start;
-                flex-direction: column;
+                align-items: center;
             }
 
             .settings-actions {
@@ -432,42 +499,72 @@
 </head>
 <body>
     <div class="container">
-        <header class="flex-row">
-            <h1>GameBridge for Fun</h1>
-            <span id="ping-badge" class="sub-text">网速延迟: --ms</span>
+        <header class="flex-row app-header">
+            <div>
+                <p class="eyebrow">Mobile Game Controller</p>
+                <h1>GameBridge for Fun</h1>
+            </div>
+            <span id="ping-badge" class="header-status" role="status" aria-live="polite">连接中</span>
         </header>
 
         <!-- 游戏选择页只负责选择玩法，不直接启动，避免玩家没调好参数就开始受罚。 -->
         <div id="screen-select" class="screen active">
-            <h2 style="margin-bottom: 20px;">选择挑战游戏</h2>
+            <section class="notice-panel" style="margin-bottom: 16px;">
+                <h2 class="selection-title">选择玩法</h2>
+                <p class="sub-text">先确认两项连接状态，再进入玩法设置。</p>
+                <div class="mobile-status-grid">
+                    <div class="mobile-status-card">
+                        <span>设备 App</span>
+                        <strong id="tech-app-status">等待绑定</strong>
+                    </div>
+                    <div class="mobile-status-card">
+                        <span>游戏端</span>
+                        <strong id="tech-game-status">连接中</strong>
+                    </div>
+                </div>
+                <button type="button" class="danger-button full-width" onclick="stopMobileOutput()">立即停止 A/B 输出</button>
+            </section>
+
+            <!-- 游戏入口放在说明之前，避免用户每次都要滚过大段文档才能开始。 -->
             <div class="game-select-container">
-                <div class="notice-panel">
-                    <h2>安全与紧急停止</h2>
-                    <ul class="info-list">
-                        <li>游玩页右上方有“停止输出”，点击后会立即请求清空输出。</li>
-                        <li>手机上滑回桌面、锁屏、切后台、刷新或关闭网页时，页面会请求紧急停止；服务端在游戏连接断开时也会兜底清空 A/B 两路。</li>
-                        <li>开始游戏后会请求手机屏幕常亮；如果浏览器不支持，仍建议保持网页在前台。</li>
-                        <li>iPhone 首次玩手抖挑战或保持角度时会请求动作与方向权限；如果普通局域网 HTTP 被系统拒绝，页面会直接提示原因。</li>
-                        <li>电脑和手机必须处于同一局域网，二维码中的端口和 token 由电脑后台自动生成。</li>
-                    </ul>
-                </div>
+                <button type="button" class="game-card" onclick="openGameSettings('shake')">
+                    <span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('angle')">
+                    <span class="game-card-heading"><span class="game-card-title">保持角度</span><span class="game-card-index">02</span></span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">以当前握持姿态为基准，持续偏离目标角度才触发惩罚</span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('dice')">
+                    <span class="game-card-heading"><span class="game-card-title">摇骰子对决</span><span class="game-card-index">03</span></span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">你和对手比总点数，输几点就输出几下，豹子按倍率结算</span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('slot')">
+                    <span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">04</span></span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">三轮高频开奖，全不同会推高压力条，满格触发惩罚</span>
+                </button>
+            </div>
 
-                <div class="notice-panel">
-                    <h2>关于 A/B 通道</h2>
-                    <p class="sub-text">
-                        设备有 A、B 两路输出。每个游戏默认只用 A；想玩 B 时，可以在游戏设置里改成“只用 B”或“A+B 同时”。B 通道可以跟 A 一样强，也可以按比例降低。
-                    </p>
+            <section class="notice-panel" style="margin-bottom: 15px;">
+                <h2>连接测试</h2>
+                <p class="sub-text" style="margin-bottom: 12px;">正式开始前先自检，再用固定低强度、短时长确认通道。</p>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px;">
+                    <button type="button" onclick="runMobileSelfCheck()">连接自检</button>
+                    <button type="button" onclick="sendMobileTestShock('a')">试 A</button>
+                    <button type="button" onclick="sendMobileTestShock('b')">试 B</button>
+                    <button type="button" onclick="sendMobileTestShock('ab')">试 A+B</button>
                 </div>
+                <p id="mobile-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
+            </section>
 
-                <div class="notice-panel">
-                    <h2>连接状态</h2>
-                    <div class="tech-grid">
+            <div class="game-select-container">
+                <details class="disclosure-panel">
+                    <summary>连接详情与排障数据</summary>
+                    <div class="disclosure-content tech-grid">
                         <div class="tech-row"><span>局域网 IP</span><span id="tech-local-ip">-</span></div>
                         <div class="tech-row"><span>HTTP 端口</span><span id="tech-http-port">-</span></div>
                         <div class="tech-row"><span>网页 WS 端口</span><span id="tech-web-ws-port">-</span></div>
                         <div class="tech-row"><span>App WS 端口</span><span id="tech-app-ws-port">-</span></div>
-                        <div class="tech-row"><span>设备 App</span><span id="tech-app-status">等待绑定</span></div>
-                        <div class="tech-row"><span>游戏端连接</span><span id="tech-game-status">连接中</span></div>
                         <div class="tech-row"><span>App 延迟</span><span id="tech-app-latency">-</span></div>
                         <div class="tech-row"><span>浏览器延迟</span><span id="tech-game-latency">-</span></div>
                         <div class="tech-row"><span>A 通道强度</span><span id="tech-strength-a">-</span></div>
@@ -476,38 +573,19 @@
                         <div class="tech-row"><span>B 通道限幅</span><span id="tech-limit-b">-</span></div>
                         <div class="tech-row"><span>设备电量</span><span id="tech-battery">未接入</span></div>
                     </div>
-                </div>
+                </details>
 
-                <div class="notice-panel">
-                    <h2>连接测试</h2>
-                    <p class="sub-text" style="margin-bottom: 12px;">建议正式开始前先自检，再用低强度短时长试一下通道。</p>
-                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px;">
-                        <button onclick="runMobileSelfCheck()">自检</button>
-                        <button onclick="stopMobileOutput()">停止输出</button>
-                        <button onclick="sendMobileTestShock('a')">试 A</button>
-                        <button onclick="sendMobileTestShock('b')">试 B</button>
+                <details class="disclosure-panel">
+                    <summary>安全说明与 A/B 通道规则</summary>
+                    <div class="disclosure-content">
+                        <ul class="info-list">
+                            <li>切后台、锁屏、刷新或关闭页面时，页面和服务端都会请求停止 A/B 两路。</li>
+                            <li>开始游戏后会请求屏幕常亮；仍需把网页或 APK 保持在前台。</li>
+                            <li>iPhone 感应玩法需要 HTTPS；Android APK 使用原生感应器，不需要网页证书。</li>
+                            <li>默认只用 A。选择 B 或 A+B 前，必须确认接法和可接受强度。</li>
+                        </ul>
                     </div>
-                    <button onclick="sendMobileTestShock('ab')" style="width: 100%; margin-bottom: 12px;">试 A+B</button>
-                    <p id="mobile-test-result" class="sub-text">等待自检。</p>
-                </div>
-            </div>
-            <div class="game-select-container">
-                <div class="game-card" onclick="openGameSettings('shake')">
-                    <h3>手抖挑战</h3>
-                    <p class="sub-text" style="margin-top: 5px;">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</p>
-                </div>
-                <div class="game-card" onclick="openGameSettings('angle')">
-                    <h3>保持角度</h3>
-                    <p class="sub-text" style="margin-top: 5px;">以当前握持姿态为基准，持续偏离目标角度才触发惩罚</p>
-                </div>
-                <div class="game-card" onclick="openGameSettings('dice')">
-                    <h3>摇骰子对决</h3>
-                    <p class="sub-text" style="margin-top: 5px;">你和对手比总点数，输几点就电几下，任意一方豹子直接按倍率结算</p>
-                </div>
-                <div class="game-card" onclick="openGameSettings('slot')">
-                    <h3>极速角子机</h3>
-                    <p class="sub-text" style="margin-top: 5px;">Emoji 三轮高频开奖，全不同会推高压力条，满格立即触发惩罚</p>
-                </div>
+                </details>
             </div>
         </div>
 
@@ -630,7 +708,7 @@
 
                     <div class="settings-actions">
                         <button onclick="calibrateCurrentPose('shake')">校准当前姿态</button>
-                        <button onclick="startConfiguredGame()">开始游戏</button>
+                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
                 </div>
 
@@ -702,7 +780,7 @@
 
                     <div class="settings-actions">
                         <button onclick="calibrateCurrentPose('angle')">校准当前姿态</button>
-                        <button onclick="startConfiguredGame()">开始游戏</button>
+                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
                 </div>
 
@@ -782,7 +860,7 @@
                     </div>
 
                     <div class="settings-actions single">
-                        <button onclick="startConfiguredGame()">开始游戏</button>
+                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
                 </div>
 
@@ -934,11 +1012,11 @@
                     </div>
 
                     <div class="settings-actions single">
-                        <button onclick="startConfiguredGame()">开始游戏</button>
+                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
                 </div>
 
-                <div id="settings-message" class="inline-note"></div>
+                <div id="settings-message" class="inline-note" role="status" aria-live="polite"></div>
             </div>
         </div>
 
@@ -946,14 +1024,14 @@
         <div id="screen-play" class="screen">
             <div class="flex-row" style="margin-bottom: 20px;">
                 <button onclick="exitGame()">返回列表</button>
-                <button onclick="stopCurrentGame()">停止输出</button>
+                <button class="danger-button" onclick="stopCurrentGame()">停止输出</button>
             </div>
 
             <div class="grid">
                 <div class="panel">
                     <h2 id="game-title">游戏进行中</h2>
                     <p id="game-help" class="game-help">-</p>
-                    <p id="game-status" class="sub-text" style="margin-bottom: 15px;">-</p>
+                    <p id="game-status" class="sub-text" role="status" aria-live="polite" style="margin-bottom: 15px;">-</p>
 
                     <div id="game-viewport" class="canvas-container">
                         <canvas id="game-canvas"></canvas>
@@ -1046,6 +1124,6 @@
         </div>
     </div>
 
-    <script src="game.js?v=20260709-test-output-rhythm-2"></script>
+    <script src="game.js?v=20260713-ux-audit"></script>
 </body>
 </html>

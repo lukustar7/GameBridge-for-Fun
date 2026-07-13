@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      adaptive-icon 根元素只能由 API 26+ 的资源解析器处理，因此仍需保留 v26 目录。
+      项目最低版本已是 35，Lint 的“目录版本多余”建议与 AAPT 实际要求冲突，只对该目录定点忽略。
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

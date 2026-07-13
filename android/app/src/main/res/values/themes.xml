@@ -5,6 +5,7 @@
         <item name="colorOnPrimary">@color/brand_on_primary</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:navigationBarColor">@color/brand_surface</item>
+        <item name="android:windowBackground">@color/brand_surface</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

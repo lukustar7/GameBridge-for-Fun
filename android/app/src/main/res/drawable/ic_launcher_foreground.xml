@@ -1,13 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 原创“闪电桥”图标：闪电代表实时感应，两端节点与弧线代表手机和电脑之间的桥接。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
-    android:viewportWidth="48"
-    android:viewportHeight="48">
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
     <path
-        android:fillColor="#6750A4"
-        android:pathData="M6,8h36v32h-36z" />
+        android:fillColor="@android:color/transparent"
+        android:pathData="M18,79 C34,61 74,61 90,79"
+        android:strokeColor="#60A5FA"
+        android:strokeLineCap="round"
+        android:strokeWidth="6" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M13,15h9v4h-5v3h5v4h-5v7h-4zM26,15h9v4h-5v3h5v4h-5v7h-4z" />
+        android:fillColor="#67E8F9"
+        android:pathData="M18,71 A8,8 0,1 0,18,87 A8,8 0,1 0,18,71 M90,71 A8,8 0,1 0,90,87 A8,8 0,1 0,90,71" />
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M60,13 L30,58 L49,58 L42,96 L80,47 L60,47 Z" />
+    <path
+        android:fillAlpha="0.55"
+        android:fillColor="#67E8F9"
+        android:pathData="M58,27 L43,51 L56,51 L51,75 L68,53 L56,53 Z" />
 </vector>

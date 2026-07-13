@@ -12,7 +12,7 @@
 - `python3 -m py_compile server.py` checks Python syntax without starting hardware connections.
 - `node --check static/console.js` and `node --check static/game.js` check JavaScript syntax when Node.js is available.
 - `python3 -m unittest discover -s tests -v` runs the HTTP, WebSocket, limit, and output-scheduler regression suite.
-- `./android/build-debug.command` runs Android URL-boundary tests, lint, and the debug APK build with Android Studio's bundled Java on macOS.
+- `./android/build-debug.command` runs Android URL-boundary tests, lint, and the debug build, then copies the installable package and checksum into `APK/`.
 
 There is no separate compilation step. The service normally opens the console; otherwise visit `http://localhost:18080`.
 
