@@ -81,4 +81,23 @@ class GameUrlValidatorTest {
 
         assertTrue(result is GameUrlResult.Error)
     }
+
+    @Test
+    fun rejectsAmbiguousIpv4WithLeadingZeros() {
+        val result = GameUrlValidator.parse(
+            "http://192.168.001.020:18080/static/game.html?ws=18081&token=abcdefghijklmnopqrstuvwx"
+        )
+
+        assertTrue(result is GameUrlResult.Error)
+    }
+
+    @Test
+    fun rejectsDeepLinkWithExtraAuthorityOrFragment() {
+        val encoded = URLEncoder.encode(validUrl, StandardCharsets.UTF_8.name())
+        val extraPath = GameUrlValidator.parse("gamebridgeforfun://connect/extra?url=$encoded")
+        val fragment = GameUrlValidator.parse("gamebridgeforfun://connect?url=$encoded#extra")
+
+        assertTrue(extraPath is GameUrlResult.Error)
+        assertTrue(fragment is GameUrlResult.Error)
+    }
 }

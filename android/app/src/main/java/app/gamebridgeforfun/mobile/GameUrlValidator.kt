@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets
 /**
  * 经过严格校验的电脑游戏页连接信息。
  *
- * APK 只接受本地私有 IPv4、固定游戏页路径、合法 WS 端口和一次性 token。
+ * APK 只接受本地私有 IPv4、固定游戏页路径、合法 WS 端口和本次运行生成的 token。
  * 这样即使其他应用伪造深链，也不能借本 APK 打开公网网页或任意局域网页面。
  */
 data class GameConnection(
@@ -40,7 +40,12 @@ object GameUrlValidator {
         val candidate = try {
             val outerUri = URI(trimmed)
             if (outerUri.scheme.equals(CONNECT_SCHEME, ignoreCase = true)) {
-                if (!outerUri.host.equals(CONNECT_HOST, ignoreCase = true)) {
+                if (!outerUri.host.equals(CONNECT_HOST, ignoreCase = true) ||
+                    outerUri.userInfo != null ||
+                    outerUri.port != -1 ||
+                    !outerUri.path.isNullOrEmpty() ||
+                    outerUri.fragment != null
+                ) {
                     return GameUrlResult.Error("APK 配对链接格式不正确。")
                 }
                 val outerQuery = parseQuery(outerUri.rawQuery)
@@ -99,7 +104,7 @@ object GameUrlValidator {
 
         val token = query["token"].orEmpty()
         if (!tokenPattern.matches(token)) {
-            return GameUrlResult.Error("游戏链接已损坏或缺少一次性 token，请重新扫码。")
+            return GameUrlResult.Error("游戏链接已损坏或缺少本次运行的 token，请重新扫码。")
         }
 
         // 重新构造地址并规范化字段顺序，确保 WebView 只收到已经逐项校验的可信内容。
@@ -115,6 +120,8 @@ object GameUrlValidator {
         if (parts.size != 4) return false
         val numbers = parts.map { part ->
             if (part.isEmpty() || part.length > 3 || part.any { !it.isDigit() }) return false
+            // 拒绝 001 这类历史八进制歧义写法，确保校验器与网络栈理解的是同一个地址。
+            if (part.length > 1 && part.startsWith('0')) return false
             part.toIntOrNull()?.takeIf { it in 0..255 } ?: return false
         }
 

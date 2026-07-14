@@ -24,9 +24,10 @@ class FakeWebSocket:
 class FakeDeviceAppClient:
     """记录硬件调用顺序，不连接真实设备 App 或硬件。"""
 
-    def __init__(self, fail_clear_channel=None):
+    def __init__(self, fail_clear_channel=None, hang_clear_channel=None):
         self.events = []
         self.fail_clear_channel = fail_clear_channel
+        self.hang_clear_channel = hang_clear_channel
 
     async def set_strength(self, channel, operation_type, value):
         self.events.append(("set_strength", channel, operation_type, value))
@@ -36,6 +37,8 @@ class FakeDeviceAppClient:
 
     async def clear_pulses(self, channel):
         self.events.append(("clear_pulses", channel))
+        if channel == self.hang_clear_channel:
+            await asyncio.Event().wait()
         if channel == self.fail_clear_channel:
             raise RuntimeError("模拟单通道停止失败")
 
@@ -125,6 +128,44 @@ class ServerLogicTests(unittest.TestCase):
         self.assertFalse(server.is_console_request_authorized(foreign_origin))
         self.assertFalse(server.is_console_request_authorized(wrong_port))
 
+    def test_certificate_override_only_accepts_canonical_private_ipv4(self):
+        """证书环境变量会进入 OpenSSL 配置，只能接受规范的 RFC1918 IPv4。"""
+        self.assertEqual(server.normalize_private_ipv4("192.168.1.20"), "192.168.1.20")
+        self.assertEqual(server.normalize_private_ipv4("172.31.255.254"), "172.31.255.254")
+        self.assertEqual(server.normalize_private_ipv4("8.8.8.8"), "")
+        self.assertEqual(server.normalize_private_ipv4("127.0.0.1"), "")
+        self.assertEqual(server.normalize_private_ipv4("192.168.1.20\nDNS.2 = example.com"), "")
+
+    def test_port_search_rejects_invalid_start_instead_of_looping(self):
+        """端口越界时要立即失败，不能从 65536 开始无限递增。"""
+        for value in (0, 65536, "not-a-port"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    server.find_free_port(value)
+
+    def test_port_search_skips_active_listener(self):
+        """已有进程监听端口时必须选择下一端口，不能与活跃服务共享流量。"""
+        listener = server.socket.socket(server.socket.AF_INET, server.socket.SOCK_STREAM)
+        listener.bind(("0.0.0.0", 0))
+        listener.listen()
+        occupied_port = listener.getsockname()[1]
+        try:
+            self.assertNotEqual(server.find_free_port(occupied_port), occupied_port)
+        finally:
+            listener.close()
+
+    def test_game_state_does_not_include_console_pairing_secrets(self):
+        """已配对游戏页只拿运行状态，不应收到设备 App 二维码或运行 token。"""
+        server.state["app_qrcode_url"] = "ws://192.168.1.20:15678/private"
+
+        game_message = server.build_state_message(include_console_details=False)
+        console_message = server.build_state_message(include_console_details=True)
+
+        self.assertNotIn("game_token", game_message)
+        self.assertNotIn("app_qrcode_url", game_message)
+        self.assertEqual(console_message["game_token"], server.GAME_ACCESS_TOKEN)
+        self.assertEqual(console_message["app_qrcode_url"], server.state["app_qrcode_url"])
+
 
 class StaticHTTPBoundaryTests(unittest.TestCase):
     """启动临时 HTTP 服务，验证局域网只能拿到明确公开的网页资源。"""
@@ -155,6 +196,7 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
         self.assertEqual(response.headers["Cross-Origin-Resource-Policy"], "same-origin")
         self.assertIn("camera=()", response.headers["Permissions-Policy"])
+        self.assertIn("object-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertNotIn("Python", response.headers["Server"])
 
@@ -229,7 +271,22 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
         cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
         self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
-        self.assertEqual(server.state["client_strength_a"], 0)
+        self.assertIsNone(server.state["client_strength_a"])
+        self.assertEqual(server.state["client_strength_b"], 0)
+        server.device_app_client = FakeDeviceAppClient()
+
+    async def test_stop_timeout_on_a_still_attempts_b(self):
+        """A 通道命令永久不返回时，超时机制仍必须继续停止 B 通道。"""
+        fake_client = FakeDeviceAppClient(hang_clear_channel=server.Channel.A)
+        server.device_app_client = fake_client
+
+        with patch.object(server, "HARDWARE_COMMAND_TIMEOUT_SECONDS", 0.01), patch("builtins.print"):
+            stopped = await server.stop_all_output()
+
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertFalse(stopped)
+        self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
+        self.assertIsNone(server.state["client_strength_a"])
         self.assertEqual(server.state["client_strength_b"], 0)
         server.device_app_client = FakeDeviceAppClient()
 

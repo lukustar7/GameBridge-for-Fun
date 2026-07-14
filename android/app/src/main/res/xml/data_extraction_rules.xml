@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
-    <!-- 连接地址包含一次性 token，云备份和换机传输都不得复制 APK 本地数据。 -->
+    <!-- 连接地址包含本次服务运行的 token，云备份和换机传输都不得复制 APK 本地数据。 -->
     <cloud-backup>
         <exclude domain="root" path="." />
         <exclude domain="file" path="." />

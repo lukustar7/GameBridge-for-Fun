@@ -38,6 +38,24 @@ def read_positive_int_env(name, default_value):
     return value if value > 0 else default_value
 
 
+RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+
+
+def normalize_private_ipv4(value):
+    """把输入规范化为 Android 与局域网网页都能访问的 RFC1918 IPv4；非法值返回空字符串"""
+    try:
+        address = ipaddress.ip_address(str(value).strip())
+    except ValueError:
+        return ""
+
+    if address.version != 4 or not any(address in network for network in RFC1918_NETWORKS):
+        return ""
+    return str(address)
+
+
 # --- 全局状态与配置 ---
 PROJECT_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PROJECT_ROOT / "static"
@@ -53,7 +71,8 @@ GAME_ACCESS_TOKEN = secrets.token_urlsafe(18)
 
 # 手机传感器权限通常需要 HTTPS。默认按当前局域网 IP 自动签发服务器证书；
 # 如现场网络必须固定某个地址，可通过品牌独立的环境变量覆盖自动检测结果。
-CERT_IP_OVERRIDE = os.environ.get("GAME_BRIDGE_FOR_FUN_CERT_IP", "").strip()
+RAW_CERT_IP_OVERRIDE = os.environ.get("GAME_BRIDGE_FOR_FUN_CERT_IP", "").strip()
+CERT_IP_OVERRIDE = normalize_private_ipv4(RAW_CERT_IP_OVERRIDE)
 CERTIFIED_LAN_IP = CERT_IP_OVERRIDE
 ROOT_CA_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS", 90)
 SERVER_CERT_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS", 7)
@@ -85,6 +104,7 @@ MAX_WEB_MESSAGE_QUEUE = 8
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
+HARDWARE_COMMAND_TIMEOUT_SECONDS = 1.0
 
 # 服务运行实例句柄 (用于端口热重启)
 http_server_instance = None
@@ -132,21 +152,6 @@ active_output_task = None
 def get_local_ip():
     """获取手机能访问的本地局域网 IPv4 地址，避开 VPN/虚拟网卡地址"""
 
-    def is_usable_lan_ip(ip_text):
-        try:
-            ip = ipaddress.ip_address(ip_text)
-        except ValueError:
-            return False
-
-        if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
-            return False
-
-        # 198.18.0.0/15 常见于代理/VPN/测试网段，手机通常无法通过它访问电脑。
-        if ip in ipaddress.ip_network("198.18.0.0/15"):
-            return False
-
-        return ip.version == 4 and ip.is_private
-
     candidates = []
 
     # macOS 下 ifconfig 能看到真实 Wi-Fi 地址；优先从这里找 RFC1918 私有网段地址。
@@ -154,8 +159,9 @@ def get_local_ip():
         output = subprocess.check_output(["/sbin/ifconfig"], text=True, timeout=2)
         for match in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)\b", output):
             ip_text = match.group(1)
-            if is_usable_lan_ip(ip_text):
-                candidates.append(ip_text)
+            normalized = normalize_private_ipv4(ip_text)
+            if normalized:
+                candidates.append(normalized)
     except Exception:
         pass
 
@@ -163,8 +169,9 @@ def get_local_ip():
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             ip_text = info[4][0]
-            if is_usable_lan_ip(ip_text):
-                candidates.append(ip_text)
+            normalized = normalize_private_ipv4(ip_text)
+            if normalized:
+                candidates.append(normalized)
     except Exception:
         pass
 
@@ -179,7 +186,7 @@ def get_local_ip():
     try:
         # 最后兜底：连接一个虚拟外部地址，不产生实际流量，但可能被 VPN 劫持。
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
+        ip = normalize_private_ipv4(s.getsockname()[0]) or "127.0.0.1"
     except Exception:
         ip = "127.0.0.1"
     finally:
@@ -188,15 +195,22 @@ def get_local_ip():
 
 
 def find_free_port(start_port):
-    """自动寻找可用的空闲端口，防止冲突"""
-    port = start_port
-    while True:
+    """从起始值向上寻找空闲端口；到达 65535 后明确失败，避免无限循环"""
+    try:
+        normalized_start = int(start_port)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("端口起始值必须是 1-65535 的整数") from error
+    if normalized_start not in range(1, 65536):
+        raise ValueError("端口起始值必须位于 1-65535")
+
+    for port in range(normalized_start, 65536):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.bind(("0.0.0.0", port))
                 return port
-            except socket.error:
-                port += 1
+            except OSError:
+                continue
+    raise OSError(f"从 {normalized_start} 到 65535 没有可用端口")
 
 
 def run_openssl(args):
@@ -584,6 +598,13 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        # 页面仍使用本地内联事件和样式，因此保留 unsafe-inline；其余资源只能来自本机，且禁止插件对象和外部跳转表单。
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        )
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
@@ -598,18 +619,32 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         pass
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """限制局域网慢连接占用时间，退出时也不等待卡住的请求线程"""
+
+    daemon_threads = True
+    request_queue_size = 32
+
+    def get_request(self):
+        request, client_address = super().get_request()
+        request.settimeout(10)
+        return request, client_address
+
+
 def run_http_server():
     """多线程托管 HTTP 服务"""
     global http_server_instance, HTTP_PORT
-    HTTP_PORT = find_free_port(HTTP_PORT)
-    
-    server_address = ("", HTTP_PORT)
-    http_server_instance = ThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
-    
-    # 打印冷峻格式启动日志
-    print(f"HTTP 服务已启动: 端口 {HTTP_PORT}")
-    http_server_ready.set()
-    http_server_instance.serve_forever()
+    try:
+        HTTP_PORT = find_free_port(HTTP_PORT)
+        server_address = ("", HTTP_PORT)
+        http_server_instance = BoundedThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
+
+        print(f"HTTP 服务已启动: 端口 {HTTP_PORT}")
+        http_server_ready.set()
+        http_server_instance.serve_forever()
+    except Exception as error:
+        print(f"HTTP 服务启动失败: {error}")
+        http_server_ready.set()
 
 
 def run_https_server():
@@ -624,7 +659,7 @@ def run_https_server():
     try:
         HTTPS_PORT = find_free_port(HTTPS_PORT)
         server_address = ("", HTTPS_PORT)
-        https_server_instance = ThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
+        https_server_instance = BoundedThreadingHTTPServer(server_address, StaticHTTPRequestHandler)
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(str(SERVER_CERT_PEM), str(SERVER_CERT_KEY))
         https_server_instance.socket = ssl_context.wrap_socket(
@@ -638,19 +673,34 @@ def run_https_server():
     except Exception as e:
         HTTPS_ENABLED = False
         print(f"HTTPS 服务启动失败: {e}")
+        if https_server_instance:
+            https_server_instance.server_close()
+            https_server_instance = None
         https_server_ready.set()
 
 
 # --- 2. WebSocket 广播函数 ---
 
-async def broadcast_state():
-    """向控制台和手机游戏页同步当前的最新连接状态、端口与硬件读数"""
-    async with state_lock:
-        msg = {
-            "type": "state_update",
-            "local_ip": LOCAL_IP,
-            "http_port": HTTP_PORT,
-            "web_ws_port": WEB_WS_PORT,
+def build_state_message(include_console_details=False):
+    """构造最小状态包；只有本机控制台能收到配对密钥、App 二维码与证书详情"""
+    message = {
+        "type": "state_update",
+        "local_ip": LOCAL_IP,
+        "http_port": HTTP_PORT,
+        "web_ws_port": WEB_WS_PORT,
+        "app_ws_port": APP_WS_PORT,
+        "app_connected": state["app_connected"],
+        "app_latency": state["app_latency"],
+        "game_latency": state["game_latency"],
+        "strength_a": state["client_strength_a"],
+        "strength_b": state["client_strength_b"],
+        "limit_a": state["limit_a"],
+        "limit_b": state["limit_b"],
+        "battery_level": state["battery_level"],
+        "game_connected": state["game_client_connected"]
+    }
+    if include_console_details:
+        message.update({
             "https_enabled": HTTPS_ENABLED,
             "https_port": HTTPS_PORT if HTTPS_ENABLED else None,
             "secure_web_ws_port": SECURE_WEB_WS_PORT if HTTPS_ENABLED else None,
@@ -663,23 +713,21 @@ async def broadcast_state():
             "cert_server_valid_days": SERVER_CERT_VALID_DAYS,
             "cert_profile_path": ROOT_CA_MOBILECONFIG_URL_PATH,
             "cert_cer_path": ROOT_CA_CER_URL_PATH,
-            "app_ws_port": APP_WS_PORT,
             "game_token": GAME_ACCESS_TOKEN,
-            "app_connected": state["app_connected"],
-            "app_latency": state["app_latency"],
-            "game_latency": state["game_latency"],
-            "app_qrcode_url": state["app_qrcode_url"],
-            "strength_a": state["client_strength_a"],
-            "strength_b": state["client_strength_b"],
-            "limit_a": state["limit_a"],
-            "limit_b": state["limit_b"],
-            "battery_level": state["battery_level"],
-            "game_connected": state["game_client_connected"]
-        }
-    payload = json.dumps(msg)
-    targets = tuple(console_connections | game_connections)
-    if targets:
-        await asyncio.gather(*(c.send(payload) for c in targets), return_exceptions=True)
+            "app_qrcode_url": state["app_qrcode_url"]
+        })
+    return message
+
+
+async def broadcast_state():
+    """向控制台和手机游戏页同步当前的最新连接状态、端口与硬件读数"""
+    async with state_lock:
+        console_payload = json.dumps(build_state_message(include_console_details=True))
+        game_payload = json.dumps(build_state_message(include_console_details=False))
+    if console_connections:
+        await asyncio.gather(*(c.send(console_payload) for c in tuple(console_connections)), return_exceptions=True)
+    if game_connections:
+        await asyncio.gather(*(c.send(game_payload) for c in tuple(game_connections)), return_exceptions=True)
 
 
 # --- 3. 设备 App 桥接后台协程 ---
@@ -811,6 +859,7 @@ async def app_bridge_runner():
         finally:
             state["app_connected"] = False
             state["app_latency"] = -1
+            state["app_qrcode_url"] = ""
             state["client_strength_a"] = 0
             state["client_strength_b"] = 0
             state["limit_a"] = None
@@ -887,21 +936,44 @@ def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_stren
 
 
 async def clear_all_output_locked():
-    """在持有 shock_lock 时逐路清空；单路失败也必须继续尝试停止另一通道"""
-    state["client_strength_a"] = 0
-    state["client_strength_b"] = 0
+    """在持有 shock_lock 时逐路清空；返回两路停止命令是否全部得到确认"""
     if not device_app_client or not state["app_connected"]:
-        return
+        state["client_strength_a"] = 0
+        state["client_strength_b"] = 0
+        return True
 
     errors = []
-    for channel in (Channel.A, Channel.B):
+    channel_states = (
+        (Channel.A, "client_strength_a"),
+        (Channel.B, "client_strength_b"),
+    )
+    for channel, state_key in channel_states:
+        channel_errors = []
         try:
-            await device_app_client.clear_pulses(channel)
-            await device_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0)
+            await asyncio.wait_for(
+                device_app_client.clear_pulses(channel),
+                timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
+            )
         except Exception as error:
-            errors.append(f"{channel}: {error}")
+            channel_errors.append(f"清波形失败: {error}")
+        try:
+            # 即使清波形失败，也继续尝试把强度设为 0，并且不会因此跳过另一通道。
+            await asyncio.wait_for(
+                device_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0),
+                timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
+            )
+        except Exception as error:
+            channel_errors.append(f"强度归零失败: {error}")
+
+        if channel_errors:
+            # 未得到完整停止确认时不能向界面谎报为 0；None 会显示为“未读取”。
+            state[state_key] = None
+            errors.append(f"{channel}: {', '.join(channel_errors)}")
+        else:
+            state[state_key] = 0
     if errors:
         print(f"停止输出未全部成功: {'; '.join(errors)}")
+    return not errors
 
 
 def on_output_task_done(task):
@@ -954,7 +1026,7 @@ async def stop_all_output():
             active_output_task = None
 
     async with shock_lock:
-        await clear_all_output_locked()
+        return await clear_all_output_locked()
 
 
 async def handle_game_shock(
@@ -991,7 +1063,10 @@ async def handle_game_shock(
 
             pulse_targets = []
             for channel, safe_strength, state_key in channel_targets:
-                await device_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength)
+                await asyncio.wait_for(
+                    device_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength),
+                    timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
+                )
                 state[state_key] = safe_strength
                 pulse_targets.append((channel, build_pulse_operation(safe_strength)))
 
@@ -999,7 +1074,10 @@ async def handle_game_shock(
                 if not state["app_connected"] or generation != shock_generation:
                     break
                 for channel, pulse_unit in pulse_targets:
-                    await device_app_client.add_pulses(channel, pulse_unit)
+                    await asyncio.wait_for(
+                        device_app_client.add_pulses(channel, pulse_unit),
+                        timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
+                    )
                 await asyncio.sleep(0.1)
 
             # 结算型惩罚结束后在同一把锁内清空，避免结束动作和下一条硬件写入交叉。
@@ -1020,6 +1098,23 @@ async def send_test_feedback(websocket, ok, message):
     try:
         await websocket.send(json.dumps({
             "type": "test_feedback",
+            "ok": ok,
+            "message": message
+        }))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
+async def send_stop_feedback(websocket, ok):
+    """明确告知页面停止命令是否得到两路硬件确认，失败时要求用户转到设备 App 处理"""
+    message = (
+        "A/B 两路停止命令已确认"
+        if ok
+        else "停止命令未全部确认，请立即在设备 App 中停止输出并检查连接"
+    )
+    try:
+        await websocket.send(json.dumps({
+            "type": "stop_feedback",
             "ok": ok,
             "message": message
         }))
@@ -1097,8 +1192,9 @@ async def web_ws_handler(websocket, path):
                 elif data.get("type") == "test_shock":
                     await handle_test_shock_request(websocket, data)
                 elif data.get("type") == "stop_shock":
-                    await stop_all_output()
-                    await send_test_feedback(websocket, True, "已请求停止 A/B 输出")
+                    stopped = await stop_all_output()
+                    await broadcast_state()
+                    await send_stop_feedback(websocket, stopped)
                     
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -1191,7 +1287,9 @@ async def web_ws_handler(websocket, path):
                         )
 
                 elif data.get("type") == "stop_shock":
-                    await stop_all_output()
+                    stopped = await stop_all_output()
+                    await broadcast_state()
+                    await send_stop_feedback(websocket, stopped)
                         
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -1246,10 +1344,45 @@ async def run_secure_web_ws_server():
     print(f"网页 WSS 安全通信服务已启动: 端口 {SECURE_WEB_WS_PORT}")
 
 
+async def shutdown_services(app_task=None):
+    """按安全顺序停止硬件输出与各服务，避免退出进程时只依赖连接断开兜底"""
+    try:
+        await stop_all_output()
+    except Exception as error:
+        print(f"退出时停止硬件输出失败: {error}")
+
+    if app_task:
+        app_task.cancel()
+        await asyncio.gather(app_task, return_exceptions=True)
+
+    websocket_servers = tuple(
+        server_instance
+        for server_instance in (web_ws_server_instance, secure_web_ws_server_instance)
+        if server_instance is not None
+    )
+    for server_instance in websocket_servers:
+        server_instance.close()
+    if websocket_servers:
+        await asyncio.gather(
+            *(server_instance.wait_closed() for server_instance in websocket_servers),
+            return_exceptions=True
+        )
+
+    loop = asyncio.get_running_loop()
+    for server_instance in (http_server_instance, https_server_instance):
+        if server_instance is None:
+            continue
+        await loop.run_in_executor(None, server_instance.shutdown)
+        server_instance.server_close()
+
+
 # --- 5. 系统初始化主协程 ---
 
 async def main():
     global LOCAL_IP, CERTIFIED_LAN_IP
+    app_task = None
+    if RAW_CERT_IP_OVERRIDE and not CERT_IP_OVERRIDE:
+        print("已忽略无效的证书 IP 环境变量：只接受 10.x、172.16-31.x 或 192.168.x IPv4")
     LOCAL_IP = get_local_ip()
     CERTIFIED_LAN_IP = CERT_IP_OVERRIDE or LOCAL_IP
     
@@ -1259,32 +1392,37 @@ async def main():
     print(f"HTTPS 证书签发 IP: {CERTIFIED_LAN_IP} ({'手动指定' if CERT_IP_OVERRIDE else '自动检测'})")
     print("=" * 45)
 
-    # 1. 启动 HTTP 托管线程
-    http_thread = threading.Thread(target=run_http_server, daemon=True)
-    http_thread.start()
-    await asyncio.get_running_loop().run_in_executor(None, http_server_ready.wait)
+    try:
+        # 1. 启动 HTTP 托管线程
+        http_thread = threading.Thread(target=run_http_server, daemon=True)
+        http_thread.start()
+        await asyncio.get_running_loop().run_in_executor(None, http_server_ready.wait)
+        if http_server_instance is None:
+            raise RuntimeError("HTTP 服务未能启动")
 
-    # 2. 启动 HTTPS 托管线程。iPhone 传感器权限依赖安全页面，失败时不影响普通 HTTP 玩法。
-    https_thread = threading.Thread(target=run_https_server, daemon=True)
-    https_thread.start()
-    await asyncio.get_running_loop().run_in_executor(None, https_server_ready.wait)
+        # 2. 启动 HTTPS 托管线程。iPhone 传感器权限依赖安全页面，失败时不影响普通 HTTP 玩法。
+        https_thread = threading.Thread(target=run_https_server, daemon=True)
+        https_thread.start()
+        await asyncio.get_running_loop().run_in_executor(None, https_server_ready.wait)
 
-    # 3. 启动网页 WebSocket 交互服务
-    await run_web_ws_server()
-    await run_secure_web_ws_server()
+        # 3. 启动网页 WebSocket 交互服务
+        await run_web_ws_server()
+        await run_secure_web_ws_server()
 
-    # 4. 后台启动设备 App 远控网关及绑定桥接
-    asyncio.create_task(app_bridge_runner())
+        # 4. 后台启动设备 App 远控网关及绑定桥接
+        app_task = asyncio.create_task(app_bridge_runner())
 
-    # 5. 运行环境就绪后，在电脑端自动打开浏览器控制台
-    print("服务已启动")
-    webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
-    if HTTPS_ENABLED:
-        print(f"手机证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
-        print(f"手机 HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
+        # 5. 运行环境就绪后，在电脑端自动打开浏览器控制台
+        print("服务已启动")
+        webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+        if HTTPS_ENABLED:
+            print(f"手机证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+            print(f"手机 HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
 
-    # 6. 挂起主协程，保持服务持久运行
-    await asyncio.Event().wait()
+        # 6. 挂起主协程，保持服务持久运行
+        await asyncio.Event().wait()
+    finally:
+        await shutdown_services(app_task)
 
 
 if __name__ == "__main__":

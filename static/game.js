@@ -6,6 +6,7 @@ let ws = null;
 let latencyTimer = null;
 let reconnectTimer = null;
 let suppressReconnect = false;
+let sensorActionInProgress = false;
 
 const urlParams = new URLSearchParams(window.location.search);
 const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
@@ -225,8 +226,8 @@ function readNumber(id, fallback = 0) {
 
 function setText(id, value) {
     const node = $(id);
-    if (node) {
-        node.innerText = value;
+    if (node && node.innerText !== String(value)) {
+        node.innerText = String(value);
     }
 }
 
@@ -264,6 +265,10 @@ function persistSettings() {
 // --- 3. WebSocket 网络连接与心跳延迟监控 ---
 
 function connectWebSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
     const host = window.location.hostname || "127.0.0.1";
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const tokenQuery = gameToken ? `?token=${encodeURIComponent(gameToken)}` : "";
@@ -271,9 +276,11 @@ function connectWebSocket() {
 
     suppressReconnect = false;
     clearTimeout(reconnectTimer);
-    ws = new WebSocket(targetUrl);
+    const socket = new WebSocket(targetUrl);
+    ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+        if (ws !== socket) return;
         console.log(`游戏端连接成功: ${targetUrl}`);
         triedPortsCount = 0;
         setText("tech-game-status", "已连接");
@@ -284,8 +291,8 @@ function connectWebSocket() {
 
         clearInterval(latencyTimer);
         latencyTimer = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
+            if (ws === socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
                     type: "ping",
                     time: Date.now()
                 }));
@@ -293,7 +300,8 @@ function connectWebSocket() {
         }, 1000);
     };
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+        if (ws !== socket) return;
         let data = null;
         try {
             data = JSON.parse(event.data);
@@ -316,12 +324,19 @@ function connectWebSocket() {
             updateTechStatus(data);
         } else if (data.type === "test_feedback") {
             setMobileTestResult(data.message || "测试请求已处理", data.ok);
+        } else if (data.type === "stop_feedback") {
+            const message = data.message || "停止请求已处理";
+            setMobileTestResult(message, data.ok);
+            setText("game-status", message);
         } else if (data.type === "button_feedback") {
             vibrateBriefly(20);
         }
     };
 
-    ws.onclose = (event) => {
+    socket.onclose = (event) => {
+        // 弱网下旧连接可能在新连接建立后才回调；迟到事件不得覆盖新连接或创建并行重连。
+        if (ws !== socket) return;
+        ws = null;
         clearInterval(latencyTimer);
         latestGameLatency = null;
         setText("ping-badge", "网速延迟: 离线");
@@ -360,8 +375,9 @@ function connectWebSocket() {
         }
     };
 
-    ws.onerror = () => {
-        ws.close();
+    socket.onerror = () => {
+        // 关闭真正报错的对象，避免旧连接误关掉刚恢复的新连接。
+        socket.close();
     };
 }
 
@@ -1009,7 +1025,6 @@ function saveSelectedSettings(silent = false) {
     const cfg = collectSettingsFromForm(selectedGame);
     gameSettings[selectedGame] = cfg;
     persistSettings();
-    populateSettingsForm(selectedGame);
 
     if (!silent) {
         setText("settings-message", "设置已保存");
@@ -1093,84 +1108,105 @@ function collectSettingsFromForm(gameName) {
 
 async function calibrateCurrentPose(gameName) {
     if (gameName !== "shake" && gameName !== "angle") return;
-
-    resetRequiredSensorState(gameName);
-    setText("settings-message", "正在请求手机倾斜感应权限...");
-    const allowed = await requestSensorPermission();
-    if (!allowed) {
-        setText("settings-message", getSensorNotReadyMessage(gameName));
+    if (sensorActionInProgress) {
+        setText("settings-message", "感应器请求正在处理中，请稍等。");
         return;
     }
 
-    bindSensors();
-    const ready = await waitForSensorReadiness(gameName);
-    if (!ready) {
-        setText("settings-message", getSensorNotReadyMessage(gameName));
-        return;
-    }
-
-    if (gameName === "shake") {
-        calibration.shakeBeta = phoneBeta;
-        calibration.shakeGamma = phoneGamma;
-    } else if (gameName === "angle") {
-        calibration.angleBeta = phoneBeta;
-    }
-
-    setText("settings-message", "已使用当前握持姿态作为基准");
-}
-
-async function startConfiguredGame() {
-    if (!selectedGame) return;
-
-    saveSelectedSettings(true);
-    const needsSensors = selectedGame === "shake" || selectedGame === "angle" || selectedGame === "dice";
-    if (needsSensors) {
-        resetRequiredSensorState(selectedGame);
-        setText("settings-message", "正在请求手机感应器权限...");
+    sensorActionInProgress = true;
+    try {
+        resetRequiredSensorState(gameName);
+        setText("settings-message", "正在请求手机倾斜感应权限...");
         const allowed = await requestSensorPermission();
         if (!allowed) {
-            setText("settings-message", getSensorNotReadyMessage(selectedGame));
+            setText("settings-message", getSensorNotReadyMessage(gameName));
             return;
         }
 
         bindSensors();
-        const ready = await waitForSensorReadiness(selectedGame);
-        if (!ready && (selectedGame === "shake" || selectedGame === "angle")) {
-            setText("settings-message", getSensorNotReadyMessage(selectedGame));
+        const ready = await waitForSensorReadiness(gameName);
+        if (!ready) {
+            setText("settings-message", getSensorNotReadyMessage(gameName));
             return;
         }
 
-        if (!ready && selectedGame === "dice" && !gameSettings.dice.manualRoll) {
-            setText("settings-message", "未收到摇晃感应数据；请先开启手动摇号，或检查 iPhone 动作感应权限");
-            return;
+        // 等待权限期间如果用户已经离开当前设置页，不再把迟到结果写进另一款游戏。
+        if (selectedGame !== gameName) return;
+        if (gameName === "shake") {
+            calibration.shakeBeta = phoneBeta;
+            calibration.shakeGamma = phoneGamma;
+        } else {
+            calibration.angleBeta = phoneBeta;
         }
 
-        if (!ready && selectedGame === "dice") {
-            setText("settings-message", "未收到摇晃感应数据，进入后仍可用手动摇号");
+        setText("settings-message", "已使用当前握持姿态作为基准");
+    } finally {
+        sensorActionInProgress = false;
+    }
+}
+
+async function startConfiguredGame() {
+    if (!selectedGame) return;
+    if (sensorActionInProgress) {
+        setText("settings-message", "感应器请求正在处理中，请稍等。");
+        return;
+    }
+
+    const gameName = selectedGame;
+    sensorActionInProgress = true;
+    try {
+        saveSelectedSettings(true);
+        const needsSensors = gameName === "shake" || gameName === "angle" || gameName === "dice";
+        if (needsSensors) {
+            resetRequiredSensorState(gameName);
+            setText("settings-message", "正在请求手机感应器权限...");
+            const allowed = await requestSensorPermission();
+            if (!allowed) {
+                setText("settings-message", getSensorNotReadyMessage(gameName));
+                return;
+            }
+
+            bindSensors();
+            const ready = await waitForSensorReadiness(gameName);
+            if (!ready && (gameName === "shake" || gameName === "angle")) {
+                setText("settings-message", getSensorNotReadyMessage(gameName));
+                return;
+            }
+
+            if (!ready && gameName === "dice" && !gameSettings.dice.manualRoll) {
+                setText("settings-message", "未收到摇晃感应数据；请先开启手动摇号，或检查 iPhone 动作感应权限");
+                return;
+            }
+
+            if (!ready && gameName === "dice") {
+                setText("settings-message", "未收到摇晃感应数据，进入后仍可用手动摇号");
+            }
         }
+
+        // 权限弹窗可能停留较久；用户如果已经切走，迟到结果不能擅自启动旧游戏。
+        if (selectedGame !== gameName) return;
+        if (gameName === "dice") unlockAudio();
+        requestScreenWakeLock();
+
+        activeGame = gameName;
+        gameStartedAt = Date.now();
+        nextPulseAllowedAt = 0;
+        shakeOutSince = null;
+        angleBadSince = null;
+
+        // 每次开始时自动用当前姿态兜底校准，避免玩家刚进入就因为初始握法被误罚。
+        if (activeGame === "shake") {
+            calibration.shakeBeta = phoneBeta;
+            calibration.shakeGamma = phoneGamma;
+        } else if (activeGame === "angle") {
+            calibration.angleBeta = phoneBeta;
+        }
+
+        setupPlayScreen(activeGame);
+        showScreen("screen-play");
+    } finally {
+        sensorActionInProgress = false;
     }
-
-    if (selectedGame === "dice") {
-        unlockAudio();
-    }
-    requestScreenWakeLock();
-
-    activeGame = selectedGame;
-    gameStartedAt = Date.now();
-    nextPulseAllowedAt = 0;
-    shakeOutSince = null;
-    angleBadSince = null;
-
-    // 每次开始时自动用当前姿态兜底校准，避免玩家刚进入就因为初始握法被误罚。
-    if (activeGame === "shake") {
-        calibration.shakeBeta = phoneBeta;
-        calibration.shakeGamma = phoneGamma;
-    } else if (activeGame === "angle") {
-        calibration.angleBeta = phoneBeta;
-    }
-
-    setupPlayScreen(activeGame);
-    showScreen("screen-play");
 }
 
 function setupPlayScreen(gameName) {
@@ -1743,6 +1779,8 @@ function initDiceGame() {
 function triggerDiceShake(force) {
     const cfg = gameSettings.dice;
     const now = Date.now();
+    // 按钮在惩罚期间会禁用，传感器也必须遵守同一边界，避免再次摇晃覆盖正在结算的队列。
+    if (activeGame !== "dice" || dicePunishRemaining > 0 || dicePunishTimer !== null) return;
 
     if (!isDiceShaking) {
         isDiceShaking = true;
@@ -1773,7 +1811,7 @@ function triggerDiceShake(force) {
 
 function rollDicesManual() {
     const cfg = gameSettings.dice;
-    if (!cfg.manualRoll || isDiceShaking) return;
+    if (!cfg.manualRoll || isDiceShaking || dicePunishRemaining > 0 || dicePunishTimer !== null) return;
 
     unlockAudio();
     isDiceShaking = true;
@@ -1894,6 +1932,8 @@ function startDicePunishQueue(rawCount, reason) {
         return;
     }
 
+    clearTimeout(dicePunishTimer);
+    dicePunishTimer = null;
     dicePunishGeneration++;
     dicePunishRemaining = cappedCount;
     const cappedText = rawCount > cappedCount ? `，已按上限截到 ${cappedCount} 下` : "";
@@ -1918,9 +1958,17 @@ function runNextDicePunish(generation) {
         "dice-instruction",
         sent
             ? `正在电 | 剩余 ${currentIndex} 下，每下 ${cfg.singleSeconds.toFixed(1)}s，间隔 ${cfg.gapSeconds.toFixed(1)}s`
-            : `${getOutputBlockReason() || "输出忙"} | 剩余 ${currentIndex} 下`
+            : `${getOutputBlockReason() || "输出忙"} | 本局队列已停止，未输出`
     );
     $("dice-instruction").style.color = "#ff3333";
+
+    if (!sent) {
+        // 网络断开或输出忙时立即终止本局，不能继续倒计数并伪装成硬件已经执行。
+        dicePunishRemaining = 0;
+        dicePunishTimer = null;
+        $("btn-roll").disabled = !gameSettings.dice.manualRoll;
+        return;
+    }
 
     if (navigator.vibrate) {
         navigator.vibrate(Math.min(900, totalDuration));
@@ -1929,6 +1977,7 @@ function runNextDicePunish(generation) {
     dicePunishRemaining -= 1;
     const nextDelay = dicePunishRemaining <= 0 ? totalDuration : totalDuration + gapDuration;
     dicePunishTimer = setTimeout(() => {
+        dicePunishTimer = null;
         if (activeGame !== "dice" || generation !== dicePunishGeneration) {
             return;
         }
@@ -2254,7 +2303,8 @@ function triggerSlotPunish(reason, forceMax) {
     vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
     if (!sent) {
-        settleSlotPressureAfterPunish(shouldClearPressure, `${reason} | ${outputBlockReason}，${shouldClearPressure ? "压力清零" : "压力保留 100%"}`);
+        // 只有真实完成惩罚后才执行“清空压力”；断线或输出忙不能让本局无代价结算。
+        settleSlotPressureAfterPunish(false, `${reason} | ${outputBlockReason}，未实际输出，压力保留 100%`);
         finishSlotRound();
         return;
     }
@@ -2329,6 +2379,13 @@ function enhanceControlAccessibility() {
         if (labelText) {
             control.setAttribute("aria-label", labelText);
         }
+    });
+
+    // 拖动期间只更新当前数值，松手后再统一显示经过边界归一化的结果，避免每一帧重建整张设置表单。
+    document.querySelectorAll("input[type='range']").forEach((control) => {
+        control.addEventListener("change", () => {
+            if (selectedGame) populateSettingsForm(selectedGame);
+        });
     });
 }
 

@@ -37,6 +37,7 @@ class NativeSensorDispatcher(
     private val rotationMatrix = FloatArray(9)
     private val adjustedRotationMatrix = FloatArray(9)
     private val orientation = FloatArray(3)
+    private val accelerationFilter = LinearAccelerationFilter()
 
     private var beta = 0.0
     private var gamma = 0.0
@@ -68,13 +69,14 @@ class NativeSensorDispatcher(
         orientationReady = false
         motionReady = false
         lastDispatchNanos = 0L
+        accelerationFilter.reset()
     }
 
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> updateOrientationFromRotationVector(event.values)
             Sensor.TYPE_LINEAR_ACCELERATION -> updateMotion(event.values, includeFallbackOrientation = false)
-            Sensor.TYPE_ACCELEROMETER -> updateMotion(
+            Sensor.TYPE_ACCELEROMETER -> updateMotionFromAccelerometer(
                 event.values,
                 includeFallbackOrientation = rotationSensor == null,
             )
@@ -118,6 +120,26 @@ class NativeSensorDispatcher(
             val vertical = sqrt(accelerationX * accelerationX + accelerationZ * accelerationZ)
             beta = Math.toDegrees(atan2(-accelerationY, vertical))
             gamma = Math.toDegrees(atan2(accelerationX, horizontal))
+            orientationReady = true
+        }
+    }
+
+    private fun updateMotionFromAccelerometer(values: FloatArray, includeFallbackOrientation: Boolean) {
+        val rawX = values.getOrElse(0) { 0f }.toDouble()
+        val rawY = values.getOrElse(1) { 0f }.toDouble()
+        val rawZ = values.getOrElse(2) { 0f }.toDouble()
+        val (linearX, linearY, linearZ) = accelerationFilter.filter(rawX, rawY, rawZ)
+        accelerationX = linearX
+        accelerationY = linearY
+        accelerationZ = linearZ
+        motionReady = true
+
+        if (includeFallbackOrientation) {
+            // 倾斜角仍需使用包含重力的原始值；摇晃强度则只使用上面去重力后的分量。
+            val horizontal = sqrt(rawY * rawY + rawZ * rawZ)
+            val vertical = sqrt(rawX * rawX + rawZ * rawZ)
+            beta = Math.toDegrees(atan2(-rawY, vertical))
+            gamma = Math.toDegrees(atan2(rawX, horizontal))
             orientationReady = true
         }
     }

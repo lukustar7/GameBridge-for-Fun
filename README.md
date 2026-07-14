@@ -21,6 +21,8 @@ macOS 双击运行：
 ./start.command
 ```
 
+依赖版本已匹配时，`start.command` 直接启动服务；只有缺少或版本不符时才访问清华镜像安装。
+
 命令行运行：
 
 ```bash
@@ -36,7 +38,7 @@ python3 server.py
 
 可选环境变量：
 
-- `GAME_BRIDGE_FOR_FUN_CERT_IP`：覆盖自动检测到的证书签发 IP。
+- `GAME_BRIDGE_FOR_FUN_CERT_IP`：覆盖自动检测到的证书签发 IP，仅接受 `10.x`、`172.16-31.x` 或 `192.168.x` IPv4。
 - `GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS`：设置本地根证书有效天数，默认 `90`。
 - `GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS`：设置服务器证书有效天数，默认 `7`。
 
@@ -51,7 +53,7 @@ node --check static/game.js
 
 ## Android APK
 
-APK 要求 Android 15 或更高版本，包名为 `app.gamebridgeforfun.mobile`。电脑控制台会生成 `gamebridgeforfun://connect` 配对二维码，APK 只接受私有 IPv4、固定游戏路径、合法端口和一次性 token。
+APK 要求 Android 15 或更高版本，包名为 `app.gamebridgeforfun.mobile`。电脑控制台会生成 `gamebridgeforfun://connect` 配对二维码，APK 只接受私有 IPv4、固定游戏路径、合法端口和本次服务运行生成的 token。
 
 使用 Android Studio 打开 `android/`，或在 macOS 执行：
 
@@ -87,7 +89,7 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 
 ## 安全边界
 
-本项目仅面向本地局域网使用。电脑控制台 WebSocket 仅接受本机页面，游戏端 WebSocket 使用一次性运行 token 校验；后端仍会对所有强度、时长和请求频率做硬限制。
+本项目仅面向本地局域网使用。电脑控制台 WebSocket 仅接受本机页面，游戏端 WebSocket 使用本次服务运行生成的 token 校验；设备 App 配对二维码、运行 token 和证书详情只向本机控制台发送。
 
 App 尚未回传通道限幅或限幅为 0 时，后端拒绝对应输出；A+B 模式要求两路限幅都有效。所有硬件输出最多只运行 1 个任务，重叠请求不会进入等待队列。
 

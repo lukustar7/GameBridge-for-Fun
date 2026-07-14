@@ -258,7 +258,8 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = true
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-            userAgentString = "$userAgentString GameBridgeForFun/1.1.0"
+            // 版本号只从 Gradle 读取，避免升级 APK 后 User-Agent 仍残留旧版本。
+            userAgentString = "$userAgentString GameBridgeForFun/${BuildConfig.VERSION_NAME}"
         }
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         binding.gameWebView.webViewClient = RestrictedGameWebViewClient()

@@ -1,6 +1,7 @@
 /* 电脑端控制台交互逻辑 console.js */
 
 let ws = null;
+let reconnectTimer = null;
 const urlParams = new URLSearchParams(window.location.search);
 const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
 const pinnedSecureWsPort = parseInt(urlParams.get("secureWs"), 10);
@@ -20,11 +21,12 @@ let certQR = null;
 let certCerQR = null;
 let secureGameQR = null;
 let latestState = null;
+const renderedQrValues = new WeakMap();
 
 function setText(id, value) {
     const node = document.getElementById(id);
-    if (node) {
-        node.innerText = value;
+    if (node && node.innerText !== String(value)) {
+        node.innerText = String(value);
     }
 }
 
@@ -61,15 +63,23 @@ async function copyAddress(sourceId, resultId) {
 
 function renderQRCode(instance, text, targetName) {
     if (!instance || !text) return false;
+    if (renderedQrValues.get(instance) === text) return true;
 
     try {
         instance.clear();
         instance.makeCode(text);
+        renderedQrValues.set(instance, text);
         return true;
     } catch (error) {
         console.error(`${targetName}二维码生成失败:`, error);
         return false;
     }
+}
+
+function clearQRCode(instance) {
+    if (!instance) return;
+    instance.clear();
+    renderedQrValues.delete(instance);
 }
 
 // 初始化二维码实例
@@ -142,21 +152,29 @@ function initQRCodes() {
 
 // 自动探测并建立 WebSocket 连接
 function connectWebSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
+    clearTimeout(reconnectTimer);
     const host = window.location.hostname || "127.0.0.1";
     const wsScheme = isSecurePage ? "wss" : "ws";
     const targetUrl = `${wsScheme}://${host}:${currentWsPort}/console`;
     setConnectionHint(`正在连接后台通信: ${targetUrl}`);
     
-    ws = new WebSocket(targetUrl);
+    const socket = new WebSocket(targetUrl);
+    ws = socket;
     
-    ws.onopen = () => {
+    socket.onopen = () => {
+        if (ws !== socket) return;
         console.log(`控制台连接成功: ${targetUrl}`);
         triedPortsCount = 0;
         setBackendStatus("online", "后台已连接");
         setConnectionHint("后台通信已连接，正在等待二维码数据...");
     };
     
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+        if (ws !== socket) return;
         let data = null;
         try {
             data = JSON.parse(event.data);
@@ -171,12 +189,17 @@ function connectWebSocket() {
             updateGameLatency(data.latency);
         } else if (data.type === "test_feedback") {
             setConsoleTestResult(data.message || "测试请求已处理", data.ok);
+        } else if (data.type === "stop_feedback") {
+            setConsoleTestResult(data.message || "停止请求已处理", data.ok);
         } else if (data.type === "button_feedback") {
             console.log(`收到设备物理按键: ${data.button}`);
         }
     };
     
-    ws.onclose = (event) => {
+    socket.onclose = (event) => {
+        // 旧连接的迟到回调不能覆盖新连接状态，更不能安排第二条并行重连链。
+        if (ws !== socket) return;
+        ws = null;
         setBackendStatus("offline", "后台已离线");
         if (event.code === 1008) {
             setConnectionHint("控制台只允许在运行服务的这台电脑上打开，请使用终端显示的 127.0.0.1 地址。");
@@ -186,7 +209,7 @@ function connectWebSocket() {
         setConnectionHint("后台通信离线：请确认 start.command 终端窗口仍在运行，然后刷新本页。");
 
         if ((isSecurePage && hasPinnedSecureWsPort) || (!isSecurePage && hasPinnedWsPort)) {
-            setTimeout(connectWebSocket, 2000);
+            reconnectTimer = setTimeout(connectWebSocket, 2000);
             return;
         }
 
@@ -195,10 +218,10 @@ function connectWebSocket() {
             triedPortsCount++;
             const startPort = isSecurePage ? 18444 : 18081;
             currentWsPort = startPort + (triedPortsCount % maxPortPortion);
-            setTimeout(connectWebSocket, 100);
+            reconnectTimer = setTimeout(connectWebSocket, 100);
         } else {
             // 已完全断开，每 2 秒尝试重连
-            setTimeout(() => {
+            reconnectTimer = setTimeout(() => {
                 triedPortsCount = 0;
                 currentWsPort = isSecurePage ? 18444 : 18081;
                 connectWebSocket();
@@ -206,8 +229,9 @@ function connectWebSocket() {
         }
     };
     
-    ws.onerror = () => {
-        ws.close();
+    socket.onerror = () => {
+        // 必须关闭实际报错的连接；使用全局 ws 会误关掉已经替换成功的新连接。
+        socket.close();
     };
 }
 
@@ -283,7 +307,7 @@ function updateUI(data) {
     } else {
         setText("secure-game-url-text", "HTTPS 服务未启用：请确认 openssl 可用并重启服务。");
         setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战和保持角度可能无法取得手机感应器权限。");
-        if (secureGameQR) secureGameQR.clear();
+        clearQRCode(secureGameQR);
     }
 
     // 5. 更新技术状态表格

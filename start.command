@@ -13,8 +13,13 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# 安装依赖项 (使用清华镜像源静默安装)
-python3 -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --quiet
+# 已安装且版本完全匹配时直接启动，避免每次双击都访问镜像并等待网络响应。
+if python3 -c 'import importlib.metadata as m; import pydglab_ws, websockets; assert m.version("pydglab-ws") == "1.1.0"; assert m.version("websockets") == "12.0"' 2>/dev/null; then
+    echo "Python 依赖已就绪"
+else
+    echo "正在从清华镜像安装 Python 依赖..."
+    python3 -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --quiet
+fi
 
 # 启动服务端
 python3 server.py

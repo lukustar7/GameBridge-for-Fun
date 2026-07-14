@@ -1,1 +1,1 @@
-f25ffa01a27bd27b1c8e4e321ba645362caad8092e228c0ef5a09ddcfe76a6fa  GameBridgeForFun-Android15-debug.apk
+59b548715f8f04366b40b750b567fa627023f5383528e30ebec732726cfb4187  GameBridgeForFun-Android15-debug.apk
