@@ -8,6 +8,7 @@ import os
 import plistlib
 import re
 import secrets
+import signal
 import shutil
 import socket
 import ssl
@@ -105,6 +106,13 @@ TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
 HARDWARE_COMMAND_TIMEOUT_SECONDS = 1.0
+# 游戏页每秒会发送应用层心跳。输出期间连续超过该时间没有收到所属页面的任何消息，
+# 说明页面可能冻结、网络半断开或系统已经暂停 JavaScript；后端必须自行停机，不能只等 WebSocket 断开。
+OUTPUT_HEARTBEAT_TIMEOUT_SECONDS = 3.5
+# 持续型玩法的前端最短约 300ms 才会续发一次；超过该时间仍无新脉冲，说明玩家已回到安全区
+# 或传感器判定已停止。普通网络 ping 不能替它续期，否则通道强度会长期停留在非零值。
+CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS = 0.75
+DISABLE_AUTO_BROWSER = os.environ.get("GAME_BRIDGE_FOR_FUN_NO_BROWSER", "").strip() == "1"
 
 # 服务运行实例句柄 (用于端口热重启)
 http_server_instance = None
@@ -145,6 +153,11 @@ game_connection_last_pulse_at = {}
 shock_generation = 0
 last_test_shock_at = 0
 active_output_task = None
+active_output_clear_after = True
+output_watchdog_task = None
+output_watchdog_owner = None
+output_watchdog_mode = None
+output_watchdog_generation = 0
 
 
 # --- 工具函数：网络与端口探测 ---
@@ -976,11 +989,77 @@ async def clear_all_output_locked():
     return not errors
 
 
+def disarm_output_watchdog():
+    """撤销游戏页输出看门狗；代际号可让已经醒来的旧任务失效，避免误停后续新输出"""
+    global output_watchdog_task, output_watchdog_owner, output_watchdog_mode, output_watchdog_generation
+    output_watchdog_generation += 1
+    task = output_watchdog_task
+    output_watchdog_task = None
+    output_watchdog_owner = None
+    output_watchdog_mode = None
+    if task and not task.done():
+        task.cancel()
+
+
+async def run_output_watchdog(generation, owner, timeout_seconds):
+    """等待游戏页续报；超时后不再相信浏览器状态，直接执行后端硬停机"""
+    global output_watchdog_task, output_watchdog_owner
+    try:
+        await asyncio.sleep(timeout_seconds)
+    except asyncio.CancelledError:
+        return
+
+    if generation != output_watchdog_generation or owner is not output_watchdog_owner:
+        return
+
+    # 先摘除自身引用，防止 stop_all_output 在同一个任务里反向取消自己。
+    output_watchdog_task = None
+    output_watchdog_owner = None
+    print("游戏页输出心跳超时，已自动停止 A/B 两路输出")
+    await stop_all_output()
+    await broadcast_state()
+
+
+def arm_output_watchdog(owner, mode="page"):
+    """设置输出责任方；长时任务看页面心跳，持续玩法只看新的脉冲请求"""
+    global output_watchdog_task, output_watchdog_owner, output_watchdog_mode, output_watchdog_generation
+    if mode not in {"page", "continuous"}:
+        raise ValueError("未知输出看门狗模式")
+    disarm_output_watchdog()
+    output_watchdog_generation += 1
+    generation = output_watchdog_generation
+    output_watchdog_owner = owner
+    output_watchdog_mode = mode
+    timeout_seconds = (
+        CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS
+        if mode == "continuous"
+        else OUTPUT_HEARTBEAT_TIMEOUT_SECONDS
+    )
+    output_watchdog_task = asyncio.create_task(
+        run_output_watchdog(generation, owner, timeout_seconds)
+    )
+
+
+def refresh_output_watchdog(owner):
+    """普通页面消息只给长时结算续期；持续短脉冲必须由新 game_pulse 明确续期"""
+    if (
+        owner is output_watchdog_owner
+        and output_watchdog_mode == "page"
+        and output_watchdog_task
+        and not output_watchdog_task.done()
+    ):
+        arm_output_watchdog(owner, mode="page")
+
+
 def on_output_task_done(task):
-    """释放当前任务引用；任务内部已记录异常，这里只处理正常取消"""
-    global active_output_task
+    """释放当前任务引用；会自行清零的结算任务完成后不再需要页面心跳兜底"""
+    global active_output_task, active_output_clear_after
     if active_output_task is task:
+        should_disarm = active_output_clear_after
         active_output_task = None
+        active_output_clear_after = True
+        if should_disarm:
+            disarm_output_watchdog()
 
 
 def schedule_game_shock(
@@ -992,7 +1071,7 @@ def schedule_game_shock(
     clear_after=True
 ):
     """最多保留一个硬件输出任务，防止异常页面把 60 秒任务无限堆进内存"""
-    global active_output_task
+    global active_output_task, active_output_clear_after
     if not state["app_connected"] or not device_app_client:
         return False
     if not build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent):
@@ -1008,14 +1087,16 @@ def schedule_game_shock(
         b_strength_percent,
         clear_after
     ))
+    active_output_clear_after = clear_after
     active_output_task.add_done_callback(on_output_task_done)
     return True
 
 
 async def stop_all_output():
     """立即取消当前任务并串行清空 A/B 两路，避免停止命令与脉冲下发交叉执行"""
-    global shock_generation, active_output_task
+    global shock_generation, active_output_task, active_output_clear_after
     shock_generation += 1
+    disarm_output_watchdog()
 
     running_task = active_output_task
     current_task = asyncio.current_task()
@@ -1024,6 +1105,7 @@ async def stop_all_output():
         await asyncio.gather(running_task, return_exceptions=True)
         if active_output_task is running_task:
             active_output_task = None
+            active_output_clear_after = True
 
     async with shock_lock:
         return await clear_all_output_locked()
@@ -1224,6 +1306,10 @@ async def web_ws_handler(websocket, path):
                     continue
                 if not isinstance(data, dict):
                     continue
+
+                # 输出看门狗只认发起输出的这一条游戏连接。正常页面每秒至少发送一次 ping，
+                # 页面冻结或网络半断开时不会再续报，后端会在硬期限内自动归零。
+                refresh_output_watchdog(websocket)
                 
                 # 网页自定义应用层 Ping 延迟包，原样回复
                 if data.get("type") == "ping":
@@ -1256,7 +1342,7 @@ async def web_ws_handler(websocket, path):
                     duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
-                        schedule_game_shock(
+                        scheduled = schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
@@ -1264,6 +1350,8 @@ async def web_ws_handler(websocket, path):
                             b_strength_percent,
                             clear_after=False
                         )
+                        if scheduled:
+                            arm_output_watchdog(websocket, mode="continuous")
                         
                 # 结算型惩罚上报：骰子、角子机满槽和角子机轻惩罚都走这里。
                 elif data.get("type") == "game_shock_trigger":
@@ -1277,7 +1365,7 @@ async def web_ws_handler(websocket, path):
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
                         # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
-                        schedule_game_shock(
+                        scheduled = schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
@@ -1285,6 +1373,8 @@ async def web_ws_handler(websocket, path):
                             b_strength_percent,
                             clear_after=True
                         )
+                        if scheduled:
+                            arm_output_watchdog(websocket)
 
                 elif data.get("type") == "stop_shock":
                     stopped = await stop_all_output()
@@ -1381,6 +1471,20 @@ async def shutdown_services(app_task=None):
 async def main():
     global LOCAL_IP, CERTIFIED_LAN_IP
     app_task = None
+    shutdown_event = asyncio.Event()
+    registered_signals = []
+    loop = asyncio.get_running_loop()
+
+    # 双击启动后的终端关闭、Ctrl+C 和系统结束进程都会先唤醒同一条安全退出路径。
+    # SIGKILL 无法被任何程序捕获，因此真实设备验收仍必须覆盖设备 App 内的人工停止。
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            loop.add_signal_handler(shutdown_signal, shutdown_event.set)
+            registered_signals.append(shutdown_signal)
+        except (NotImplementedError, RuntimeError, ValueError):
+            # 非 macOS/Unix 环境可能不支持异步信号处理；保留原有 KeyboardInterrupt 兜底。
+            continue
+
     if RAW_CERT_IP_OVERRIDE and not CERT_IP_OVERRIDE:
         print("已忽略无效的证书 IP 环境变量：只接受 10.x、172.16-31.x 或 192.168.x IPv4")
     LOCAL_IP = get_local_ip()
@@ -1414,15 +1518,19 @@ async def main():
 
         # 5. 运行环境就绪后，在电脑端自动打开浏览器控制台
         print("服务已启动")
-        webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
+        if not DISABLE_AUTO_BROWSER:
+            webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
         if HTTPS_ENABLED:
             print(f"手机证书安装页: http://{LOCAL_IP}:{HTTP_PORT}/static/index.html?ws={WEB_WS_PORT}")
             print(f"手机 HTTPS 游戏页: https://{CERTIFIED_LAN_IP}:{HTTPS_PORT}/static/game.html?ws={SECURE_WEB_WS_PORT}&token={GAME_ACCESS_TOKEN}")
 
-        # 6. 挂起主协程，保持服务持久运行
-        await asyncio.Event().wait()
+        # 6. 挂起主协程，直到系统信号要求按安全顺序停止输出和所有服务。
+        await shutdown_event.wait()
+        print("正在安全停止服务...")
     finally:
         await shutdown_services(app_task)
+        for shutdown_signal in registered_signals:
+            loop.remove_signal_handler(shutdown_signal)
 
 
 if __name__ == "__main__":

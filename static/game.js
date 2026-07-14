@@ -84,6 +84,19 @@ const DEFAULT_SETTINGS = {
     }
 };
 
+// 规则计算放在独立纯逻辑文件中，浏览器和 Node 自动化测试执行的是同一份代码。
+const {
+    advanceSlotState,
+    buildSlotResult,
+    capPunishmentCount,
+    clamp,
+    classifySlotResult,
+    estimateDiceQueueSeconds,
+    evaluateDiceRound,
+    isTimestampFresh,
+    restoreSettings
+} = window.GameBridgeForFunLogic;
+
 const GAME_META = {
     shake: {
         title: "手抖挑战",
@@ -146,6 +159,7 @@ let phoneGamma = 0;  // 左右倾斜，单位为度。
 let shakeAcc = 0;    // 三轴加速度合成值，摇骰子时用于判断晃动强度。
 let lastOrientationAt = 0;
 let lastMotionAt = 0;
+let sensorStopRequestedForStaleData = false;
 
 let canvas = null;
 let ctx = null;
@@ -215,10 +229,6 @@ function $(id) {
     return document.getElementById(id);
 }
 
-function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-}
-
 function readNumber(id, fallback = 0) {
     const value = parseFloat($(id).value);
     return Number.isFinite(value) ? value : fallback;
@@ -242,12 +252,7 @@ function loadSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : {};
-        return {
-            shake: { ...DEFAULT_SETTINGS.shake, ...(parsed.shake || {}) },
-            angle: { ...DEFAULT_SETTINGS.angle, ...(parsed.angle || {}) },
-            dice: { ...DEFAULT_SETTINGS.dice, ...(parsed.dice || {}) },
-            slot: { ...DEFAULT_SETTINGS.slot, ...(parsed.slot || {}) }
-        };
+        return restoreSettings(DEFAULT_SETTINGS, parsed);
     } catch (error) {
         console.warn("读取本地游戏设置失败，已回退默认值:", error);
         return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -711,15 +716,16 @@ function waitForSensorReadiness(gameName, timeoutMs = 1400) {
 }
 
 function hasFreshOrientation() {
-    return orientationReady && Date.now() - lastOrientationAt < 1600;
+    return orientationReady && isTimestampFresh(lastOrientationAt, 1600);
 }
 
 function hasFreshMotion() {
-    return motionReady && Date.now() - lastMotionAt < 1600;
+    return motionReady && isTimestampFresh(lastMotionAt, 1600);
 }
 
 function resetRequiredSensorState(gameName) {
     // 每次开始或校准都要求拿到新的传感器回包，避免用旧状态误判“传感器可用”。
+    sensorStopRequestedForStaleData = false;
     if (gameName === "shake" || gameName === "angle") {
         orientationReady = false;
         lastOrientationAt = 0;
@@ -1267,6 +1273,7 @@ function stopRuntimeLoops() {
     clearTimeout(slotCooldownTimer);
     slotCooldownTimer = null;
     nextPulseAllowedAt = 0;
+    sensorStopRequestedForStaleData = false;
 }
 
 function exitGame() {
@@ -1303,7 +1310,19 @@ function stopCurrentGame() {
 
 function canPunish(requiresOrientation = true) {
     if (!activeGame) return false;
-    if (requiresOrientation && !orientationReady) return false;
+    if (requiresOrientation && !hasFreshOrientation()) {
+        // 页面仍在线但原生传感器或浏览器权限流已经停更时，WebSocket 心跳还会继续。
+        // 因此这里必须单独发一次停止命令，并清掉旧的出界计时，不能让最后一帧坏姿态无限续罚。
+        shakeOutSince = null;
+        angleBadSince = null;
+        if (!sensorStopRequestedForStaleData) {
+            sensorStopRequestedForStaleData = true;
+            sendGameMessage({ type: "stop_shock" });
+            setText("game-status", "感应器数据已中断，输出已停止；恢复后重新计时");
+        }
+        return false;
+    }
+    sensorStopRequestedForStaleData = false;
     // App 未绑定时直接拦截，避免按钮进入“正在电”的假状态。
     if (!latestAppConnected) return false;
     if (!isConfiguredOutputReady()) return false;
@@ -1849,10 +1868,6 @@ function rollOpponentDie(difficulty) {
     return value;
 }
 
-function getTripleFace(dices) {
-    return dices[0] === dices[1] && dices[1] === dices[2] ? dices[0] : 0;
-}
-
 function settleDiceGame() {
     if (!isDiceShaking) return;
     isDiceShaking = false;
@@ -1870,52 +1885,36 @@ function settleDiceGame() {
         rollOpponentDie(cfg.opponentDifficulty),
         rollOpponentDie(cfg.opponentDifficulty)
     ];
-    const pTotal = player.reduce((sum, value) => sum + value, 0);
-    const oTotal = opponent.reduce((sum, value) => sum + value, 0);
+    const outcome = evaluateDiceRound(player, opponent, cfg.leopardMultiplier);
 
     setDiceRoundFaces(player, opponent);
-    setText("dice-scores", `玩家总分: ${pTotal} | 对手总分: ${oTotal}`);
+    setText("dice-scores", `玩家总分: ${outcome.playerTotal} | 对手总分: ${outcome.opponentTotal}`);
     $("btn-roll").disabled = !cfg.manualRoll;
 
-    const playerTriple = getTripleFace(player);
-    const opponentTriple = getTripleFace(opponent);
-    if (playerTriple > 0 || opponentTriple > 0) {
+    if (outcome.kind === "leopard") {
         vibratePattern([80, 35, 120], 0);
-        // 任意一方出豹子都直接结算；双方同时豹子时取较大点数，避免一局叠两份惩罚。
-        const tripleFace = Math.max(playerTriple, opponentTriple);
-        const owner = playerTriple > 0 && opponentTriple > 0
-            ? "双方"
-            : (playerTriple > 0 ? "你" : "对手");
-        const count = tripleFace * cfg.leopardMultiplier;
-        startDicePunishQueue(count, `${owner} ${tripleFace} 点豹子`);
+        startDicePunishQueue(outcome.punishmentCount, outcome.reason);
         return;
     }
 
-    if (pTotal >= oTotal) {
-        setText("dice-instruction", `你赢了 | ${pTotal} : ${oTotal}`);
+    if (outcome.kind === "win") {
+        setText("dice-instruction", outcome.reason);
         $("dice-instruction").style.color = "#ffffff";
         vibratePattern([28, 35, 28], 0);
         return;
     }
 
-    const diff = oTotal - pTotal;
     vibratePattern([45, 30, 90], 0);
-    startDicePunishQueue(diff, `输了 ${diff} 点`);
+    startDicePunishQueue(outcome.punishmentCount, outcome.reason);
 }
 
 function rollPlayerDie() {
     return Math.floor(Math.random() * 6) + 1;
 }
 
-function estimateDiceQueueSeconds(count, cfg) {
-    const safeCount = Math.max(0, Math.round(count));
-    if (safeCount <= 0) return 0;
-    return safeCount * cfg.singleSeconds + Math.max(0, safeCount - 1) * cfg.gapSeconds;
-}
-
 function startDicePunishQueue(rawCount, reason) {
     const cfg = gameSettings.dice;
-    const cappedCount = Math.min(Math.max(0, Math.round(rawCount)), cfg.maxPunishCount);
+    const cappedCount = capPunishmentCount(rawCount, cfg.maxPunishCount);
 
     if (cappedCount <= 0) {
         setText("dice-instruction", "没有惩罚");
@@ -2061,7 +2060,7 @@ function finishSlotSpin() {
     clearTimeout(slotSpinFinishTimer);
     slotSpinFinishTimer = null;
 
-    const reels = buildSlotResult(cfg);
+    const reels = buildSlotResult(cfg, SLOT_SYMBOLS);
     setSlotReels(reels);
     setSlotReelsSpinning(false);
     slotIsSpinning = false;
@@ -2160,105 +2159,20 @@ function pickSlotSymbol(excluded = []) {
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function getSlotOdds(winRate) {
-    if (winRate === "loose") {
-        return { small: 0.42, jackpot: 0.14 };
-    }
-
-    if (winRate === "brutal") {
-        return { small: 0.22, jackpot: 0.06 };
-    }
-
-    return { small: 0.32, jackpot: 0.09 };
-}
-
-function buildSlotResult(cfg) {
-    const odds = getSlotOdds(cfg.winRate);
-    const roll = Math.random();
-
-    if (roll < odds.jackpot) {
-        const symbol = Math.random() < 0.14 ? "7️⃣" : pickSlotSymbol(["7️⃣"]);
-        return [symbol, symbol, symbol];
-    }
-
-    if (roll < odds.jackpot + odds.small) {
-        const pairSymbol = pickSlotSymbol();
-        const singleSymbol = pickSlotSymbol([pairSymbol]);
-        return shuffleSlotReels([pairSymbol, pairSymbol, singleSymbol]);
-    }
-
-    const first = pickSlotSymbol();
-    const second = pickSlotSymbol([first]);
-    const third = pickSlotSymbol([first, second]);
-    return shuffleSlotReels([first, second, third]);
-}
-
-function shuffleSlotReels(reels) {
-    const result = [...reels];
-    for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
-}
-
-function classifySlotResult(reels) {
-    const counts = reels.reduce((map, symbol) => {
-        map[symbol] = (map[symbol] || 0) + 1;
-        return map;
-    }, {});
-    const maxCount = Math.max(...Object.values(counts));
-
-    if (maxCount === 3) {
-        return reels[0] === "7️⃣" ? "seven" : "jackpot";
-    }
-
-    if (maxCount === 2) {
-        return "small";
-    }
-
-    return "miss";
-}
-
 function applySlotResult(resultType, reels) {
     const cfg = gameSettings.slot;
     const display = reels.join(" ");
-    let message = "";
+    const nextState = advanceSlotState(
+        { pressure: slotPressure, missStreak: slotMissStreak },
+        cfg,
+        resultType
+    );
+    slotPressure = nextState.pressure;
+    slotMissStreak = nextState.missStreak;
+    updateSlotView(`${display} | ${nextState.message}`);
 
-    if (resultType === "miss") {
-        slotMissStreak += 1;
-        const gain = cfg.missGain + Math.max(0, slotMissStreak - 1) * cfg.streakBonus;
-        slotPressure = clamp(slotPressure + gain, 0, 100);
-        message = `${display} | 没中奖，压力 +${gain}%`;
-    } else if (resultType === "small") {
-        slotMissStreak = Math.max(0, slotMissStreak - 1);
-        slotPressure = clamp(slotPressure - cfg.smallWinDrop, 0, 100);
-        message = `${display} | 小奖，压力 -${cfg.smallWinDrop}%`;
-    } else if (resultType === "jackpot") {
-        slotMissStreak = 0;
-        slotPressure = clamp(slotPressure - cfg.jackpotDrop, 0, 100);
-        message = `${display} | 大奖，压力 -${cfg.jackpotDrop}%`;
-    } else if (resultType === "seven") {
-        slotMissStreak = 0;
-        if (cfg.sevenRule === "reset") {
-            slotPressure = 0;
-            message = `${display} | 三个 7，压力清空`;
-        } else if (cfg.sevenRule === "shock") {
-            slotPressure = 100;
-            updateSlotView(`${display} | 三个 7，立即最大惩罚`);
-            triggerSlotPunish("三个 7", true);
-            return true;
-        } else {
-            slotPressure = 100;
-            updateSlotView(`${display} | 三个 7，压力直接满槽`);
-            triggerSlotPunish("三个 7 满槽", false);
-            return true;
-        }
-    }
-
-    updateSlotView(message);
-    if (slotPressure >= 100) {
-        triggerSlotPunish("压力满格", false);
+    if (nextState.triggerPunishment) {
+        triggerSlotPunish(nextState.punishmentReason, nextState.forceMaximum);
         return true;
     }
 

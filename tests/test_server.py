@@ -231,7 +231,12 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.original_state = server.state.copy()
         self.original_client = server.device_app_client
         self.original_task = server.active_output_task
+        self.original_task_clear_after = server.active_output_clear_after
         self.original_generation = server.shock_generation
+        self.original_watchdog_task = server.output_watchdog_task
+        self.original_watchdog_owner = server.output_watchdog_owner
+        self.original_watchdog_mode = server.output_watchdog_mode
+        self.original_watchdog_generation = server.output_watchdog_generation
 
         server.state["app_connected"] = True
         server.state["limit_a"] = 100
@@ -239,6 +244,10 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.state["client_strength_a"] = 0
         server.state["client_strength_b"] = 0
         server.active_output_task = None
+        server.active_output_clear_after = True
+        server.output_watchdog_task = None
+        server.output_watchdog_owner = None
+        server.output_watchdog_mode = None
         server.device_app_client = FakeDeviceAppClient()
 
     async def asyncTearDown(self):
@@ -247,7 +256,12 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.state.update(self.original_state)
         server.device_app_client = self.original_client
         server.active_output_task = self.original_task
+        server.active_output_clear_after = self.original_task_clear_after
         server.shock_generation = self.original_generation
+        server.output_watchdog_task = self.original_watchdog_task
+        server.output_watchdog_owner = self.original_watchdog_owner
+        server.output_watchdog_mode = self.original_watchdog_mode
+        server.output_watchdog_generation = self.original_watchdog_generation
 
     async def test_overlapping_output_is_rejected_without_queueing(self):
         first = server.schedule_game_shock(20, 1000, "a", "same", 100, clear_after=True)
@@ -289,6 +303,80 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(server.state["client_strength_a"])
         self.assertEqual(server.state["client_strength_b"], 0)
         server.device_app_client = FakeDeviceAppClient()
+
+    async def test_watchdog_stops_long_output_without_page_heartbeat(self):
+        """网页冻结但连接尚未正式断开时，长时任务也必须由后端主动取消并归零。"""
+        fake_client = server.device_app_client
+        owner = object()
+
+        with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.03), patch("builtins.print"):
+            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            self.assertTrue(scheduled)
+            server.arm_output_watchdog(owner)
+            await asyncio.sleep(0.08)
+
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
+        self.assertEqual(server.state["client_strength_a"], 0)
+        self.assertIsNone(server.active_output_task)
+        self.assertIsNone(server.output_watchdog_task)
+
+    async def test_page_heartbeat_only_extends_its_own_output_deadline(self):
+        """所属页面可以续期，其他已配对页面不能替失联页面维持输出。"""
+        fake_client = server.device_app_client
+        owner = object()
+        unrelated_page = object()
+
+        with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
+            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            self.assertTrue(scheduled)
+            server.arm_output_watchdog(owner)
+            await asyncio.sleep(0.03)
+            server.refresh_output_watchdog(unrelated_page)
+            await asyncio.sleep(0.03)
+
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
+        self.assertEqual(server.state["client_strength_a"], 0)
+
+    async def test_owner_heartbeat_postpones_watchdog_until_messages_stop(self):
+        """正常页面每秒续报时不能误停；续报真正停止后仍要按新期限归零。"""
+        fake_client = server.device_app_client
+        owner = object()
+
+        with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
+            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            self.assertTrue(scheduled)
+            server.arm_output_watchdog(owner)
+            await asyncio.sleep(0.03)
+            server.refresh_output_watchdog(owner)
+            await asyncio.sleep(0.03)
+
+            early_clears = [event for event in fake_client.events if event[0] == "clear_pulses"]
+            self.assertEqual(early_clears, [])
+            await asyncio.sleep(0.04)
+
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
+        self.assertEqual(server.state["client_strength_a"], 0)
+
+    async def test_page_ping_cannot_keep_continuous_pulse_strength_nonzero(self):
+        """玩家回到安全区后只有普通 ping 时，短脉冲模式仍必须按空闲期限归零。"""
+        fake_client = server.device_app_client
+        owner = object()
+
+        with patch.object(server, "CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
+            scheduled = server.schedule_game_shock(25, 500, "a", "same", 100, clear_after=False)
+            self.assertTrue(scheduled)
+            server.arm_output_watchdog(owner, mode="continuous")
+            await asyncio.sleep(0.03)
+            server.refresh_output_watchdog(owner)
+            await asyncio.sleep(0.04)
+
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
+        self.assertEqual(server.state["client_strength_a"], 0)
+        self.assertIsNone(server.output_watchdog_mode)
 
 
 if __name__ == "__main__":

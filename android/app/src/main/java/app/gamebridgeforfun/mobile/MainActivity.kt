@@ -388,6 +388,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREF_LAST_GAME_URL = "last_game_url"
         private val ALLOWED_STATIC_RESOURCES = setOf(
+            "/static/game-logic.js",
             "/static/game.js",
             "/static/style.css",
         )

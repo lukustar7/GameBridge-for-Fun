@@ -41,15 +41,15 @@ python3 server.py
 - `GAME_BRIDGE_FOR_FUN_CERT_IP`：覆盖自动检测到的证书签发 IP，仅接受 `10.x`、`172.16-31.x` 或 `192.168.x` IPv4。
 - `GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS`：设置本地根证书有效天数，默认 `90`。
 - `GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS`：设置服务器证书有效天数，默认 `7`。
+- `GAME_BRIDGE_FOR_FUN_NO_BROWSER`：设为 `1` 时启动服务但不自动打开浏览器，仅用于自动验收。
 
 本地校验：
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 -m py_compile server.py
-node --check static/console.js
-node --check static/game.js
+./verify.command
 ```
+
+该脚本依次执行 Python、浏览器规则、Android、完整服务冒烟和 Git 差异检查。
 
 ## Android APK
 
@@ -80,10 +80,12 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 - `server.py`：HTTP 静态服务、WebSocket 中转、设备 App 桥接与脉冲下发。
 - `static/index.html`：电脑端控制台。
 - `static/game.html`：手机端小游戏和独立设置页。
-- `static/game.js`：游戏逻辑、传感器处理、参数持久化与惩罚上报。
+- `static/game.js`：页面交互、传感器处理、参数持久化与惩罚上报。
+- `static/game-logic.js`：浏览器与 Node 测试共用的纯游戏规则。
 - `android/`：Android APK、原生传感器桥接、安全 WebView 和地址校验测试。
 - `APK/`：可直接安装的 Android 15+ 调试包、校验值和简要安装说明。
 - `tests/test_server.py`：HTTP/WS 访问边界、硬件限幅与输出调度回归测试。
+- `tests/test_game_logic.js`：骰子、角子机、配置恢复和传感器时效规则测试。
 - `USER_GUIDE.md`：面向使用者的完整操作手册。
 - `coyote/`：兼容设备的脉冲协议参考文档。
 
@@ -96,5 +98,7 @@ App 尚未回传通道限幅或限幅为 0 时，后端拒绝对应输出；A+B 
 连接测试只用于确认链路和通道，不替代人工确认。安全试电最高强度为 30，最长 1 秒，并带有后端冷却。
 
 手机端离开网页、页面进入后台、刷新或 WebSocket 断开时会主动请求停止输出；服务端也会在游戏连接断开时兜底清空 A/B 两路输出。
+
+游戏输出期间必须持续收到所属页面的应用层心跳；长时结算超过 3.5 秒没有续报时，后端会取消任务并强制清空 A/B。持续型玩法超过 0.75 秒没有新脉冲时会自动归零，普通网络心跳不能替脉冲续期；传感器数据超过 1.6 秒未更新时也会立即请求停止并重新计时。
 
 手机选择页展示紧急停止方式和 A/B 通道说明。游戏页可选择只用 A、只用 B 或 A+B 同时输出，但不直接修改波形、软上限或平衡参数。

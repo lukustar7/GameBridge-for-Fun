@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`server.py` is the Python entry point for static delivery, HTTP/HTTPS and WebSocket endpoints, certificates, and device-App bridging. Browser code lives in `static/`: `index.html` and `console.js` implement the desktop console; `game.html` and `game.js` implement the mobile games. `android/` contains the Kotlin APK shell, native sensor bridge, restricted WebView, and Android unit tests. Shared styles are in `style.css`. Treat `qrcode.min.js` as vendored code. `coyote/` contains protocol references, not runtime code. User instructions belong in `README.md` and `USER_GUIDE.md`.
+`server.py` is the Python entry point for static delivery, HTTP/HTTPS and WebSocket endpoints, certificates, and device-App bridging. Browser code lives in `static/`: `index.html` and `console.js` implement the desktop console; `game.html`, `game.js`, and `game-logic.js` implement the mobile games and testable rules. `android/` contains the Kotlin APK shell, native sensor bridge, restricted WebView, and Android unit tests. Shared styles are in `style.css`. Treat `qrcode.min.js` as vendored code. `coyote/` contains protocol references, not runtime code. User instructions belong in `README.md` and `USER_GUIDE.md`.
 
 ## Build, Test, and Development Commands
 
@@ -13,6 +13,7 @@
 - `node --check static/console.js` and `node --check static/game.js` check JavaScript syntax when Node.js is available.
 - `python3 -m unittest discover -s tests -v` runs the HTTP, WebSocket, limit, and output-scheduler regression suite.
 - `./android/build-debug.command` runs Android URL-boundary tests, lint, and the debug build, then copies the installable package and checksum into `APK/`.
+- `./verify.command` runs Python, browser-rule, Android, service-smoke, and diff checks as the complete local acceptance gate.
 
 There is no separate compilation step. The service normally opens the console; otherwise visit `http://localhost:18080`.
 
