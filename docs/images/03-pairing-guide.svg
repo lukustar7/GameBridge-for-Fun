@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">两个二维码的正确扫描方式</title><desc id="desc">第一个二维码给设备 App，第二个二维码给 GameBridge for Fun APK</desc>
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111c31"/><stop offset="1" stop-color="#070a12"/></linearGradient>
+    <linearGradient id="a3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#60a5fa"/></linearGradient>
+    <filter id="s3"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-opacity=".3"/></filter>
+    <marker id="ar3" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1l10 5-10 5z" fill="#67e8f9"/></marker>
+    <style>text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}.t{fill:#f8fafc;font-size:36px;font-weight:750}.s{fill:#8291a8;font-size:18px}.h{fill:#f8fafc;font-size:22px;font-weight:700}.p{fill:#b7c4d7;font-size:16px}.good{fill:#4ade80;font-size:16px;font-weight:750}.bad{fill:#fb7185;font-size:16px;font-weight:700}.num{fill:#07101f;font-size:20px;font-weight:850}</style>
+  </defs>
+  <rect width="1200" height="680" rx="28" fill="url(#bg3)"/><text x="64" y="72" class="t">两个二维码，不能扫反</text><text x="64" y="108" class="s">控制台从左到右依次完成：设备 App 绑定 → Android APK 配对</text>
+  <!-- 模拟电脑控制台的两张主要卡片，二维码仅为不可扫描的视觉占位。 -->
+  <g filter="url(#s3)">
+    <rect x="64" y="156" width="450" height="424" rx="24" fill="#0b1120" stroke="#263654"/>
+    <circle cx="106" cy="202" r="23" fill="url(#a3)"/><text x="106" y="209" text-anchor="middle" class="num">1</text><text x="144" y="210" class="h">绑定设备 App</text><text x="88" y="244" class="p">用负责硬件连接的设备 App 扫描</text>
+    <g transform="translate(166 278)" fill="#f8fafc"><rect width="246" height="218" rx="18"/><g fill="#07101f"><path d="M26 24h56v56H26zm12 12v32h32V36zM164 24h56v56h-56zm12 12v32h32V36zM26 138h56v56H26zm12 12v32h32v-32z"/><path d="M104 26h18v18h-18zm30 0h18v36h-18zm-30 32h34v18h-34zm0 34h18v34h-18zm30 0h18v18h-18zm30 0h18v18h-18zm-62 48h18v18h-18zm30-16h18v34h-18zm30 18h18v34h-18zm30-16h18v18h-18zm-90 50h18v18h-18zm32 0h34v18h-34zm64-16h18v34h-18z"/></g></g>
+    <rect x="88" y="524" width="402" height="34" rx="12" fill="#0d251c"/><text x="289" y="547" text-anchor="middle" class="good">正确结果：控制台显示“已绑定”</text>
+
+    <rect x="686" y="156" width="450" height="424" rx="24" fill="#0b1120" stroke="#60a5fa" stroke-opacity=".62"/>
+    <circle cx="728" cy="202" r="23" fill="url(#a3)"/><text x="728" y="209" text-anchor="middle" class="num">2</text><text x="766" y="210" class="h">连接 Android APK</text><text x="710" y="244" class="p">用系统相机扫描，再由系统打开 APK</text>
+    <g transform="translate(788 278)" fill="#f8fafc"><rect width="246" height="218" rx="18"/><g fill="#07101f"><path d="M26 24h56v56H26zm12 12v32h32V36zM164 24h56v56h-56zm12 12v32h32V36zM26 138h56v56H26zm12 12v32h32v-32z"/><path d="M102 24h18v34h-18zm32 16h18v18h-18zm-32 34h50v18h-50zm0 32h18v34h-18zm32 0h18v18h-18zm30-14h18v34h-18zm30 0h18v18h-18zm-92 56h18v36h-18zm30-18h18v18h-18zm0 34h34v18h-34zm48-18h18v34h-18z"/></g></g>
+    <rect x="710" y="524" width="402" height="34" rx="12" fill="#0d251c"/><text x="911" y="547" text-anchor="middle" class="good">正确结果：APK 自动进入连接页或游戏页</text>
+  </g>
+  <path d="M520 366h152" stroke="#67e8f9" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#ar3)"/>
+  <text x="596" y="336" text-anchor="middle" fill="#67e8f9" font-size="16" font-weight="750">先完成 1，再做 2</text>
+  <text x="600" y="630" text-anchor="middle" class="bad">不要保存二维码截图长期使用：每次重启电脑服务后，APK 配对地址都会变化</text>
+</svg>

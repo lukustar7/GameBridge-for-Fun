@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">紧急停止操作示意</title><desc id="desc">优先点击停止输出，同时保留设备 App 和硬件端停止手段</desc>
+  <defs>
+    <linearGradient id="bg6" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111c31"/><stop offset="1" stop-color="#070a12"/></linearGradient>
+    <radialGradient id="red6"><stop stop-color="#fb7185"/><stop offset="1" stop-color="#be123c"/></radialGradient>
+    <filter id="glow6"><feDropShadow dx="0" dy="0" stdDeviation="16" flood-color="#fb7185" flood-opacity=".45"/></filter>
+    <marker id="ar6" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1l10 5-10 5z" fill="#fb7185"/></marker>
+    <style>text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}.t{fill:#f8fafc;font-size:36px;font-weight:750}.s{fill:#8291a8;font-size:18px}.h{fill:#f8fafc;font-size:22px;font-weight:750}.p{fill:#b7c4d7;font-size:16px}.n{fill:#fda4af;font-size:18px;font-weight:750}</style>
+  </defs>
+  <rect width="1200" height="680" rx="28" fill="url(#bg6)"/><text x="64" y="72" class="t">任何不适或异常：先停，再排查</text><text x="64" y="108" class="s">不要等待本局结束，不要先调整参数，不要只依赖一种停止方式</text>
+  <!-- 中央停止按钮是第一动作，周围是独立兜底路径。 -->
+  <g filter="url(#glow6)"><circle cx="600" cy="342" r="126" fill="#2a0d18" stroke="#fb7185" stroke-width="3"/><circle cx="600" cy="342" r="92" fill="url(#red6)"/><rect x="560" y="302" width="80" height="80" rx="14" fill="#fff"/><text x="600" y="466" text-anchor="middle" class="n">第一动作：点击“停止输出”</text></g>
+  <g>
+    <rect x="66" y="176" width="330" height="116" rx="20" fill="#0b1120" stroke="#263654"/><text x="94" y="216" class="h">页面仍可操作</text><text x="94" y="250" class="p">点击停止输出，等待确认反馈</text>
+    <rect x="66" y="392" width="330" height="116" rx="20" fill="#0b1120" stroke="#263654"/><text x="94" y="432" class="h">页面卡住或网络断开</text><text x="94" y="466" class="p">立即转到设备 App 或硬件端停止</text>
+    <rect x="804" y="176" width="330" height="116" rx="20" fill="#0b1120" stroke="#263654"/><text x="832" y="216" class="h">需要马上离开游戏</text><text x="832" y="250" class="p">返回列表、切后台或锁屏会请求停止</text>
+    <rect x="804" y="392" width="330" height="116" rx="20" fill="#0b1120" stroke="#263654"/><text x="832" y="432" class="h">停止未全部确认</text><text x="832" y="466" class="p">按提示检查连接，并使用硬件兜底</text>
+  </g>
+  <path d="M396 234c70 0 82 30 100 54" fill="none" stroke="#fb7185" stroke-width="4" marker-end="url(#ar6)"/><path d="M396 450c70 0 82-30 100-54" fill="none" stroke="#fb7185" stroke-width="4" marker-end="url(#ar6)"/><path d="M804 234c-70 0-82 30-100 54" fill="none" stroke="#fb7185" stroke-width="4" marker-end="url(#ar6)"/><path d="M804 450c-70 0-82-30-100-54" fill="none" stroke="#fb7185" stroke-width="4" marker-end="url(#ar6)"/>
+  <rect x="166" y="570" width="868" height="54" rx="16" fill="#2a210b" stroke="#fbbf24" stroke-opacity=".55"/><text x="600" y="604" text-anchor="middle" fill="#fde68a" font-size="18" font-weight="700">现场必须提前约定安全词，并确保有人能直接操作设备 App 或硬件停止</text>
+</svg>
