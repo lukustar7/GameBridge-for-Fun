@@ -49,7 +49,7 @@ python3 server.py
 ./verify.command
 ```
 
-该脚本依次执行 Python、浏览器规则、Android、完整服务冒烟和 Git 差异检查。
+该脚本依次执行 Python、浏览器规则、Android、完整服务冒烟和 Git 差异检查；Android 阶段会刷新 `APK/` 安装包并核对校验值、字节一致性和签名。
 
 ## Android APK
 

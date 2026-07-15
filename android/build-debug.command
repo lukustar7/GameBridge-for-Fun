@@ -34,6 +34,21 @@ cp "$SOURCE_APK" "$OUTPUT_DIR/$OUTPUT_NAME"
 (
     cd "$OUTPUT_DIR"
     shasum -a 256 "$OUTPUT_NAME" > SHA256.txt
+    shasum -a 256 -c SHA256.txt
 )
+
+# 交付目录必须与刚刚编译出的文件逐字节一致，防止只通过 Gradle 编译却遗漏复制步骤。
+if ! cmp -s "$SOURCE_APK" "$OUTPUT_DIR/$OUTPUT_NAME"; then
+    echo "错误: APK 交付包与 Gradle 编译产物不一致。"
+    exit 1
+fi
+
+# 调试包也必须带有可安装签名；未签名或复制损坏时不允许生成“构建完成”提示。
+APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+if [ ! -x "$APKSIGNER" ]; then
+    echo "错误: 未找到 Android Build Tools 36.1.0 的 apksigner。"
+    exit 1
+fi
+"$APKSIGNER" verify --verbose --print-certs "$OUTPUT_DIR/$OUTPUT_NAME"
 
 echo "构建完成: $OUTPUT_DIR/$OUTPUT_NAME"

@@ -34,25 +34,8 @@ node --check static/game-logic.js
 node --check static/game.js
 node --test tests/test_game_logic.js
 
-echo "[3/5] 检查 Android 单元测试、Lint 与调试包编译"
-if [ -z "${JAVA_HOME:-}" ]; then
-    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-fi
-if [ ! -x "$JAVA_HOME/bin/java" ]; then
-    echo "错误: 未找到可用 Java，请先安装 Android Studio。"
-    exit 1
-fi
-if [ -z "${ANDROID_HOME:-}" ]; then
-    export ANDROID_HOME="$HOME/Library/Android/sdk"
-fi
-if [ ! -d "$ANDROID_HOME" ]; then
-    echo "错误: 未找到 Android SDK，请先在 Android Studio 中完成 SDK 安装。"
-    exit 1
-fi
-(
-    cd android
-    ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-)
+echo "[3/5] 检查 Android 并刷新已验签的调试安装包"
+./android/build-debug.command
 
 echo "[4/5] 启动完整服务并执行本机 HTTP 冒烟检查"
 GAME_BRIDGE_FOR_FUN_NO_BROWSER=1 PYTHONUNBUFFERED=1 python3 server.py >"$SMOKE_LOG" 2>&1 &
