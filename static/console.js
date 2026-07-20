@@ -21,6 +21,7 @@ let certQR = null;
 let certCerQR = null;
 let secureGameQR = null;
 let latestState = null;
+let renderedDeviceSignature = "";
 const renderedQrValues = new WeakMap();
 
 function setText(id, value) {
@@ -191,6 +192,8 @@ function connectWebSocket() {
             setConsoleTestResult(data.message || "测试请求已处理", data.ok);
         } else if (data.type === "stop_feedback") {
             setConsoleTestResult(data.message || "停止请求已处理", data.ok);
+        } else if (data.type === "device_feedback") {
+            setText("device-selection-result", data.message || "设备选择请求已处理");
         } else if (data.type === "button_feedback") {
             console.log(`收到设备物理按键: ${data.button}`);
         }
@@ -241,13 +244,33 @@ function updateUI(data) {
 
     // 1. 更新连接状态
     const statusSpan = document.getElementById("conn-status");
-    if (data.app_connected) {
-        statusSpan.innerText = "已绑定";
-        statusSpan.classList.add("connected");
+    const unsafeDeviceState = Boolean(
+        data.overheat_a
+        || data.overheat_b
+        || data.muted_a
+        || data.muted_b
+        || [3, 4].includes(data.channel_status_a)
+        || [3, 4].includes(data.channel_status_b)
+    );
+    statusSpan.classList.remove("connected", "blocked");
+    if (data.device_connected) {
+        if (unsafeDeviceState) {
+            statusSpan.innerText = "安全保护中";
+            statusSpan.classList.add("blocked");
+        } else {
+            statusSpan.innerText = "设备已连接";
+            statusSpan.classList.add("connected");
+        }
+    } else if (data.app_connected) {
+        statusSpan.innerText = data.selection_required ? "需要选择设备" : "等待硬件连接";
+        if (data.selection_required || data.overheat_a || data.overheat_b) {
+            statusSpan.classList.add("blocked");
+        }
     } else {
-        statusSpan.innerText = "等待绑定";
-        statusSpan.classList.remove("connected");
+        statusSpan.innerText = "等待 App 扫码";
     }
+    setText("device-status-detail", data.device_status_message || "等待设备状态同步。");
+    renderDevicePicker(data);
 
     // 2. 更新 App 扫码绑定二维码
     if (data.app_qrcode_url) {
@@ -255,7 +278,7 @@ function updateUI(data) {
         setText(
             "app-url-text",
             appRendered
-                ? "绑定二维码已生成；如二维码未显示，请刷新本页。"
+                ? "V4 绑定二维码已生成；请使用 DG-LAB 4 App 的 Socket 控制扫码。"
                 : `二维码生成失败，绑定数据：${data.app_qrcode_url}`
         );
     } else {
@@ -320,6 +343,10 @@ function updateUI(data) {
     document.getElementById("stat-root-expiry").innerText = formatCertificateExpiry(data.cert_root_not_after, data.cert_root_valid_days);
     document.getElementById("stat-server-expiry").innerText = formatCertificateExpiry(data.cert_server_not_after, data.cert_server_valid_days);
     document.getElementById("stat-app-ws-port").innerText = data.app_ws_port;
+    setText("stat-bridge-protocol", data.bridge_protocol || "V4");
+    setText("stat-device-model", data.device_model || "未连接");
+    setText("stat-device-name", data.device_name || "未连接");
+    setText("stat-device-connected", data.device_connected ? "已连接" : "未连接");
     
     // 延迟格式化显示 (冷峻标记)
     const statAppLat = document.getElementById("stat-app-latency");
@@ -334,12 +361,84 @@ function updateUI(data) {
 
     updateGameLatency(data.game_latency);
     document.getElementById("stat-game-connected").innerText = data.game_connected ? "已连接" : "未连接";
-    document.getElementById("stat-strength-a").innerText = formatHardwareReading(data.strength_a, data.app_connected);
-    document.getElementById("stat-strength-b").innerText = formatHardwareReading(data.strength_b, data.app_connected);
-    document.getElementById("stat-limit-a").innerText = formatHardwareReading(data.limit_a, data.app_connected);
-    document.getElementById("stat-limit-b").innerText = formatHardwareReading(data.limit_b, data.app_connected);
+    document.getElementById("stat-strength-a").innerText = formatHardwareReading(data.strength_a, data.device_connected);
+    document.getElementById("stat-strength-b").innerText = formatHardwareReading(data.strength_b, data.device_connected);
+    document.getElementById("stat-limit-a").innerText = formatHardwareReading(data.limit_a, data.device_connected);
+    document.getElementById("stat-limit-b").innerText = formatHardwareReading(data.limit_b, data.device_connected);
     document.getElementById("stat-battery-level").innerText = formatBatteryLevel(data.battery_level);
+    setText("stat-safety-a", formatChannelSafety(data, "a"));
+    setText("stat-safety-b", formatChannelSafety(data, "b"));
 
+}
+
+function renderDevicePicker(data) {
+    const select = document.getElementById("device-select");
+    const confirmButton = document.getElementById("confirm-device-button");
+    if (!select || !confirmButton) return;
+
+    const devices = Array.isArray(data.compatible_devices) ? data.compatible_devices : [];
+    const signature = JSON.stringify({
+        devices: devices.map((device) => ({
+            id: device.selection_id,
+            name: device.name,
+            model: device.model,
+            connected: device.connected
+        })),
+        selected: data.selected_device_id
+    });
+
+    if (signature !== renderedDeviceSignature) {
+        renderedDeviceSignature = signature;
+        const previousValue = select.value;
+        select.replaceChildren();
+
+        if (devices.length === 0) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = data.app_connected ? "App 尚未上报兼容设备" : "等待 App 上报设备...";
+            select.appendChild(option);
+        } else {
+            for (const device of devices) {
+                const option = document.createElement("option");
+                option.value = device.selection_id;
+                option.textContent = `${device.model} · ${device.name}${device.connected ? " · 已连接" : " · 蓝牙未连接"}`;
+                option.disabled = !device.connected;
+                select.appendChild(option);
+            }
+        }
+
+        const preferredValue = data.selected_device_id || previousValue;
+        if (devices.some((device) => device.selection_id === preferredValue && device.connected)) {
+            select.value = preferredValue;
+        }
+    }
+
+    const selectedDevice = devices.find((device) => device.selection_id === select.value);
+    select.disabled = devices.length === 0;
+    confirmButton.disabled = !selectedDevice || !selectedDevice.connected;
+
+    if (data.selection_required) {
+        setText("device-selection-result", "必须选择并确认一台已连接设备，确认前不会输出。");
+    } else if (data.device_connected && data.device_model) {
+        setText("device-selection-result", `当前控制：${data.device_model} · ${data.device_name || "未命名设备"}`);
+    } else if (data.app_connected) {
+        setText("device-selection-result", "请先在 DG-LAB 4 App 中完成硬件蓝牙连接。");
+    }
+}
+
+function selectDevice() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        setText("device-selection-result", "后台通信未连接，不能选择设备。");
+        return;
+    }
+    const selectionId = document.getElementById("device-select")?.value || "";
+    if (!selectionId) {
+        setText("device-selection-result", "请先选择一台已连接设备。");
+        return;
+    }
+
+    ws.send(JSON.stringify({ type: "select_device", selectionId }));
+    setText("device-selection-result", "正在停止旧输出并确认新控制目标...");
 }
 
 function updateConsoleTestLabels() {
@@ -365,12 +464,15 @@ function runConsoleSelfCheck() {
     const checks = [
         ws && ws.readyState === WebSocket.OPEN ? "控制台已连接" : "控制台未连接",
         latestState.app_connected ? "App 已绑定" : "App 未绑定",
+        latestState.device_connected
+            ? `${latestState.device_model || "郊狼设备"}已连接`
+            : "郊狼硬件未就绪",
         latestState.game_connected ? "手机游戏页已连接" : "手机游戏页未连接",
         latestState.https_enabled ? "HTTPS 已启用" : "HTTPS 未启用",
-        `A 限幅 ${formatHardwareReading(latestState.limit_a, latestState.app_connected)}`,
-        `B 限幅 ${formatHardwareReading(latestState.limit_b, latestState.app_connected)}`
+        `A 限幅 ${formatHardwareReading(latestState.limit_a, latestState.device_connected)}`,
+        `B 限幅 ${formatHardwareReading(latestState.limit_b, latestState.device_connected)}`
     ];
-    const ok = Boolean(ws && ws.readyState === WebSocket.OPEN && latestState.app_connected);
+    const ok = Boolean(ws && ws.readyState === WebSocket.OPEN && latestState.device_connected);
     setConsoleTestResult(`自检结果：${checks.join("；")}`, ok);
 }
 
@@ -381,8 +483,8 @@ function sendConsoleTestShock() {
     }
 
     const outputMode = document.getElementById("console-test-output-mode")?.value || "a";
-    if (!latestState?.app_connected) {
-        setConsoleTestResult("设备 App 尚未绑定，不能试电。", false);
+    if (!latestState?.device_connected) {
+        setConsoleTestResult(latestState?.device_status_message || "郊狼硬件尚未就绪，不能试电。", false);
         return;
     }
 
@@ -440,6 +542,24 @@ function formatBatteryLevel(level) {
     const value = Number(level);
     if (!Number.isFinite(value)) return "未接入";
     return `${Math.round(value)}%`;
+}
+
+function formatChannelSafety(data, channel) {
+    if (!data.device_connected) return "未读取";
+    if (data[`overheat_${channel}`]) return "过热，输出已封锁";
+    if (data[`muted_${channel}`]) return "静音，输出已封锁";
+
+    const status = Number(data[`channel_status_${channel}`]);
+    const statusLabels = {
+        0: "可用，当前无有效输出",
+        1: "未形成回路",
+        2: "输出正常",
+        3: "设备报告输出异常",
+        4: "通道已屏蔽"
+    };
+    return Number.isInteger(status) && Object.prototype.hasOwnProperty.call(statusLabels, status)
+        ? statusLabels[status]
+        : "安全上限已读取";
 }
 
 function formatHardwareReading(value, appConnected) {

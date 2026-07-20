@@ -5,7 +5,6 @@ import asyncio
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -24,23 +23,29 @@ class FakeWebSocket:
 class FakeDeviceAppClient:
     """记录硬件调用顺序，不连接真实设备 App 或硬件。"""
 
-    def __init__(self, fail_clear_channel=None, hang_clear_channel=None):
+    def __init__(self, fail_clear_channel=None, hang_clear_channel=None, clear_delay=0):
         self.events = []
         self.fail_clear_channel = fail_clear_channel
         self.hang_clear_channel = hang_clear_channel
+        self.clear_delay = clear_delay
 
-    async def set_strength(self, channel, operation_type, value):
-        self.events.append(("set_strength", channel, operation_type, value))
+    async def set_temporary_strength(self, channel, value, duration_ms):
+        self.events.append(("set_temporary_strength", channel, value, duration_ms))
 
-    async def add_pulses(self, channel, pulse):
-        self.events.append(("add_pulses", channel, pulse))
+    async def send_pulse(self, channel, strength, duration_ms=100):
+        self.events.append(("send_pulse", channel, strength, duration_ms))
 
     async def clear_pulses(self, channel):
         self.events.append(("clear_pulses", channel))
+        if self.clear_delay:
+            await asyncio.sleep(self.clear_delay)
         if channel == self.hang_clear_channel:
             await asyncio.Event().wait()
         if channel == self.fail_clear_channel:
             raise RuntimeError("模拟单通道停止失败")
+
+    async def reset_strength(self, channel):
+        self.events.append(("reset_strength", channel))
 
 
 class ServerLogicTests(unittest.TestCase):
@@ -58,17 +63,6 @@ class ServerLogicTests(unittest.TestCase):
         server.HTTP_PORT = self.original_http_port
         server.HTTPS_PORT = self.original_https_port
         server.HTTPS_ENABLED = self.original_https_enabled
-
-    def test_reads_real_bridge_limit_field_names(self):
-        """当前桥接库使用 a_limit/b_limit，必须读取到真实限幅。"""
-        packet = SimpleNamespace(a=12, b=34, a_limit=80, b_limit=65)
-
-        server.update_hardware_state_from_data(packet)
-
-        self.assertEqual(server.state["client_strength_a"], 12)
-        self.assertEqual(server.state["client_strength_b"], 34)
-        self.assertEqual(server.state["limit_a"], 80)
-        self.assertEqual(server.state["limit_b"], 65)
 
     def test_unknown_limits_disable_output(self):
         """App 尚未回传限幅时不能擅自按协议最大值 200 输出。"""
@@ -157,14 +151,29 @@ class ServerLogicTests(unittest.TestCase):
     def test_game_state_does_not_include_console_pairing_secrets(self):
         """已配对游戏页只拿运行状态，不应收到设备 App 二维码或运行 token。"""
         server.state["app_qrcode_url"] = "ws://192.168.1.20:15678/private"
+        server.state["selected_device_id"] = "internal-app:slot-a"
+        server.state["compatible_devices"] = [{
+            "selection_id": "internal-app:slot-a",
+            "client_id": "internal-app",
+            "slot_id": "slot-a",
+            "name": "测试设备",
+            "type": "COYOTE_020",
+            "model": "郊狼 2.0",
+            "connected": True,
+            "selected": True,
+        }]
 
         game_message = server.build_state_message(include_console_details=False)
         console_message = server.build_state_message(include_console_details=True)
 
         self.assertNotIn("game_token", game_message)
         self.assertNotIn("app_qrcode_url", game_message)
+        self.assertNotIn("selected_device_id", game_message)
+        self.assertNotIn("compatible_devices", game_message)
         self.assertEqual(console_message["game_token"], server.GAME_ACCESS_TOKEN)
         self.assertEqual(console_message["app_qrcode_url"], server.state["app_qrcode_url"])
+        self.assertNotIn("client_id", console_message["compatible_devices"][0])
+        self.assertNotIn("slot_id", console_message["compatible_devices"][0])
 
 
 class StaticHTTPBoundaryTests(unittest.TestCase):
@@ -190,6 +199,7 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
 
         self.assertIn("GameBridge for Fun 控制台", body)
         self.assertIn("apk-qrcode", body)
+        self.assertIn("device-select", body)
         self.assertTrue(response.geturl().endswith("/static/index.html"))
         self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
@@ -237,8 +247,11 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.original_watchdog_owner = server.output_watchdog_owner
         self.original_watchdog_mode = server.output_watchdog_mode
         self.original_watchdog_generation = server.output_watchdog_generation
+        self.original_shock_lock = server.shock_lock
+        self.original_state_lock = server.state_lock
 
         server.state["app_connected"] = True
+        server.state["device_connected"] = True
         server.state["limit_a"] = 100
         server.state["limit_b"] = 100
         server.state["client_strength_a"] = 0
@@ -248,6 +261,8 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.output_watchdog_task = None
         server.output_watchdog_owner = None
         server.output_watchdog_mode = None
+        server.shock_lock = asyncio.Lock()
+        server.state_lock = asyncio.Lock()
         server.device_app_client = FakeDeviceAppClient()
 
     async def asyncTearDown(self):
@@ -262,6 +277,8 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.output_watchdog_owner = self.original_watchdog_owner
         server.output_watchdog_mode = self.original_watchdog_mode
         server.output_watchdog_generation = self.original_watchdog_generation
+        server.shock_lock = self.original_shock_lock
+        server.state_lock = self.original_state_lock
 
     async def test_overlapping_output_is_rejected_without_queueing(self):
         first = server.schedule_game_shock(20, 1000, "a", "same", 100, clear_after=True)
@@ -273,6 +290,21 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         await server.stop_all_output()
         self.assertIsNone(server.active_output_task)
+        self.assertEqual(server.state["client_strength_a"], 0)
+
+    async def test_output_uses_expiring_v4_strength_before_pulse(self):
+        """非零强度必须使用带期限的 V4 任务，并在波形下发前完成入队。"""
+        fake_client = server.device_app_client
+
+        scheduled = server.schedule_game_shock(20, 100, "a", "same", 100, clear_after=True)
+        self.assertTrue(scheduled)
+        running_task = server.active_output_task
+        await running_task
+
+        self.assertEqual(fake_client.events[0][0], "set_temporary_strength")
+        self.assertEqual(fake_client.events[0][1:3], (server.Channel.A, 20))
+        self.assertGreaterEqual(fake_client.events[0][3], 100 + server.OUTPUT_AUTO_RESET_MARGIN_MS)
+        self.assertIn(("send_pulse", server.Channel.A, 20, 100), fake_client.events)
         self.assertEqual(server.state["client_strength_a"], 0)
 
     async def test_stop_continues_with_b_when_a_clear_fails(self):
@@ -303,6 +335,22 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(server.state["client_strength_a"])
         self.assertEqual(server.state["client_strength_b"], 0)
         server.device_app_client = FakeDeviceAppClient()
+
+    async def test_simultaneous_page_disconnects_share_current_loop_lock(self):
+        """多个网页同时离线时停止动作应安全串行，不能引用旧事件循环。"""
+        fake_client = FakeDeviceAppClient(clear_delay=0.005)
+        server.device_app_client = fake_client
+
+        results = await asyncio.gather(server.stop_all_output(), server.stop_all_output())
+
+        self.assertEqual(results, [True, True])
+        cleared_channels = [event[1] for event in fake_client.events if event[0] == "clear_pulses"]
+        self.assertEqual(cleared_channels, [
+            server.Channel.A,
+            server.Channel.B,
+            server.Channel.A,
+            server.Channel.B,
+        ])
 
     async def test_watchdog_stops_long_output_without_page_heartbeat(self):
         """网页冻结但连接尚未正式断开时，长时任务也必须由后端主动取消并归零。"""

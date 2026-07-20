@@ -15,8 +15,8 @@ const gameToken = urlParams.get("token") || "";
 let currentWsPort = hasPinnedWsPort ? pinnedWsPort : 18081;
 let triedPortsCount = 0;
 const maxPortPortion = 10;
-// 记录设备 App 是否已经绑定。没有 App 时，游戏只能演示结算，不能假装已经下发电击。
-let latestAppConnected = false;
+// 只有 App 和所选郊狼硬件都就绪时才允许输出；单纯扫码成功不能冒充硬件可用。
+let latestDeviceConnected = false;
 let latestTechState = null;
 
 // selectedGame 是设置页当前选中的游戏；activeGame 是已经真正开始运行的游戏。
@@ -420,14 +420,14 @@ function getConfiguredOutputMode() {
 }
 
 function isConfiguredOutputReady() {
-    if (!latestTechState || !latestAppConnected) return false;
+    if (!latestTechState || !latestDeviceConnected) return false;
 
     const mode = getConfiguredOutputMode();
     return isOutputModeReady(mode);
 }
 
 function isOutputModeReady(mode) {
-    if (!latestTechState || !latestAppConnected) return false;
+    if (!latestTechState || !latestDeviceConnected) return false;
 
     const limitA = Number(latestTechState.limit_a);
     const limitB = Number(latestTechState.limit_b);
@@ -440,7 +440,7 @@ function isOutputModeReady(mode) {
 
 function getOutputBlockReason() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return "后台未连接";
-    if (!latestAppConnected) return "App 未绑定";
+    if (!latestDeviceConnected) return latestTechState?.device_status_message || "郊狼硬件未就绪";
     if (!isConfiguredOutputReady()) return "所选通道限幅未读取或已设为 0";
     return "";
 }
@@ -452,24 +452,30 @@ function updateLocalGameLatency() {
 function updateTechStatus(data) {
     latestTechState = data;
     const appConnected = Boolean(data.app_connected);
-    latestAppConnected = appConnected;
+    const deviceConnected = Boolean(data.device_connected);
+    latestDeviceConnected = deviceConnected;
 
     // 选择页的技术状态用于现场排障：端口、连接、延迟和硬件回读统一放在这里。
     setText("tech-local-ip", data.local_ip || window.location.hostname || "-");
     setText("tech-http-port", data.http_port || "-");
     setText("tech-web-ws-port", data.web_ws_port || currentWsPort || "-");
     setText("tech-app-ws-port", data.app_ws_port || "-");
-    setText("tech-app-status", appConnected ? "已绑定" : "等待绑定");
+    setText("tech-app-status", deviceConnected
+        ? `${data.device_model || "郊狼"} 已连接`
+        : appConnected
+            ? "等待硬件"
+            : "等待 App 扫码");
     setText("tech-game-status", data.game_connected ? "已连接" : "未连接");
-    setConnectionClass("tech-app-status", appConnected);
+    setConnectionClass("tech-app-status", deviceConnected);
     setConnectionClass("tech-game-status", Boolean(data.game_connected));
     setText("tech-app-latency", formatLatency(data.app_latency));
     const shownGameLatency = latestGameLatency !== null ? latestGameLatency : data.game_latency;
     setText("tech-game-latency", formatLatency(shownGameLatency));
-    setText("tech-strength-a", formatHardwareReading(data.strength_a, appConnected));
-    setText("tech-strength-b", formatHardwareReading(data.strength_b, appConnected));
-    setText("tech-limit-a", formatHardwareReading(data.limit_a, appConnected));
-    setText("tech-limit-b", formatHardwareReading(data.limit_b, appConnected));
+    setText("tech-device-model", data.device_model || "未连接");
+    setText("tech-strength-a", formatHardwareReading(data.strength_a, deviceConnected));
+    setText("tech-strength-b", formatHardwareReading(data.strength_b, deviceConnected));
+    setText("tech-limit-a", formatHardwareReading(data.limit_a, deviceConnected));
+    setText("tech-limit-b", formatHardwareReading(data.limit_b, deviceConnected));
     setText("tech-battery", formatBatteryLevel(data.battery_level));
 }
 
@@ -490,12 +496,15 @@ function runMobileSelfCheck() {
     const parts = [
         browserConnected ? "浏览器已连接" : "浏览器未连接",
         latestTechState.app_connected ? "App 已绑定" : "App 未绑定",
+        latestTechState.device_connected
+            ? `${latestTechState.device_model || "郊狼设备"} 已连接`
+            : "郊狼硬件未就绪",
         `App 延迟 ${formatLatency(latestTechState.app_latency)}`,
         `浏览器延迟 ${formatLatency(latestGameLatency ?? latestTechState.game_latency)}`,
-        `A 限幅 ${formatHardwareReading(latestTechState.limit_a, latestTechState.app_connected)}`,
-        `B 限幅 ${formatHardwareReading(latestTechState.limit_b, latestTechState.app_connected)}`
+        `A 限幅 ${formatHardwareReading(latestTechState.limit_a, latestTechState.device_connected)}`,
+        `B 限幅 ${formatHardwareReading(latestTechState.limit_b, latestTechState.device_connected)}`
     ];
-    setMobileTestResult(`自检结果：${parts.join("；")}`, browserConnected && latestTechState.app_connected);
+    setMobileTestResult(`自检结果：${parts.join("；")}`, browserConnected && latestTechState.device_connected);
 }
 
 function sendMobileTestShock(outputMode) {
@@ -504,8 +513,8 @@ function sendMobileTestShock(outputMode) {
         return;
     }
 
-    if (!latestAppConnected) {
-        setMobileTestResult("设备 App 尚未绑定，不能试电。", false);
+    if (!latestDeviceConnected) {
+        setMobileTestResult(latestTechState?.device_status_message || "郊狼硬件尚未就绪，不能试电。", false);
         return;
     }
     if (!isOutputModeReady(outputMode)) {
@@ -1323,8 +1332,8 @@ function canPunish(requiresOrientation = true) {
         return false;
     }
     sensorStopRequestedForStaleData = false;
-    // App 未绑定时直接拦截，避免按钮进入“正在电”的假状态。
-    if (!latestAppConnected) return false;
+    // 郊狼硬件未就绪时直接拦截，避免按钮进入“正在输出”的假状态。
+    if (!latestDeviceConnected) return false;
     if (!isConfiguredOutputReady()) return false;
     if (Date.now() - gameStartedAt < 1200) return false;
     return ws && ws.readyState === WebSocket.OPEN;
@@ -1361,8 +1370,8 @@ function getOutputPayload() {
 function sendConfiguredShock(strength, duration) {
     const safeStrength = clamp(Math.round(strength), 0, 200);
     if (safeStrength <= 0) return false;
-    // 发送前再次确认 App 绑定状态，防止状态刷新延迟导致空发。
-    if (!latestAppConnected || !isConfiguredOutputReady()) return false;
+    // 发送前再次确认硬件就绪状态，防止 App 已扫码但蓝牙设备离线时空发。
+    if (!latestDeviceConnected || !isConfiguredOutputReady()) return false;
 
     return sendGameMessage({
         type: "game_shock_trigger",

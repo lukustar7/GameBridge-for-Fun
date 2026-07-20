@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import plistlib
 import re
@@ -21,12 +22,10 @@ from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 import websockets
-from pydglab_ws import (
+from dglab_v4 import (
     Channel,
-    DGLabWSConnect as DeviceWSConnect,
-    DGLabWSServer as DeviceWSServer,
-    RetCode,
-    StrengthOperationType,
+    DGLabV4Bridge,
+    DeviceBridgeError,
 )
 
 
@@ -102,10 +101,14 @@ MAX_SHOCK_DURATION_MS = 60000
 MIN_PULSE_INTERVAL_SECONDS = 0.22
 MAX_WEB_MESSAGE_BYTES = 4096
 MAX_WEB_MESSAGE_QUEUE = 8
+MAX_APP_MESSAGE_BYTES = 65536
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
 HARDWARE_COMMAND_TIMEOUT_SECONDS = 1.0
+# V4 非零强度必须带自动到期时间。额外余量覆盖最后一帧、网络抖动和停止指令往返，
+# 即使电脑进程意外退出，App 端也会在有限时间内自行把临时强度恢复为 0。
+OUTPUT_AUTO_RESET_MARGIN_MS = 800
 # 游戏页每秒会发送应用层心跳。输出期间连续超过该时间没有收到所属页面的任何消息，
 # 说明页面可能冻结、网络半断开或系统已经暂停 JavaScript；后端必须自行停机，不能只等 WebSocket 断开。
 OUTPUT_HEARTBEAT_TIMEOUT_SECONDS = 3.5
@@ -128,6 +131,7 @@ device_app_client = None
 # 系统连接状态
 state = {
     "app_connected": False,      # 手机设备 App 是否已绑定
+    "device_connected": False,   # 已选择的郊狼硬件是否通过蓝牙就绪
     "app_latency": -1,           # 电脑到手机 App 的网速延迟 (ms)
     "game_latency": -1,          # 电脑到手机浏览器小游戏页的应用层延迟 (ms)
     "app_qrcode_url": "",        # 手机 App 绑定扫码 URL
@@ -136,8 +140,22 @@ state = {
     # None 表示 App 还没有回传限幅。未知限幅不能按 200 处理，否则刚绑定时可能越过用户在 App 内设定的安全上限。
     "limit_a": None,             # A 通道硬件上限限制
     "limit_b": None,             # B 通道硬件上限限制
-    "battery_level": None,       # V3 文档有电量特征位；当前第三方桥接层未暴露读取接口
-    "game_client_connected": False # 手机小游戏网页是否已连入
+    "battery_level": None,       # V4 props.power 回传的设备电量
+    "game_client_connected": False, # 手机小游戏网页是否已连入
+    "bridge_protocol": "V4",    # DG-LAB 4 App 使用的桥接协议
+    "device_type": None,         # COYOTE_020 / COYOTE_030
+    "device_model": None,        # 面向用户显示的硬件型号
+    "device_name": None,         # App 内设备名称
+    "device_status_message": "等待 DG-LAB 4 App 扫码",
+    "selected_device_id": None,
+    "selection_required": False,
+    "compatible_devices": [],
+    "muted_a": False,
+    "muted_b": False,
+    "overheat_a": False,
+    "overheat_b": False,
+    "channel_status_a": None,
+    "channel_status_b": None,
 }
 
 # 维护当前连接的控制台和游戏端连接
@@ -703,6 +721,7 @@ def build_state_message(include_console_details=False):
         "web_ws_port": WEB_WS_PORT,
         "app_ws_port": APP_WS_PORT,
         "app_connected": state["app_connected"],
+        "device_connected": state["device_connected"],
         "app_latency": state["app_latency"],
         "game_latency": state["game_latency"],
         "strength_a": state["client_strength_a"],
@@ -710,6 +729,17 @@ def build_state_message(include_console_details=False):
         "limit_a": state["limit_a"],
         "limit_b": state["limit_b"],
         "battery_level": state["battery_level"],
+        "bridge_protocol": state["bridge_protocol"],
+        "device_type": state["device_type"],
+        "device_model": state["device_model"],
+        "device_name": state["device_name"],
+        "device_status_message": state["device_status_message"],
+        "muted_a": state["muted_a"],
+        "muted_b": state["muted_b"],
+        "overheat_a": state["overheat_a"],
+        "overheat_b": state["overheat_b"],
+        "channel_status_a": state["channel_status_a"],
+        "channel_status_b": state["channel_status_b"],
         "game_connected": state["game_client_connected"]
     }
     if include_console_details:
@@ -727,7 +757,20 @@ def build_state_message(include_console_details=False):
             "cert_profile_path": ROOT_CA_MOBILECONFIG_URL_PATH,
             "cert_cer_path": ROOT_CA_CER_URL_PATH,
             "game_token": GAME_ACCESS_TOKEN,
-            "app_qrcode_url": state["app_qrcode_url"]
+            "app_qrcode_url": state["app_qrcode_url"],
+            "selected_device_id": state["selected_device_id"],
+            "selection_required": state["selection_required"],
+            "compatible_devices": [
+                {
+                    "selection_id": device.get("selection_id"),
+                    "name": device.get("name"),
+                    "type": device.get("type"),
+                    "model": device.get("model"),
+                    "connected": bool(device.get("connected")),
+                    "selected": bool(device.get("selected")),
+                }
+                for device in state["compatible_devices"]
+            ],
         })
     return message
 
@@ -746,138 +789,154 @@ async def broadcast_state():
 # --- 3. 设备 App 桥接后台协程 ---
 
 async def monitor_app_latency(client):
-    """周期性测量电脑到手机 App 的标准 RFC 6455 Ping/Pong 延迟"""
+    """周期性测量电脑到 DG-LAB App 的完整 V4 应用层往返延迟。"""
     global state
     while True:
-        if state["app_connected"] and client.websocket:
+        if state["app_connected"] and client.has_app:
             try:
-                start_time = asyncio.get_event_loop().time()
-                # 发送底层的 Ping 控制帧并等待 Pong 回复
-                pong_waiter = await client.websocket.ping()
-                await asyncio.wait_for(pong_waiter, timeout=2.0)
-                rtt = int((asyncio.get_event_loop().time() - start_time) * 1000)
-                state["app_latency"] = rtt
+                state["app_latency"] = await client.measure_latency()
             except Exception:
                 state["app_latency"] = -1
             await broadcast_state()
+        else:
+            state["app_latency"] = -1
         await asyncio.sleep(2)
 
 
-def update_hardware_state_from_data(data):
-    """兼容第三方桥接库当前与可能的旧字段名，并把硬件回读压入协议允许范围"""
-    if hasattr(data, "a") and hasattr(data, "b"):
-        state["client_strength_a"] = clamp_int(getattr(data, "a"), 0, 200, fallback=0)
-        state["client_strength_b"] = clamp_int(getattr(data, "b"), 0, 200, fallback=0)
+async def apply_v4_bridge_state(snapshot):
+    """把 V4 设备快照映射到现有电脑、网页和 Android 共用的状态协议。"""
+    previous_device_connected = state["device_connected"]
+    previous_selected_device = state["selected_device_id"]
+    had_active_output = bool(
+        active_output_task
+        or (isinstance(state["client_strength_a"], int) and state["client_strength_a"] > 0)
+        or (isinstance(state["client_strength_b"], int) and state["client_strength_b"] > 0)
+    )
 
-    # 当前桥接库的真实字段是 a_limit / b_limit。旧代码误读成 limit_a / limit_b，
-    # 导致页面一直显示 0，后端又错误地把 0 当成 200 使用，实际绕开了 App 内的限幅设置。
-    limit_a = getattr(data, "a_limit", None)
-    limit_b = getattr(data, "b_limit", None)
-    if limit_a is None:
-        limit_a = getattr(data, "limit_a", None)
-    if limit_b is None:
-        limit_b = getattr(data, "limit_b", None)
-    if limit_a is not None:
-        state["limit_a"] = clamp_int(limit_a, 0, 200, fallback=0)
-    if limit_b is not None:
-        state["limit_b"] = clamp_int(limit_b, 0, 200, fallback=0)
+    state["app_connected"] = snapshot["app_connected"]
+    state["device_connected"] = snapshot["device_connected"]
+    state["client_strength_a"] = snapshot["client_strength_a"]
+    state["client_strength_b"] = snapshot["client_strength_b"]
+    state["limit_a"] = snapshot["limit_a"]
+    state["limit_b"] = snapshot["limit_b"]
+    state["battery_level"] = snapshot["battery_level"]
+    state["bridge_protocol"] = snapshot["bridge_protocol"]
+    state["device_type"] = snapshot["device_type"]
+    state["device_model"] = snapshot["device_model"]
+    state["device_name"] = snapshot["device_name"]
+    state["device_status_message"] = snapshot["device_status_message"]
+    state["selected_device_id"] = snapshot["selected_device_id"]
+    state["selection_required"] = snapshot["selection_required"]
+    state["compatible_devices"] = snapshot["devices"]
+    state["muted_a"] = snapshot["muted_a"]
+    state["muted_b"] = snapshot["muted_b"]
+    state["overheat_a"] = snapshot["overheat_a"]
+    state["overheat_b"] = snapshot["overheat_b"]
+    state["channel_status_a"] = snapshot["channel_status_a"]
+    state["channel_status_b"] = snapshot["channel_status_b"]
 
-    # 当前 1.1.0 尚未公开电量字段；保留兼容读取，未来升级依赖后无需修改页面协议。
-    battery_value = getattr(data, "battery_level", None)
-    if battery_value is None:
-        battery_value = getattr(data, "battery", None)
-    if battery_value is not None:
-        state["battery_level"] = clamp_int(battery_value, 0, 100, fallback=0)
+    became_unsafe = (
+        (previous_device_connected and not state["device_connected"])
+        or (
+            previous_selected_device
+            and previous_selected_device != state["selected_device_id"]
+        )
+        or state["overheat_a"]
+        or state["overheat_b"]
+        or state["muted_a"]
+        or state["muted_b"]
+        or state["channel_status_a"] in {3, 4}
+        or state["channel_status_b"] in {3, 4}
+    )
+    if became_unsafe and had_active_output:
+        # 回调运行在 App 的接收循环中，不能原地等待停止 RPC 回执，否则接收循环会等自己。
+        asyncio.create_task(stop_all_output())
+
+    await broadcast_state()
 
 
-async def read_app_data_stream(client):
-    """持续读取 App 回传的硬件状态更新数据流"""
-    global state
-    try:
-        async for data in client.data_generator():
-            if data == RetCode.CLIENT_DISCONNECTED:
-                print("手机 App 已断开绑定")
-                state["app_connected"] = False
-                state["app_latency"] = -1
-                state["client_strength_a"] = 0
-                state["client_strength_b"] = 0
-                state["limit_a"] = None
-                state["limit_b"] = None
-                state["battery_level"] = None
-                await broadcast_state()
-                return
+async def handle_v4_action(action):
+    """把 DG-LAB 4 App 的 0-9 自定义动作继续广播给原有前端。"""
+    button_message = json.dumps({"type": "button_feedback", "button": str(action)})
+    recipients = tuple(console_connections) + tuple(game_connections)
+    if recipients:
+        await asyncio.gather(*(connection.send(button_message) for connection in recipients), return_exceptions=True)
 
-            # 一旦收到数据包，说明 App 已扫码连接并成功绑定
-            if not state["app_connected"]:
-                state["app_connected"] = True
-                print("手机 App 绑定已建立")
-            
-            # data_generator 可能回传强度数据、物理按键或心跳；只有存在对应字段时才更新硬件读数。
-            update_hardware_state_from_data(data)
-                
-            # 若是收到设备端按钮被按下的通知，向控制台和游戏广播
-            if hasattr(data, 'name'):
-                btn_msg = json.dumps({"type": "button_feedback", "button": data.name})
-                if console_connections:
-                    await asyncio.gather(*(c.send(btn_msg) for c in console_connections), return_exceptions=True)
-                if game_connections:
-                    await asyncio.gather(*(g.send(btn_msg) for g in game_connections), return_exceptions=True)
 
-            await broadcast_state()
-    except Exception as e:
-        print(f"与 App 的连接断开: {e}")
-        state["app_connected"] = False
-        state["app_latency"] = -1
-        state["client_strength_a"] = 0
-        state["client_strength_b"] = 0
-        state["limit_a"] = None
-        state["limit_b"] = None
-        state["battery_level"] = None
-        await broadcast_state()
+def reset_v4_state(clear_qrcode=False):
+    """App 桥接重启或退出时清理所有可能误导用户的硬件读数。"""
+    state.update({
+        "app_connected": False,
+        "device_connected": False,
+        "app_latency": -1,
+        "client_strength_a": 0,
+        "client_strength_b": 0,
+        "limit_a": None,
+        "limit_b": None,
+        "battery_level": None,
+        "device_type": None,
+        "device_model": None,
+        "device_name": None,
+        "device_status_message": "等待 DG-LAB 4 App 扫码",
+        "selected_device_id": None,
+        "selection_required": False,
+        "compatible_devices": [],
+        "muted_a": False,
+        "muted_b": False,
+        "overheat_a": False,
+        "overheat_b": False,
+        "channel_status_a": None,
+        "channel_status_b": None,
+    })
+    if clear_qrcode:
+        state["app_qrcode_url"] = ""
 
 
 async def app_bridge_runner():
-    """异步长久运行 App 服务端和控制客户端，断线后自动重建绑定入口"""
+    """运行本地 V4 Socket 网关；异常退出后自动换用可用端口重建。"""
     global device_app_client, state, APP_WS_PORT
 
     while True:
         APP_WS_PORT = find_free_port(APP_WS_PORT)
+        bridge = DGLabV4Bridge(
+            state_callback=apply_v4_bridge_state,
+            action_callback=handle_v4_action,
+        )
+        app_server = None
+        latency_task = None
 
         try:
-            # 启动远控网关，并在 App 掉线后退出上下文释放端口，下一轮重新生成二维码。
-            async with DeviceWSServer("0.0.0.0", APP_WS_PORT) as server:
-                print(f"App 远控网关已启动: 端口 {APP_WS_PORT}")
-
-                async with DeviceWSConnect(f"ws://127.0.0.1:{APP_WS_PORT}") as client:
-                    device_app_client = client
-                    state["app_qrcode_url"] = client.get_qrcode(f"ws://{LOCAL_IP}:{APP_WS_PORT}")
-                    await broadcast_state()
-
-                    read_task = asyncio.create_task(read_app_data_stream(client))
-                    latency_task = asyncio.create_task(monitor_app_latency(client))
-                    done, pending = await asyncio.wait(
-                        {read_task, latency_task},
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-
-                    for task in pending:
-                        task.cancel()
-                    await asyncio.gather(*pending, return_exceptions=True)
-                    for task in done:
-                        task.result()
+            app_server = await websockets.serve(
+                bridge.handle_connection,
+                "0.0.0.0",
+                APP_WS_PORT,
+                compression=None,
+                max_size=MAX_APP_MESSAGE_BYTES,
+                max_queue=MAX_WEB_MESSAGE_QUEUE,
+                ping_interval=10,
+                ping_timeout=10,
+                close_timeout=2,
+            )
+            device_app_client = bridge
+            state["app_qrcode_url"] = bridge.pairing_url(LOCAL_IP, APP_WS_PORT)
+            reset_v4_state(clear_qrcode=False)
+            latency_task = asyncio.create_task(monitor_app_latency(bridge))
+            print(f"DG-LAB App V4 网关已启动: 端口 {APP_WS_PORT}")
+            await broadcast_state()
+            await asyncio.Future()
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            print(f"App 桥接运行异常: {e}")
+            print(f"DG-LAB App V4 桥接运行异常: {e}")
         finally:
-            state["app_connected"] = False
-            state["app_latency"] = -1
-            state["app_qrcode_url"] = ""
-            state["client_strength_a"] = 0
-            state["client_strength_b"] = 0
-            state["limit_a"] = None
-            state["limit_b"] = None
-            state["battery_level"] = None
+            if latency_task:
+                latency_task.cancel()
+                await asyncio.gather(latency_task, return_exceptions=True)
+            await bridge.close()
+            if app_server:
+                app_server.close()
+                await app_server.wait_closed()
+            reset_v4_state(clear_qrcode=True)
             device_app_client = None
             await broadcast_state()
 
@@ -893,14 +952,6 @@ def clamp_int(value, minimum, maximum, fallback=0):
     except (TypeError, ValueError, OverflowError):
         number = fallback
     return max(minimum, min(maximum, number))
-
-
-def build_pulse_operation(channel_strength):
-    """构造第三方桥接库需要的 V3 单组 100ms 波形数据"""
-    # PulseOperation 是 ((4 个频率值), (4 个波形强度值))，
-    # 不是旧代码里误写的 4 元组。波形强度上限是 100，通道强度上限是 200。
-    wave_strength = clamp_int(round(channel_strength / 2), 1, 100, fallback=1)
-    return ((100, 100, 100, 100), (wave_strength, wave_strength, wave_strength, wave_strength))
 
 
 def parse_output_config(data):
@@ -950,10 +1001,16 @@ def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_stren
 
 async def clear_all_output_locked():
     """在持有 shock_lock 时逐路清空；返回两路停止命令是否全部得到确认"""
-    if not device_app_client or not state["app_connected"]:
+    if not device_app_client:
         state["client_strength_a"] = 0
         state["client_strength_b"] = 0
         return True
+    if not state["device_connected"]:
+        # App 仍在线但没有可定位设备时无法确认硬件归零，必须向界面如实报告失败。
+        unknown_value = None if state["app_connected"] else 0
+        state["client_strength_a"] = unknown_value
+        state["client_strength_b"] = unknown_value
+        return not state["app_connected"]
 
     errors = []
     channel_states = (
@@ -970,9 +1027,9 @@ async def clear_all_output_locked():
         except Exception as error:
             channel_errors.append(f"清波形失败: {error}")
         try:
-            # 即使清波形失败，也继续尝试把强度设为 0，并且不会因此跳过另一通道。
+            # 即使清任务失败，也继续使用独立的 V4 归零任务，并且不会因此跳过另一通道。
             await asyncio.wait_for(
-                device_app_client.set_strength(channel, StrengthOperationType.SET_TO, 0),
+                device_app_client.reset_strength(channel),
                 timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
             )
         except Exception as error:
@@ -1072,7 +1129,7 @@ def schedule_game_shock(
 ):
     """最多保留一个硬件输出任务，防止异常页面把 60 秒任务无限堆进内存"""
     global active_output_task, active_output_clear_after
-    if not state["app_connected"] or not device_app_client:
+    if not state["device_connected"] or not device_app_client:
         return False
     if not build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent):
         return False
@@ -1121,7 +1178,7 @@ async def handle_game_shock(
 ):
     """向 App 客户端下发一段受限脉冲；所有硬件写入都在同一把锁内串行执行"""
     global device_app_client, state, shock_generation
-    if not state["app_connected"] or not device_app_client:
+    if not state["device_connected"] or not device_app_client:
         return
     
     try:
@@ -1136,28 +1193,33 @@ async def handle_game_shock(
         if not channel_targets:
             return
 
-        loops = max(1, int(safe_duration / 100))
+        # 向上取整，确保 101-199ms 这类时长不会被错误缩短到单帧；最后仍由临时强度期限兜底。
+        loops = max(1, math.ceil(safe_duration / 100))
         generation = shock_generation
 
         async with shock_lock:
-            if not state["app_connected"] or generation != shock_generation:
+            if not state["device_connected"] or generation != shock_generation:
                 return
 
-            pulse_targets = []
+            # V4 的 device.op 只在任务结束时回执，因此非零强度和波形必须并发排入 App，
+            # 不能像旧 V3 那样逐条等回执。每条非零强度都带自动过期时间，作为断线后的独立保险。
             for channel, safe_strength, state_key in channel_targets:
                 await asyncio.wait_for(
-                    device_app_client.set_strength(channel, StrengthOperationType.SET_TO, safe_strength),
+                    device_app_client.set_temporary_strength(
+                        channel,
+                        safe_strength,
+                        safe_duration + OUTPUT_AUTO_RESET_MARGIN_MS,
+                    ),
                     timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
                 )
                 state[state_key] = safe_strength
-                pulse_targets.append((channel, build_pulse_operation(safe_strength)))
 
             for _ in range(loops):
-                if not state["app_connected"] or generation != shock_generation:
+                if not state["device_connected"] or generation != shock_generation:
                     break
-                for channel, pulse_unit in pulse_targets:
+                for channel, safe_strength, _state_key in channel_targets:
                     await asyncio.wait_for(
-                        device_app_client.add_pulses(channel, pulse_unit),
+                        device_app_client.send_pulse(channel, safe_strength, duration_ms=100),
                         timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
                     )
                 await asyncio.sleep(0.1)
@@ -1204,6 +1266,18 @@ async def send_stop_feedback(websocket, ok):
         pass
 
 
+async def send_device_feedback(websocket, ok, message):
+    """向本机控制台返回设备选择结果，不把设备内部 ID 广播给游戏端。"""
+    try:
+        await websocket.send(json.dumps({
+            "type": "device_feedback",
+            "ok": ok,
+            "message": message,
+        }))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
 async def handle_test_shock_request(websocket, data):
     """处理连接测试的低强度试电请求；后端强制限幅，不能被前端参数绕过"""
     global last_test_shock_at
@@ -1214,8 +1288,8 @@ async def handle_test_shock_request(websocket, data):
         await send_test_feedback(websocket, False, f"测试冷却中，约 {remaining:.1f}s 后再试")
         return
 
-    if not state["app_connected"] or not device_app_client:
-        await send_test_feedback(websocket, False, "设备 App 未绑定，无法试电")
+    if not state["device_connected"] or not device_app_client:
+        await send_test_feedback(websocket, False, "郊狼设备尚未连接并就绪，无法试电")
         return
 
     strength = clamp_int(data.get("strength", 5), 1, TEST_MAX_STRENGTH, fallback=5)
@@ -1277,6 +1351,27 @@ async def web_ws_handler(websocket, path):
                     stopped = await stop_all_output()
                     await broadcast_state()
                     await send_stop_feedback(websocket, stopped)
+                elif data.get("type") == "select_device":
+                    selection_id = data.get("selectionId")
+                    if not isinstance(selection_id, str) or not device_app_client:
+                        await send_device_feedback(websocket, False, "设备选择请求无效")
+                        continue
+
+                    # 从一台设备切到另一台之前必须确认旧设备已经停止，禁止带电切换控制目标。
+                    if state["device_connected"] and state["selected_device_id"] != selection_id:
+                        stopped = await stop_all_output()
+                        if not stopped:
+                            await send_device_feedback(
+                                websocket,
+                                False,
+                                "旧设备停止指令未确认，已拒绝切换；请先在 App 中手动停止",
+                            )
+                            continue
+                    try:
+                        await device_app_client.select_device(selection_id)
+                        await send_device_feedback(websocket, True, "控制目标已确认")
+                    except DeviceBridgeError as error:
+                        await send_device_feedback(websocket, False, str(error))
                     
         except websockets.exceptions.ConnectionClosed:
             pass
@@ -1389,7 +1484,11 @@ async def web_ws_handler(websocket, path):
             state["game_client_connected"] = len(game_connections) > 0
             if not state["game_client_connected"]:
                 state["game_latency"] = -1
-            await stop_all_output()
+            try:
+                await stop_all_output()
+            except Exception as error:
+                # 连接清理不能因为一次停止异常跳过状态广播；临时强度自动到期仍是最后保险。
+                print(f"游戏页断开后的停止流程异常: {error}")
             await broadcast_state()
     else:
         await websocket.close(code=1008, reason="unknown route")
@@ -1469,11 +1568,16 @@ async def shutdown_services(app_task=None):
 # --- 5. 系统初始化主协程 ---
 
 async def main():
-    global LOCAL_IP, CERTIFIED_LAN_IP
+    global LOCAL_IP, CERTIFIED_LAN_IP, state_lock, shock_lock
     app_task = None
     shutdown_event = asyncio.Event()
     registered_signals = []
     loop = asyncio.get_running_loop()
+
+    # Python 3.9 的异步锁会绑定首次真正等待它的事件循环。服务启动后在当前主循环内重建，
+    # 避免模块导入、测试循环或多页面同时断开时拿到属于旧循环的 Future。
+    state_lock = asyncio.Lock()
+    shock_lock = asyncio.Lock()
 
     # 双击启动后的终端关闭、Ctrl+C 和系统结束进程都会先唤醒同一条安全退出路径。
     # SIGKILL 无法被任何程序捕获，因此真实设备验收仍必须覆盖设备 App 内的人工停止。

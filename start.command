@@ -13,8 +13,9 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+# V4 桥接已经由项目自身实现，只依赖锁定版本的 WebSocket 运行库。
 # 已安装且版本完全匹配时直接启动，避免每次双击都访问镜像并等待网络响应。
-if python3 -c 'import importlib.metadata as m; import pydglab_ws, websockets; assert m.version("pydglab-ws") == "1.1.0"; assert m.version("websockets") == "12.0"' 2>/dev/null; then
+if python3 -c 'import importlib.metadata as m; import websockets; assert m.version("websockets") == "12.0"' 2>/dev/null; then
     echo "Python 依赖已就绪"
 else
     echo "正在从清华镜像安装 Python 依赖..."

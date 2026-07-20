@@ -32,24 +32,33 @@
         <div id="tab-monitor" class="tab-content active">
             <div class="status-badge">
                 <div>
-                    <div class="status-label">设备 App 连接</div>
-                    <span id="conn-status">等待绑定</span>
+                    <div class="status-label">设备控制链路</div>
+                    <span id="conn-status">等待 App 扫码</span>
+                    <p id="device-status-detail" class="sub-text" aria-live="polite">请先用 DG-LAB 4 App 扫描下方二维码。</p>
                 </div>
-                <p class="sub-text">依次完成设备 App 绑定和 Android APK 配对，再开始游戏。</p>
+                <p class="sub-text">App、郊狼硬件和游戏端全部就绪后再开始游戏。</p>
             </div>
 
             <div class="grid">
                 <!-- App 绑定二维码区 -->
                 <div class="panel">
                     <div class="panel-heading">
-                        <h2>1. 绑定设备 App</h2>
-                        <span class="panel-badge">必需</span>
+                        <h2>1. 绑定 DG-LAB 4 App</h2>
+                        <span class="panel-badge">V4</span>
                     </div>
-                    <p class="sub-text">先用设备 App 扫描二维码，让电脑成为远控网关。</p>
+                    <p class="sub-text">使用 App 的 Socket 控制扫码。本通道同时支持郊狼 2.0 和 3.0。</p>
                     <div class="qr-box">
                         <div id="app-qrcode"></div>
                     </div>
                     <p id="app-url-text" class="sub-text" aria-live="polite">等待后台生成绑定二维码...</p>
+                    <div class="device-selection">
+                        <label for="device-select">控制目标</label>
+                        <select id="device-select" disabled>
+                            <option value="">等待 App 上报设备...</option>
+                        </select>
+                        <button id="confirm-device-button" type="button" onclick="selectDevice()" disabled>确认控制目标</button>
+                        <p id="device-selection-result" class="sub-text" aria-live="polite">只有一台已连接设备时会自动选择。</p>
+                    </div>
                 </div>
 
                 <!-- Android APK 是 Android 15+ 用户的主入口，不需要安装网页根证书。 -->
@@ -246,6 +255,22 @@
                             <td id="stat-app-ws-port">-</td>
                         </tr>
                         <tr>
+                            <td>App 桥接协议</td>
+                            <td id="stat-bridge-protocol">V4</td>
+                        </tr>
+                        <tr>
+                            <td>郊狼硬件型号</td>
+                            <td id="stat-device-model">未连接</td>
+                        </tr>
+                        <tr>
+                            <td>App 内设备名称</td>
+                            <td id="stat-device-name">未连接</td>
+                        </tr>
+                        <tr>
+                            <td>硬件蓝牙状态</td>
+                            <td id="stat-device-connected">未连接</td>
+                        </tr>
+                        <tr>
                             <td>电脑 $\leftrightarrow$ 手机 App 延迟</td>
                             <td id="stat-app-latency">-</td>
                         </tr>
@@ -277,6 +302,14 @@
                             <td>设备电量</td>
                             <td id="stat-battery-level">未接入</td>
                         </tr>
+                        <tr>
+                            <td>A 通道安全状态</td>
+                            <td id="stat-safety-a">未读取</td>
+                        </tr>
+                        <tr>
+                            <td>B 通道安全状态</td>
+                            <td id="stat-safety-b">未读取</td>
+                        </tr>
                     </table>
                 </div>
 
@@ -286,6 +319,8 @@
                     <ul class="info-list" style="padding-left: 20px;">
                         <li>端口由服务启动时统一分配；遇到占用会自动向后寻找可用端口。</li>
                         <li>电脑服务重启后，以本页刚生成的二维码和地址为准，不使用旧截图。</li>
+                        <li>App 二维码使用 V4 通道；郊狼 2.0 与 3.0 会自动采用各自的波形格式。</li>
+                        <li>出现多台兼容设备时必须在“状态监控”中明确选择，服务不会自动控制列表第一台。</li>
                         <li>Android APK 使用普通 HTTP/WS，但只接受私有局域网 IP 和带 token 的固定游戏地址。</li>
                         <li>浏览器感应玩法使用 HTTPS/WSS；APK 原生读取感应器，不需要安装网页证书。</li>
                     </ul>
@@ -294,6 +329,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260713-ux-audit"></script>
+    <script src="console.js?v=20260720-v4-devices"></script>
 </body>
 </html>

@@ -252,6 +252,14 @@ h3 {
     color: var(--success);
 }
 
+#conn-status.blocked {
+    color: var(--danger);
+}
+
+#device-status-detail {
+    margin-top: 4px;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
@@ -326,6 +334,20 @@ h3 {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.76rem;
     line-height: 1.45;
+}
+
+.device-selection {
+    display: grid;
+    gap: 9px;
+    padding-top: 16px;
+    margin-top: 15px;
+    border-top: 1px solid var(--border);
+}
+
+.device-selection label {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-weight: 700;
 }
 
 .compact-actions,
