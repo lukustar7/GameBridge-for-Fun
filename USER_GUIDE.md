@@ -24,18 +24,23 @@
 
 ## 2. 启动服务
 
-macOS 双击运行：
+本项目的普通使用入口只支持 macOS。双击项目文件夹里的 `start.command`：
 
 ```bash
 ./start.command
 ```
 
-命令行运行：
+启动器会在服务运行前完成以下工作：
 
-```bash
-python3 -m pip install -r requirements.txt
-python3 server.py
-```
+- 确认当前是 macOS，并找到 Python 3.9 或更高版本。
+- 首次运行时创建项目自己的 `.venv` 独立环境，不改动系统 Python。
+- 缺少依赖时优先从清华 PyPI 镜像安装；已匹配时完全不访问网络。
+- 检查项目文件、目录写入权限、OpenSSL、真实局域网地址和 Android APK 完整性。
+- 按这台 Mac 当前的局域网地址生成或更新本地 HTTPS 证书。
+
+如果电脑没有合格的 Python，终端会显示清华 Python 镜像说明和官方备用下载页。安装稳定版 Python 3.12 后重新双击即可；普通使用不需要安装 Node.js、Java 或 Android Studio。
+
+如果 macOS 第一次阻止打开，右键 `start.command` 并选择“打开”。检查失败时服务不会半启动，终端窗口会保留具体原因和处理方法。
 
 服务启动后，终端会显示本机局域网 IP、HTTP 端口、HTTPS 端口、网页 WS 端口、网页 WSS 端口和 App 桥接端口。
 
@@ -393,6 +398,22 @@ B 通道强度有两种模式：
 ### 12.8 端口不是文档里的默认值
 
 端口被占用时系统会自动递增。以终端输出和控制台技术参数为准。
+
+### 12.9 双击启动文件没有反应
+
+右键 `start.command` 并选择“打开”。如果终端提示 `Permission denied`，在项目目录执行 `chmod +x start.command`；如果提示目录不可写，把完整项目文件夹复制到当前用户的“文稿”目录后再试，不要只复制启动文件。
+
+### 12.10 提示缺少 Python 或依赖安装失败
+
+按终端显示的清华 Python 镜像说明安装 Python 3.12。依赖安装会先使用清华 PyPI 镜像；镜像失败时，启动器只会在你明确输入 `y` 后改用官方 PyPI。
+
+### 12.11 提示没有局域网地址
+
+让 Mac 与手机连接同一个 Wi-Fi，暂时关闭会接管网络的 VPN 后重新启动。程序会优先选择 macOS 的真实 `en` 网卡，并忽略常见 VPN 和虚拟机网卡。
+
+### 12.12 提示 OpenSSL 或 HTTPS 证书失败
+
+先完成 macOS 系统更新后重试。OpenSSL 是生成本机 HTTPS 证书的工具，macOS 通常已经提供；只有系统工具确实缺失时才需要按终端给出的清华 Homebrew 镜像命令安装。
 
 ## 13. 首次使用前的低强度故障演练
 

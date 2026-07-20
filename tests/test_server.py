@@ -2,6 +2,7 @@
 """后端安全边界、硬件限幅与输出调度的回归测试。"""
 
 import asyncio
+import subprocess
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
@@ -129,6 +130,66 @@ class ServerLogicTests(unittest.TestCase):
         self.assertEqual(server.normalize_private_ipv4("8.8.8.8"), "")
         self.assertEqual(server.normalize_private_ipv4("127.0.0.1"), "")
         self.assertEqual(server.normalize_private_ipv4("192.168.1.20\nDNS.2 = example.com"), "")
+
+    def test_local_ip_prefers_macos_default_route(self):
+        """默认路由网卡必须排在 VPN 和虚拟网卡之前，保证手机二维码使用真实局域网地址。"""
+        route_result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="   route to: default\ninterface: en0\n",
+            stderr="",
+        )
+        address_result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="192.168.50.23\n",
+            stderr="",
+        )
+        ifconfig_output = (
+            "en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST>\n"
+            "\tinet 10.0.0.5 netmask 0xff000000\n"
+        )
+
+        with patch(
+            "server.subprocess.run",
+            side_effect=(route_result, address_result),
+        ), patch(
+            "server.subprocess.check_output",
+            return_value=ifconfig_output,
+        ), patch.object(server, "CERT_IP_OVERRIDE", ""):
+            self.assertEqual(server.get_local_ip(), "192.168.50.23")
+
+    def test_local_ip_ignores_vpn_default_route(self):
+        """VPN 成为默认路由时仍要选择物理网卡，避免手机拿到 utun 地址。"""
+        route_result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="   route to: default\ninterface: utun4\n",
+            stderr="",
+        )
+        ifconfig_output = (
+            "utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST>\n"
+            "\tinet 10.8.0.2 --> 10.8.0.2 netmask 0xffffffff\n"
+            "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST>\n"
+            "\tinet 192.168.31.45 netmask 0xffffff00 broadcast 192.168.31.255\n"
+        )
+
+        with patch("server.subprocess.run", return_value=route_result), patch(
+            "server.subprocess.check_output",
+            return_value=ifconfig_output,
+        ), patch.object(server, "CERT_IP_OVERRIDE", ""):
+            self.assertEqual(server.get_local_ip(), "192.168.31.45")
+
+    def test_openssl_finder_uses_system_fallback(self):
+        """用户 PATH 被精简时仍应发现 macOS 系统证书工具。"""
+        def fake_is_file(path):
+            return str(path) == "/usr/bin/openssl"
+
+        with patch("server.shutil.which", return_value=None), patch(
+            "server.Path.is_file",
+            fake_is_file,
+        ), patch("server.os.access", return_value=True):
+            self.assertEqual(server.find_openssl_executable(), "/usr/bin/openssl")
 
     def test_port_search_rejects_invalid_start_instead_of_looping(self):
         """端口越界时要立即失败，不能从 65536 开始无限递增。"""

@@ -16,19 +16,22 @@
 
 ## 启动方式
 
-macOS 双击运行：
+本项目的普通使用入口只支持 macOS。双击项目根目录的 `start.command`；首次被系统拦截时，右键该文件并选择“打开”。
 
 ```bash
 ./start.command
 ```
 
-依赖版本已匹配时，`start.command` 直接启动服务；只有缺少或版本不符时才访问清华镜像安装。
+启动器会依次检查 macOS、Python 3.9+、项目完整性、目录写入权限、锁定依赖、真实局域网地址、OpenSSL、HTTPS 证书和 APK 校验值。可修复项会自动写入项目自己的 `.venv/` 与 `certs/`，不会修改系统 Python 或其他项目。
 
-命令行运行：
+首次运行缺少 Python 依赖时，启动器优先使用清华 PyPI 镜像。电脑没有合格 Python 时会显示[清华 Python 镜像说明](https://mirrors.tuna.tsinghua.edu.cn/help/python/)和官方备用地址；正常使用不要求 Node.js、Java 或 Android Studio。
+
+检查失败时服务不会启动，终端会保留具体原因和处理方法。Mac 与手机必须先连接同一个 Wi-Fi；VPN 或虚拟网卡不会优先写入二维码。
+
+也可以在终端进入项目目录后运行同一入口：
 
 ```bash
-python3 -m pip install -r requirements.txt
-python3 server.py
+./start.command
 ```
 
 服务启动后会自动打开电脑端控制台。手机和电脑必须处于同一局域网。
@@ -41,6 +44,7 @@ python3 server.py
 
 可选环境变量：
 
+- `GAME_BRIDGE_FOR_FUN_PYTHON`：指定启动器使用的 Python 可执行文件路径；一般不需要设置。
 - `GAME_BRIDGE_FOR_FUN_CERT_IP`：覆盖自动检测到的证书签发 IP，仅接受 `10.x`、`172.16-31.x` 或 `192.168.x` IPv4。
 - `GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS`：设置本地根证书有效天数，默认 `90`。
 - `GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS`：设置服务器证书有效天数，默认 `7`。
@@ -81,6 +85,7 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 ## 目录
 
 - `server.py`：HTTP 静态服务、WebSocket 中转、设备 App 桥接与脉冲下发。
+- `macos_preflight.py`：macOS 启动前的依赖、文件、网络、证书与 APK 完整性检查。
 - `dglab_v4.py`：V4 握手、设备发现、状态合并、设备选择、安全 RPC 与 2.0/3.0 波形适配。
 - `static/index.html`：电脑端控制台。
 - `static/game.html`：手机端小游戏和独立设置页。
@@ -90,6 +95,7 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 - `APK/`：可直接安装的 Android 15+ 调试包、校验值和简要安装说明。
 - `tests/test_server.py`：HTTP/WS 访问边界、硬件限幅与输出调度回归测试。
 - `tests/test_dglab_v4.py`：V4 实际 WebSocket 往返、设备选择、安全状态与双版本波形测试。
+- `tests/test_macos_preflight.py`：启动依赖、必需文件、Python 版本和 APK 校验边界测试。
 - `tests/test_game_logic.js`：骰子、角子机、配置恢复和传感器时效规则测试。
 - `USER_GUIDE.md`：面向使用者的完整操作手册。
 - `coyote/`：兼容设备的脉冲协议参考文档。

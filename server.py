@@ -185,14 +185,78 @@ def get_local_ip():
 
     candidates = []
 
-    # macOS 下 ifconfig 能看到真实 Wi-Fi 地址；优先从这里找 RFC1918 私有网段地址。
+    # macOS 的默认路由代表当前真正承担局域网通信的网卡。先读取该网卡地址，
+    # 能避免 VPN、Docker 或虚拟机网卡排在 Wi-Fi 前面时生成无法扫码访问的地址。
+    try:
+        route_result = subprocess.run(
+            ["/sbin/route", "-n", "get", "default"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=2,
+        )
+        interface_match = re.search(
+            r"^\s*interface:\s*([A-Za-z0-9._-]+)\s*$",
+            route_result.stdout,
+            re.MULTILINE,
+        )
+        interface_name = interface_match.group(1) if interface_match else ""
+        # macOS 的 Wi-Fi、内置网卡和 USB 网卡通常使用 en0、en1 等名称；
+        # utun、bridge、awdl 等虚拟接口即使成为默认路由，也不能优先写进手机二维码。
+        if route_result.returncode == 0 and re.fullmatch(r"en\d+", interface_name):
+            address_result = subprocess.run(
+                ["/usr/sbin/ipconfig", "getifaddr", interface_name],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=2,
+            )
+            if address_result.returncode == 0:
+                normalized = normalize_private_ipv4(address_result.stdout)
+                if normalized:
+                    candidates.append(normalized)
+    except Exception:
+        pass
+
+    # 默认路由读取失败时，再从全部网卡中收集地址。物理 en 网卡优先，
+    # 明确的虚拟接口完全忽略，减少 VPN 或虚拟机地址被放进二维码的概率。
     try:
         output = subprocess.check_output(["/sbin/ifconfig"], text=True, timeout=2)
-        for match in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)\b", output):
-            ip_text = match.group(1)
-            normalized = normalize_private_ipv4(ip_text)
-            if normalized:
-                candidates.append(normalized)
+        physical_candidates = []
+        fallback_candidates = []
+        current_interface = ""
+        ignored_prefixes = (
+            "lo",
+            "utun",
+            "bridge",
+            "awdl",
+            "llw",
+            "gif",
+            "stf",
+            "vmenet",
+        )
+        for line in output.splitlines():
+            interface_header = re.match(r"^([A-Za-z0-9._-]+):", line)
+            if interface_header:
+                current_interface = interface_header.group(1)
+                continue
+
+            address_match = re.search(r"\binet (\d+\.\d+\.\d+\.\d+)\b", line)
+            normalized = (
+                normalize_private_ipv4(address_match.group(1))
+                if address_match
+                else ""
+            )
+            if not normalized or current_interface.startswith(ignored_prefixes):
+                continue
+            if re.fullmatch(r"en\d+", current_interface):
+                physical_candidates.append(normalized)
+            else:
+                fallback_candidates.append(normalized)
+        candidates.extend(physical_candidates)
+        candidates.extend(fallback_candidates)
     except Exception:
         pass
 
@@ -225,6 +289,20 @@ def get_local_ip():
     return ip
 
 
+def find_openssl_executable():
+    """查找 macOS 系统或 Homebrew 提供的 OpenSSL，并兼容 Apple Silicon 与 Intel 路径。"""
+    candidates = (
+        "/usr/bin/openssl",
+        "/opt/homebrew/opt/openssl@3/bin/openssl",
+        "/usr/local/opt/openssl@3/bin/openssl",
+        shutil.which("openssl"),
+    )
+    for candidate in dict.fromkeys(candidate for candidate in candidates if candidate):
+        if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
+
+
 def find_free_port(start_port):
     """从起始值向上寻找空闲端口；到达 65535 后明确失败，避免无限循环"""
     try:
@@ -246,8 +324,11 @@ def find_free_port(start_port):
 
 def run_openssl(args):
     """执行本地 openssl 命令；失败时抛出带原因的异常，方便启动日志定位"""
+    openssl_executable = find_openssl_executable()
+    if not openssl_executable:
+        raise RuntimeError("未找到可执行的 OpenSSL")
     result = subprocess.run(
-        ["openssl", *args],
+        [openssl_executable, *args],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -263,8 +344,19 @@ def read_certificate_not_after(cert_path):
     if not cert_path.exists():
         return None
 
+    openssl_executable = find_openssl_executable()
+    if not openssl_executable:
+        return None
+
     result = subprocess.run(
-        ["openssl", "x509", "-in", str(cert_path), "-noout", "-enddate"],
+        [
+            openssl_executable,
+            "x509",
+            "-in",
+            str(cert_path),
+            "-noout",
+            "-enddate",
+        ],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -419,7 +511,7 @@ def ensure_local_https_assets():
     """确保本地 HTTPS 证书存在；服务器证书随当前 IP 自动重签，私钥只保存在 certs/private"""
     global CERT_SHA256, CERT_ROOT_NOT_AFTER, CERT_SERVER_NOT_AFTER
 
-    if shutil.which("openssl") is None:
+    if not find_openssl_executable():
         print("HTTPS 已跳过: 未找到 openssl，无法生成本地证书")
         return False
 
