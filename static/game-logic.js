@@ -258,7 +258,7 @@
         let missStreak = Math.max(0, Math.round(Number(currentState?.missStreak) || 0));
         let message = "";
         let triggerPunishment = false;
-        let forceMaximum = false;
+        let deferFullPunishment = false;
         let punishmentReason = "压力满格";
 
         if (resultType === "miss") {
@@ -281,19 +281,24 @@
             missStreak = 0;
             if (cfg?.sevenRule === "reset") {
                 pressure = 0;
-                message = "三个 7，压力清空";
-            } else {
+                message = "三个图标全是 7️⃣，压力清空";
+            } else if (cfg?.sevenRule === "shock") {
                 pressure = 100;
                 triggerPunishment = true;
-                forceMaximum = cfg?.sevenRule === "shock";
-                punishmentReason = forceMaximum ? "三个 7" : "三个 7 满槽";
-                message = forceMaximum ? "三个 7，立即最大惩罚" : "三个 7，压力直接满槽";
+                punishmentReason = "7️⃣ × 3 特殊事件";
+                message = "三个图标全是 7️⃣，立即执行满槽惩罚";
+            } else {
+                // “进入满槽”只制造下一局的危险，不在本局偷偷复用“立即惩罚”的效果。
+                // 未知配置也走这条保守路径，损坏的本地设置不能意外升级成立即输出。
+                pressure = 100;
+                deferFullPunishment = true;
+                message = "三个图标全是 7️⃣，进入满槽；本局不输出";
             }
         } else {
             throw new RangeError("未知角子机结算类型");
         }
 
-        if (!triggerPunishment && pressure >= 100) {
+        if (!deferFullPunishment && !triggerPunishment && pressure >= 100) {
             triggerPunishment = true;
         }
         return {
@@ -301,7 +306,6 @@
             missStreak,
             message,
             triggerPunishment,
-            forceMaximum,
             punishmentReason
         };
     }

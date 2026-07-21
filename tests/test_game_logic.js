@@ -154,10 +154,11 @@ test("三档角子机中奖率保持固定规则", () => {
     assert.deepEqual(logic.getSlotOdds("broken"), { small: 0.32, jackpot: 0.09 });
 });
 
-test("角子机能区分空奖、小奖、大奖和三个 7", () => {
+test("角子机只把三个 7️⃣ 图标识别为特殊事件", () => {
     assert.equal(logic.classifySlotResult(["A", "B", "C"]), "miss");
     assert.equal(logic.classifySlotResult(["A", "A", "B"]), "small");
     assert.equal(logic.classifySlotResult(["A", "A", "A"]), "jackpot");
+    assert.equal(logic.classifySlotResult(["🎰", "🎰", "🎰"]), "jackpot");
     assert.equal(logic.classifySlotResult(["7️⃣", "7️⃣", "7️⃣"]), "seven");
     assert.throws(() => logic.classifySlotResult(["A", "B"]), /3 个/);
 });
@@ -217,19 +218,35 @@ test("小奖和大奖按规则降低压力并正确处理连败次数", () => {
     assert.equal(jackpot.missStreak, 0);
 });
 
-test("三个 7 的清空、满槽和最大惩罚规则互不混淆", () => {
+test("7️⃣ × 3 的清零、延后满槽和立即惩罚规则互不重复", () => {
     const reset = logic.advanceSlotState({ pressure: 80, missStreak: 4 }, { sevenRule: "reset" }, "seven");
     const fill = logic.advanceSlotState({ pressure: 20, missStreak: 1 }, { sevenRule: "fill" }, "seven");
     const shock = logic.advanceSlotState({ pressure: 20, missStreak: 1 }, { sevenRule: "shock" }, "seven");
+    const damaged = logic.advanceSlotState({ pressure: 20, missStreak: 1 }, { sevenRule: "broken" }, "seven");
 
     assert.equal(reset.pressure, 0);
     assert.equal(reset.triggerPunishment, false);
     assert.equal(fill.pressure, 100);
-    assert.equal(fill.forceMaximum, false);
-    assert.equal(fill.punishmentReason, "三个 7 满槽");
+    assert.equal(fill.triggerPunishment, false);
+    assert.match(fill.message, /本局不输出/);
     assert.equal(shock.pressure, 100);
-    assert.equal(shock.forceMaximum, true);
-    assert.equal(shock.punishmentReason, "三个 7");
+    assert.equal(shock.triggerPunishment, true);
+    assert.equal(shock.punishmentReason, "7️⃣ × 3 特殊事件");
+    assert.equal(damaged.triggerPunishment, false);
+});
+
+test("7️⃣ × 3 进入满槽后由下一局输赢决定是否惩罚", () => {
+    const cfg = { sevenRule: "fill", missGain: 24, streakBonus: 6, smallWinDrop: 14 };
+    const armed = logic.advanceSlotState({ pressure: 35, missStreak: 2 }, cfg, "seven");
+    const miss = logic.advanceSlotState(armed, cfg, "miss");
+    const win = logic.advanceSlotState(armed, cfg, "small");
+
+    assert.equal(armed.pressure, 100);
+    assert.equal(armed.triggerPunishment, false);
+    assert.equal(miss.pressure, 100);
+    assert.equal(miss.triggerPunishment, true);
+    assert.equal(win.pressure, 86);
+    assert.equal(win.triggerPunishment, false);
 });
 
 test("未知角子机结果会明确失败", () => {

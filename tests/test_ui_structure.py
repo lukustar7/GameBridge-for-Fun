@@ -44,6 +44,7 @@ class InterfaceStructureTests(unittest.TestCase):
         cls.console_path = ROOT / "static" / "index.html"
         cls.game_text = cls.game_path.read_text(encoding="utf-8")
         cls.console_text = cls.console_path.read_text(encoding="utf-8")
+        cls.game_script_text = (ROOT / "static" / "game.js").read_text(encoding="utf-8")
         cls.game = parse_html(cls.game_path)
         cls.console = parse_html(cls.console_path)
 
@@ -81,6 +82,20 @@ class InterfaceStructureTests(unittest.TestCase):
                     if attrs.get("data-game") == game and attrs.get("data-default-open") == "true"
                 ]
                 self.assertEqual(len(defaults), 1)
+
+    def test_slot_special_event_copy_and_symbols_are_unambiguous(self):
+        """界面只能把三个 7️⃣ 图标称为特殊事件，图标池不得再混入自带 777 的老虎机图标。"""
+
+        symbols_line = next(
+            line for line in self.game_script_text.splitlines() if line.startswith("const SLOT_SYMBOLS =")
+        )
+        self.assertIn("7️⃣", symbols_line)
+        self.assertIn("🍀", symbols_line)
+        self.assertNotIn("🎰", symbols_line)
+        self.assertIn("三个图标全是 7️⃣ 时", self.game_text)
+        self.assertIn("进入满槽：本局不输出", self.game_text)
+        self.assertNotIn("三轮", self.game_text)
+        self.assertNotIn("立即最大惩罚", self.game_text)
 
     def test_console_uses_accessible_tabs_and_persistent_stop(self):
         """桌面控制台的页签应支持读屏语义，停止按钮不能藏在某个页签内。"""

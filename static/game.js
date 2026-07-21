@@ -141,10 +141,10 @@ const GAME_META = {
     },
     slot: {
         title: "极速角子机",
-        subtitle: "调开奖速度、没中奖是否轻电、压力条涨跌和满槽电击。",
+        subtitle: "调开奖速度、没中奖是否轻电、压力条涨跌和满槽惩罚。",
         help: "三个图案全不同时压力会上涨；中奖会降压力。压力满了就电一下，开启轻电后没中奖也会轻轻电一下。",
         primaryLabel: "轻电强度",
-        secondaryLabel: "满槽强度",
+        secondaryLabel: "满槽惩罚强度",
         primaryValue: (cfg) => cfg.lightPunishEnabled ? cfg.strengthMin : "关闭",
         secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => `没中 +${cfg.missGain}% | 小奖 -${cfg.smallWinDrop}%`,
@@ -207,7 +207,8 @@ let wakeLock = null;
 let latestGameLatency = null;
 
 // 极速角子机状态。
-const SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "💎", "7️⃣", "🎰"];
+// “🎰”图标自身常带 777，容易和三枚“7️⃣”特殊事件混淆，因此改用含义单一的四叶草。
+const SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "💎", "7️⃣", "🍀"];
 let slotPressure = 0;
 let slotMissStreak = 0;
 let slotIsSpinning = false;
@@ -2282,7 +2283,7 @@ function applySlotResult(resultType, reels) {
     updateSlotView(`${display} | ${nextState.message}`);
 
     if (nextState.triggerPunishment) {
-        triggerSlotPunish(nextState.punishmentReason, nextState.forceMaximum);
+        triggerSlotPunish(nextState.punishmentReason);
         return true;
     }
 
@@ -2313,17 +2314,17 @@ function triggerSlotLightPunish() {
         : `${getOutputBlockReason() || "输出忙"}，未输出`;
 }
 
-function triggerSlotPunish(reason, forceMax) {
+function triggerSlotPunish(reason) {
     const cfg = gameSettings.slot;
     const duration = Math.round(cfg.shockSeconds * 1000);
-    const ratio = forceMax ? 1 : clamp(slotPressure / 100, 0, 1);
-    const strength = Math.round(cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio);
+    // 所有满槽惩罚都使用用户设置的“满槽惩罚强度”；200 只是可设置上限，后端仍会按硬件限幅截断。
+    const strength = Math.round(cfg.strengthMax);
     const sent = sendConfiguredShock(strength, duration);
     const shouldClearPressure = cfg.pressureAfterPunish !== "keep";
     const outputBlockReason = getOutputBlockReason() || "输出忙";
 
-    setText("game-status", sent ? `${reason}，已触发 ${strength}` : `${reason}，${outputBlockReason}`);
-    setText("slot-result", sent ? `${reason} | ${strength} 强度，${(duration / 1000).toFixed(1)}s` : `${reason} | ${outputBlockReason}，未输出`);
+    setText("game-status", sent ? `${reason}，已发送请求强度 ${strength}` : `${reason}，${outputBlockReason}`);
+    setText("slot-result", sent ? `${reason} | 请求强度 ${strength}，${(duration / 1000).toFixed(1)}s；实际受 App 限幅` : `${reason} | ${outputBlockReason}，未输出`);
     vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
     if (!sent) {

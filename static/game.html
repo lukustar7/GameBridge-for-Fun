@@ -843,7 +843,7 @@
                 </button>
                 <button type="button" class="game-card" onclick="openGameSettings('slot')">
                     <span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">04</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">三轮高频开奖，全不同会推高压力条，满格触发惩罚</span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span>
                 </button>
             </div>
 
@@ -1210,7 +1210,7 @@
                     <details class="settings-group" data-game="slot" data-default-open="true" open>
                         <summary>
                             <span>基础输出</span>
-                            <small>轻电强度、满槽强度与时长</small>
+                            <small>轻电强度、满槽惩罚强度与时长</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
@@ -1225,20 +1225,20 @@
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>满槽电击强度</span>
+                                <span>满槽惩罚强度</span>
                                 <span id="val-slot-strength-max">85</span>
                             </div>
                             <input type="range" id="slot-strength-max" min="0" max="200" value="85" oninput="updateSettingValue('slot-strength-max')">
-                            <p class="field-help">压力条满格时使用的强度。后端仍会按设备限幅再截断。</p>
+                            <p class="field-help">压力达到 100% 或选择立即惩罚时使用。这里是用户设定值（0–200），不会自动变成 200；实际输出还会按 B 通道比例和 App 的 A/B 限幅降低。</p>
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-label">
-                                <span>满槽电多久</span>
+                                <span>满槽惩罚多久</span>
                                 <span id="val-slot-shock-seconds">2.0s</span>
                             </div>
                             <input type="range" id="slot-shock-seconds" min="0.5" max="8.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
-                            <p class="field-help">压力条满格后单次输出多久；输出结束后还会按“电完休息”等一段时间。</p>
+                            <p class="field-help">满槽惩罚单次输出多久；输出结束后还会按“电完休息”等一段时间。</p>
                         </div>
 
                     </div>
@@ -1248,13 +1248,13 @@
                     <details class="settings-group" data-game="slot">
                         <summary>
                             <span>轻电与结算</span>
-                            <small>轻电开关、时长与满槽后压力</small>
+                            <small>轻电开关、时长与惩罚后压力</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
 
                         <div>
-                            <label class="slider-label" style="margin-bottom: 5px;">满槽后压力</label>
+                            <label class="slider-label" style="margin-bottom: 5px;">满槽惩罚后压力</label>
                             <select id="slot-pressure-after-punish" onchange="saveSelectedSettings(true)">
                                 <option value="clear">清空压力</option>
                                 <option value="keep">保留 100%</option>
@@ -1381,7 +1381,7 @@
                     <details class="settings-group" data-game="slot">
                         <summary>
                             <span>特殊规则</span>
-                            <small>中奖率与三个 7 彩蛋</small>
+                            <small>中奖率与 7️⃣ × 3 特殊事件</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
@@ -1397,13 +1397,13 @@
                         </div>
 
                         <div>
-                            <label class="slider-label" style="margin-bottom: 5px;">三个 7 规则</label>
+                            <label class="slider-label" style="margin-bottom: 5px;">三个图标全是 7️⃣ 时</label>
                             <select id="slot-seven-rule" onchange="saveSelectedSettings(true)">
-                                <option value="reset">清空压力</option>
-                                <option value="fill">直接满槽</option>
-                                <option value="shock">立即最大惩罚</option>
+                                <option value="reset">当作大奖：压力清零</option>
+                                <option value="fill">进入满槽：本局不输出</option>
+                                <option value="shock">立即执行满槽惩罚</option>
                             </select>
-                            <p class="field-help">三个 7 是独立彩蛋：可以当大奖清空，也可以直接推满压力或立刻按最大强度结算。</p>
+                            <p class="field-help">只在摇出的三个图标全部是 7️⃣ 时触发。“进入满槽”会把压力变成 100%，但本局不输出；下一局没中奖才执行满槽惩罚，中奖则可以降低压力。</p>
                         </div>
                     </div>
                     </div>
@@ -1527,7 +1527,7 @@
         </div>
     </div>
 
-    <script src="game-logic.js?v=20260721-ui-safety"></script>
-    <script src="game.js?v=20260721-ui-safety"></script>
+    <script src="game-logic.js?v=20260721-slot-rules"></script>
+    <script src="game.js?v=20260721-slot-rules"></script>
 </body>
 </html>
