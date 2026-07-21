@@ -612,9 +612,32 @@ function switchTab(tabName) {
         const active = tab.dataset.tab === tabName;
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
     });
-    contents.forEach(c => c.classList.remove("active"));
-    document.getElementById(`tab-${tabName}`)?.classList.add("active");
+    contents.forEach((content) => {
+        const active = content.id === `tab-${tabName}`;
+        content.classList.toggle("active", active);
+        content.hidden = !active;
+    });
+}
+
+function bindTabKeyboardNavigation() {
+    const tabs = Array.from(document.querySelectorAll(".tab[role='tab']"));
+    tabs.forEach((tab, index) => {
+        tab.addEventListener("keydown", (event) => {
+            let targetIndex = null;
+            if (event.key === "ArrowRight") targetIndex = (index + 1) % tabs.length;
+            if (event.key === "ArrowLeft") targetIndex = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === "Home") targetIndex = 0;
+            if (event.key === "End") targetIndex = tabs.length - 1;
+            if (targetIndex === null) return;
+
+            event.preventDefault();
+            const target = tabs[targetIndex];
+            switchTab(target.dataset.tab);
+            target.focus();
+        });
+    });
 }
 
 // 页面加载就绪后执行
@@ -622,6 +645,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setConnectionHint("控制台脚本已启动，正在连接后台...");
     setBackendStatus("", "后台连接中");
     updateConsoleTestLabels();
+    bindTabKeyboardNavigation();
 
     /*
        二维码库只负责“画图”，不能决定后台是否连接。

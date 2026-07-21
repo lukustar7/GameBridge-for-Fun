@@ -9,6 +9,12 @@ let suppressReconnect = false;
 let sensorActionInProgress = false;
 
 const urlParams = new URLSearchParams(window.location.search);
+
+// Android 外壳加载网页时尽早切换到原生布局，避免原生工具栏和网页标题短暂重复闪现。
+if (navigator.userAgent.includes("GameBridgeForFun/")) {
+    document.documentElement.classList.add("native-host");
+}
+
 const pinnedWsPort = parseInt(urlParams.get("ws"), 10);
 const hasPinnedWsPort = Number.isInteger(pinnedWsPort) && pinnedWsPort >= 1 && pinnedWsPort <= 65535;
 const gameToken = urlParams.get("token") || "";
@@ -93,6 +99,8 @@ const {
     classifySlotResult,
     estimateDiceQueueSeconds,
     evaluateDiceRound,
+    formatSettingLabel,
+    hasSafeOutputLimits,
     isTimestampFresh,
     restoreSettings
 } = window.GameBridgeForFunLogic;
@@ -293,6 +301,7 @@ function connectWebSocket() {
         $("ping-badge")?.classList.add("online");
         $("ping-badge")?.classList.remove("offline");
         setText("ping-badge", "网速延迟: --ms");
+        updateGlobalSafetyStatus("后台已连接，等待郊狼设备", false);
 
         clearInterval(latencyTimer);
         latencyTimer = setInterval(() => {
@@ -347,6 +356,7 @@ function connectWebSocket() {
         setText("ping-badge", "网速延迟: 离线");
         setText("tech-game-status", "离线");
         setConnectionClass("tech-game-status", false);
+        updateGlobalSafetyStatus("后台通信已断开", false);
         $("ping-badge")?.classList.remove("online");
         $("ping-badge")?.classList.add("offline");
         updateLocalGameLatency();
@@ -428,14 +438,7 @@ function isConfiguredOutputReady() {
 
 function isOutputModeReady(mode) {
     if (!latestTechState || !latestDeviceConnected) return false;
-
-    const limitA = Number(latestTechState.limit_a);
-    const limitB = Number(latestTechState.limit_b);
-    const aReady = Number.isFinite(limitA) && limitA > 0;
-    const bReady = Number.isFinite(limitB) && limitB > 0;
-    if (mode === "a") return aReady;
-    if (mode === "b") return bReady;
-    return aReady && bReady;
+    return hasSafeOutputLimits(mode, latestTechState.limit_a, latestTechState.limit_b);
 }
 
 function getOutputBlockReason() {
@@ -477,6 +480,37 @@ function updateTechStatus(data) {
     setText("tech-limit-a", formatHardwareReading(data.limit_a, deviceConnected));
     setText("tech-limit-b", formatHardwareReading(data.limit_b, deviceConnected));
     setText("tech-battery", formatBatteryLevel(data.battery_level));
+    refreshGlobalSafetyStatus();
+}
+
+function updateGlobalSafetyStatus(message, ready) {
+    // 所有手机页面共用同一个醒目的安全状态，避免滚动后看不到当前连接结论。
+    setText("global-safety-status", message);
+    const bar = $("global-safety-bar");
+    if (!bar) return;
+    bar.classList.toggle("ready", Boolean(ready));
+    bar.classList.toggle("blocked", !ready);
+}
+
+function refreshGlobalSafetyStatus() {
+    // “已就绪”必须同时满足后台、硬件和当前所选通道限幅，不能只凭蓝牙在线就显示绿色。
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateGlobalSafetyStatus("后台通信已断开", false);
+        return;
+    }
+    if (!latestTechState || !latestDeviceConnected) {
+        updateGlobalSafetyStatus(latestTechState?.device_status_message || "等待郊狼设备", false);
+        return;
+    }
+
+    const mode = getConfiguredOutputMode();
+    const modeLabel = mode === "ab" ? "A+B" : mode.toUpperCase();
+    if (!isOutputModeReady(mode)) {
+        updateGlobalSafetyStatus(`${modeLabel} 通道限幅未读取或已设为 0`, false);
+        return;
+    }
+
+    updateGlobalSafetyStatus(`${latestTechState.device_model || "郊狼设备"} · ${modeLabel} 可输出`, true);
 }
 
 function setMobileTestResult(message, ok = true) {
@@ -504,7 +538,14 @@ function runMobileSelfCheck() {
         `A 限幅 ${formatHardwareReading(latestTechState.limit_a, latestTechState.device_connected)}`,
         `B 限幅 ${formatHardwareReading(latestTechState.limit_b, latestTechState.device_connected)}`
     ];
-    setMobileTestResult(`自检结果：${parts.join("；")}`, browserConnected && latestTechState.device_connected);
+    const outputReady = isConfiguredOutputReady();
+    if (!outputReady) {
+        parts.push("所选通道尚未满足输出条件");
+    }
+    setMobileTestResult(
+        `自检结果：${parts.join("；")}`,
+        browserConnected && latestTechState.device_connected && outputReady
+    );
 }
 
 function sendMobileTestShock(outputMode) {
@@ -539,6 +580,7 @@ function stopMobileOutput() {
         return;
     }
     setMobileTestResult("已请求停止 A/B 输出。");
+    setText("global-safety-status", "已请求停止 A/B 输出");
 }
 
 function closeGameSocketForEmergency() {
@@ -556,16 +598,32 @@ function closeGameSocketForEmergency() {
 }
 
 async function requestScreenWakeLock() {
-    if (!("wakeLock" in navigator) || wakeLock) return;
+    if (nativeSensorHostEnabled || wakeLock) return;
+    if (!("wakeLock" in navigator)) {
+        showWakeLockWarning("当前浏览器不支持屏幕常亮；锁屏会安全停止游戏，请保持屏幕开启。");
+        return;
+    }
 
     try {
         wakeLock = await navigator.wakeLock.request("screen");
+        showWakeLockWarning("");
         wakeLock.addEventListener("release", () => {
             wakeLock = null;
+            if (activeGame) {
+                showWakeLockWarning("屏幕常亮已失效；锁屏会安全停止游戏，请保持屏幕开启。");
+            }
         });
     } catch (error) {
         console.warn("屏幕常亮请求失败，当前浏览器可能不支持 Wake Lock:", error);
+        showWakeLockWarning("无法保持屏幕常亮；锁屏会安全停止游戏，请保持屏幕开启。");
     }
+}
+
+function showWakeLockWarning(message) {
+    const warning = $("wake-lock-warning");
+    if (!warning) return;
+    setText("wake-lock-warning", message);
+    warning.hidden = !message;
 }
 
 async function releaseScreenWakeLock() {
@@ -794,6 +852,7 @@ window.GameBridgeForFunNative = {
     enable() {
         nativeSensorHostEnabled = true;
         sensorsAllowed = true;
+        document.documentElement.classList.add("native-host");
     },
     receiveSensorFrame(beta, gamma, x, y, z, hasOrientation, hasMotion) {
         if (!nativeSensorHostEnabled) return;
@@ -819,6 +878,9 @@ window.GameBridgeForFunNative = {
         if (!ws || ws.readyState === WebSocket.CLOSED) {
             connectWebSocket();
         }
+    },
+    stop() {
+        stopCurrentGame();
     }
 };
 
@@ -879,11 +941,21 @@ function playDiceCollisionSound() {
 // --- 5. 设置页流程 ---
 
 function showScreen(screenId) {
+    document.documentElement.classList.toggle("compact-game-header", screenId !== "screen-select");
     document.querySelectorAll(".screen").forEach((node) => {
         node.classList.remove("active");
+        node.hidden = true;
     });
-    $(screenId).classList.add("active");
+    const screen = $(screenId);
+    screen.classList.add("active");
+    screen.hidden = false;
     window.scrollTo(0, 0);
+
+    // 页面切换后把键盘和读屏焦点送到新标题，避免焦点滞留在已经隐藏的旧按钮上。
+    const focusTarget = screen.querySelector("[data-screen-heading]");
+    if (focusTarget) {
+        window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
+    }
 }
 
 function showSelectScreen() {
@@ -906,7 +978,29 @@ function openGameSettings(gameName) {
     setText("settings-subtitle", GAME_META[gameName].subtitle);
     setText("settings-message", "");
     populateSettingsForm(gameName);
+    resetSettingsDisclosureState(gameName);
+    updateSettingsActionVisibility(gameName);
     showScreen("screen-settings");
+}
+
+function resetSettingsDisclosureState(gameName) {
+    // 每次进入设置只展开当前玩法的基础分组，高级规则和通道细节保持折叠。
+    document.querySelectorAll("#screen-settings details.settings-group").forEach((group) => {
+        const groupGame = group.dataset.game || "common";
+        const shouldOpen = groupGame === gameName && group.dataset.defaultOpen === "true";
+        group.open = shouldOpen;
+    });
+}
+
+function updateSettingsActionVisibility(gameName) {
+    const calibrateButton = $("settings-calibrate-button");
+    if (!calibrateButton) return;
+    const shouldShowCalibration = gameName === "shake" || gameName === "angle";
+    calibrateButton.hidden = !shouldShowCalibration;
+    $("screen-settings")?.querySelector(".settings-sticky-actions")?.classList.toggle(
+        "two-actions",
+        !shouldShowCalibration
+    );
 }
 
 function populateSettingsForm(gameName) {
@@ -969,6 +1063,7 @@ function populateOutputSettings(cfg) {
     $("common-b-strength-mode").value = cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
     setRangeValue("common-b-strength-percent", cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
     updateBChannelSettingsVisibility();
+    setText("common-output-summary", formatOutputLabel(cfg));
 }
 
 function updateBChannelSettingsVisibility() {
@@ -992,31 +1087,34 @@ function setRangeValue(id, value) {
 
 function updateSettingValue(id, shouldSave = true) {
     const rawValue = readNumber(id, 0);
-    let label = String(rawValue);
+    setText(`val-${id}`, formatSettingLabel(id, rawValue));
 
-    if (id.endsWith("safe-radius") || id.endsWith("gap-inner") ||
-        id.endsWith("miss-gain") || id.endsWith("streak-bonus") ||
-        id.endsWith("small-win-drop") || id.endsWith("jackpot-drop") ||
-        id.endsWith("b-strength-percent")) {
-        label = `${rawValue}%`;
-    } else if (id.endsWith("forgive-ms") || id.endsWith("trigger-ms") || id.endsWith("rest-ms") ||
-        id.endsWith("spin-ms") || id.endsWith("auto-interval-ms")) {
-        label = `${rawValue}ms`;
-    } else if (id.endsWith("seconds-per-point")) {
-        label = `${rawValue}s`;
-    } else if (id.endsWith("shock-seconds") || id.endsWith("single-seconds") || id.endsWith("gap-seconds")) {
-        label = `${rawValue.toFixed(1)}s`;
-    } else if (id.includes("time-")) {
-        label = `${rawValue.toFixed(1)}s`;
-    } else if (id.includes("angle-") || id.endsWith("ramp-degrees")) {
-        label = `${rawValue}°`;
+    const control = $(id);
+    if (control) {
+        control.setAttribute("aria-valuetext", formatSettingLabel(id, rawValue));
     }
-
-    setText(`val-${id}`, label);
 
     if (shouldSave) {
         saveSelectedSettings(true);
     }
+}
+
+function calibrateSelectedGame() {
+    if (selectedGame === "shake" || selectedGame === "angle") {
+        calibrateCurrentPose(selectedGame);
+    }
+}
+
+function resetSelectedSettings() {
+    if (!selectedGame || !DEFAULT_SETTINGS[selectedGame]) return;
+
+    // 当前配置全部由原始值组成，浅复制即可生成独立对象，不会反向修改默认配置。
+    gameSettings[selectedGame] = { ...DEFAULT_SETTINGS[selectedGame] };
+    persistSettings();
+    populateSettingsForm(selectedGame);
+    resetSettingsDisclosureState(selectedGame);
+    refreshGlobalSafetyStatus();
+    setText("settings-message", "已恢复当前玩法的默认设置");
 }
 
 function collectOutputSettings() {
@@ -1040,6 +1138,8 @@ function saveSelectedSettings(silent = false) {
     const cfg = collectSettingsFromForm(selectedGame);
     gameSettings[selectedGame] = cfg;
     persistSettings();
+    setText("common-output-summary", formatOutputLabel(cfg));
+    refreshGlobalSafetyStatus();
 
     if (!silent) {
         setText("settings-message", "设置已保存");
@@ -1313,6 +1413,7 @@ function stopCurrentGame() {
         slotButton.disabled = false;
     }
     setText("game-status", "已停止输出");
+    setText("global-safety-status", "已请求停止 A/B 输出");
 }
 
 // --- 6. 统一惩罚发送与本机震动 ---
@@ -2319,5 +2420,6 @@ window.onload = () => {
     populateSettingsForm("slot");
     enhanceControlAccessibility();
     bindEmergencyStopEvents();
+    updateGlobalSafetyStatus("正在连接电脑服务", false);
     connectWebSocket();
 };

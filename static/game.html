@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 小游戏操纵端</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260721-ui-navigation">
     <style>
         body {
             /* 选择页和设置页内容较长，需要允许纵向滚动；真正的游玩区再单独锁触摸。 */
@@ -106,6 +106,73 @@
             color: var(--success);
         }
 
+        .global-safety-bar {
+            position: sticky;
+            top: 8px;
+            z-index: 30;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            padding: 9px 10px 9px 14px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(251, 113, 133, 0.52);
+            border-radius: var(--radius-medium);
+            background: rgba(7, 10, 18, 0.94);
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+            backdrop-filter: blur(18px);
+        }
+
+        .global-safety-bar.ready {
+            border-color: rgba(74, 222, 128, 0.45);
+        }
+
+        .global-safety-state {
+            display: flex;
+            min-width: 0;
+            align-items: center;
+            gap: 9px;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            font-weight: 650;
+        }
+
+        .global-safety-state .status-dot {
+            flex: 0 0 auto;
+            background: var(--danger);
+            box-shadow: 0 0 12px rgba(251, 113, 133, 0.48);
+        }
+
+        .global-safety-bar.ready .status-dot {
+            background: var(--success);
+            box-shadow: 0 0 12px rgba(74, 222, 128, 0.52);
+        }
+
+        .global-safety-bar .danger-button {
+            min-height: 40px;
+            padding: 8px 12px;
+            white-space: nowrap;
+        }
+
+        .readiness-result {
+            min-height: 21px;
+            margin-top: 10px;
+        }
+
+        .test-disclosure {
+            margin-bottom: 15px;
+        }
+
+        .test-disclosure-help {
+            margin-bottom: 12px;
+        }
+
+        .test-action-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
         .back-btn {
             margin-bottom: 20px;
         }
@@ -116,6 +183,10 @@
 
         .screen.active {
             display: block;
+        }
+
+        [hidden] {
+            display: none !important;
         }
 
         #screen-play {
@@ -134,15 +205,146 @@
             display: block;
         }
 
-        .settings-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 20px;
+        #screen-settings {
+            padding-bottom: 78px;
         }
 
-        .settings-actions.single {
-            grid-template-columns: 1fr;
+        .settings-group {
+            margin-bottom: 14px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-medium);
+            background: rgba(3, 7, 15, 0.48);
+        }
+
+        .settings-group.common-settings {
+            padding: 0;
+        }
+
+        .settings-group > summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            min-height: 56px;
+            padding: 13px 15px;
+            color: var(--text);
+            cursor: pointer;
+            font-weight: 720;
+            list-style: none;
+        }
+
+        .settings-group > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .settings-group > summary::after {
+            content: "";
+            flex: 0 0 auto;
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid var(--accent);
+            border-bottom: 2px solid var(--accent);
+            transform: rotate(45deg);
+            transition: transform 150ms ease;
+        }
+
+        .settings-group[open] > summary::after {
+            transform: rotate(225deg);
+        }
+
+        .settings-group > summary small {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .settings-group-content {
+            padding: 0 15px 15px;
+            border-top: 1px solid rgba(148, 163, 184, 0.11);
+        }
+
+        .settings-group:not([open]) > .settings-group-content {
+            display: none;
+        }
+
+        .settings-group .settings-stack {
+            padding-top: 15px;
+            margin-bottom: 0;
+        }
+
+        #screen-settings input[type="range"] {
+            height: 44px;
+        }
+
+        .settings-stack-flush {
+            margin-bottom: 0;
+        }
+
+        .settings-sticky-actions {
+            position: fixed;
+            left: 50%;
+            bottom: max(8px, env(safe-area-inset-bottom));
+            z-index: 25;
+            display: grid;
+            grid-template-columns: auto auto minmax(120px, 1fr);
+            gap: 8px;
+            width: min(calc(100% - 28px), 1072px);
+            padding: 9px;
+            transform: translateX(-50%);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-medium);
+            background: rgba(7, 10, 18, 0.94);
+            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+            backdrop-filter: blur(18px);
+        }
+
+        .settings-sticky-actions.two-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .settings-sticky-actions.two-actions .primary-button {
+            grid-column: auto;
+        }
+
+        .play-navigation {
+            display: flex;
+            margin-bottom: 16px;
+        }
+
+        .play-parameter-summary {
+            align-self: start;
+            padding: 0;
+        }
+
+        .play-parameter-summary > summary {
+            min-height: 54px;
+            padding: 16px 18px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 720;
+            letter-spacing: 0.06em;
+        }
+
+        .play-parameter-content {
+            padding: 0 18px 18px;
+        }
+
+        .inline-warning {
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            border: 1px solid rgba(251, 191, 36, 0.46);
+            border-radius: var(--radius-small);
+            color: #fef3c7;
+            background: rgba(120, 53, 15, 0.28);
+            font-size: 0.86rem;
+        }
+
+        [data-screen-heading]:focus {
+            outline: none;
         }
 
         .inline-note {
@@ -192,7 +394,7 @@
 
         .field-help {
             color: var(--text-muted);
-            font-size: 0.78rem;
+            font-size: 0.84rem;
             line-height: 1.45;
             margin-top: 5px;
         }
@@ -460,12 +662,77 @@
         }
 
         @media (max-width: 420px) {
+            .mobile-app-header {
+                padding: 14px 16px;
+                margin-bottom: 12px;
+            }
+
+            .mobile-app-header h1 {
+                font-size: 1.35rem;
+            }
+
             .flex-row {
                 align-items: center;
             }
 
-            .settings-actions {
-                grid-template-columns: 1fr;
+            .global-safety-bar {
+                top: 6px;
+                margin-bottom: 14px;
+            }
+
+            .global-safety-state {
+                font-size: 0.78rem;
+            }
+
+            .game-card {
+                padding: 14px 15px;
+            }
+
+            .game-select-container {
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+
+            .game-card-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .game-card-grid .game-card {
+                height: 132px;
+            }
+
+            .game-card-grid .sub-text {
+                display: -webkit-box !important;
+                overflow: hidden;
+                -webkit-box-orient: vertical;
+                -webkit-line-clamp: 3;
+            }
+
+            .settings-group > summary {
+                position: relative;
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .settings-group > summary small {
+                margin-left: 0;
+                padding-right: 24px;
+                text-align: left;
+            }
+
+            .settings-group > summary::after {
+                position: absolute;
+                right: 30px;
+            }
+
+            .settings-sticky-actions {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .settings-sticky-actions.two-actions .primary-button {
+                grid-column: auto;
             }
 
             .tech-grid {
@@ -495,11 +762,24 @@
                 min-height: 68px;
             }
         }
+
+        html.native-host .mobile-app-header,
+        html.native-host .global-safety-bar {
+            display: none;
+        }
+
+        html.compact-game-header .mobile-app-header {
+            display: none;
+        }
+
+        html.native-host .container {
+            padding-top: 12px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <header class="flex-row app-header">
+        <header class="flex-row app-header mobile-app-header">
             <div>
                 <p class="eyebrow">Mobile Game Controller</p>
                 <h1>GameBridge for Fun</h1>
@@ -507,10 +787,19 @@
             <span id="ping-badge" class="header-status" role="status" aria-live="polite">连接中</span>
         </header>
 
+        <!-- 浏览器模式下始终可见；Android 原生壳会在工具栏提供同等停止入口。 -->
+        <div id="global-safety-bar" class="global-safety-bar blocked" role="region" aria-label="输出安全控制">
+            <div class="global-safety-state">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="global-safety-status" role="status" aria-live="polite">正在连接电脑服务</span>
+            </div>
+            <button type="button" class="danger-button" onclick="stopMobileOutput()">停止 A/B 输出</button>
+        </div>
+
         <!-- 游戏选择页只负责选择玩法，不直接启动，避免玩家没调好参数就开始受罚。 -->
         <div id="screen-select" class="screen active">
             <section class="notice-panel" style="margin-bottom: 16px;">
-                <h2 class="selection-title">选择玩法</h2>
+                <h2 id="selection-title" class="selection-title" tabindex="-1" data-screen-heading>选择玩法</h2>
                 <p class="sub-text">先确认两项连接状态，再进入玩法设置。</p>
                 <div class="mobile-status-grid">
                     <div class="mobile-status-card">
@@ -522,11 +811,24 @@
                         <strong id="tech-game-status">连接中</strong>
                     </div>
                 </div>
-                <button type="button" class="danger-button full-width" onclick="stopMobileOutput()">立即停止 A/B 输出</button>
+                <button type="button" class="full-width" onclick="runMobileSelfCheck()">连接自检</button>
+                <p id="mobile-test-result" class="sub-text readiness-result" role="status" aria-live="polite">尚未自检；正式开始前建议先确认连接。</p>
             </section>
 
+            <details class="disclosure-panel test-disclosure">
+                <summary>低强度通道试电</summary>
+                <div class="disclosure-content">
+                    <p class="sub-text test-disclosure-help">固定使用强度 5、时长 0.3 秒；请先确认接线和通道限幅。</p>
+                    <div class="test-action-grid">
+                        <button type="button" onclick="sendMobileTestShock('a')">试 A</button>
+                        <button type="button" onclick="sendMobileTestShock('b')">试 B</button>
+                        <button type="button" onclick="sendMobileTestShock('ab')">试 A+B</button>
+                    </div>
+                </div>
+            </details>
+
             <!-- 游戏入口放在说明之前，避免用户每次都要滚过大段文档才能开始。 -->
-            <div class="game-select-container">
+            <div class="game-select-container game-card-grid">
                 <button type="button" class="game-card" onclick="openGameSettings('shake')">
                     <span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span>
                     <span class="sub-text" style="display: block; margin-top: 5px;">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span>
@@ -544,18 +846,6 @@
                     <span class="sub-text" style="display: block; margin-top: 5px;">三轮高频开奖，全不同会推高压力条，满格触发惩罚</span>
                 </button>
             </div>
-
-            <section class="notice-panel" style="margin-bottom: 15px;">
-                <h2>连接测试</h2>
-                <p class="sub-text" style="margin-bottom: 12px;">正式开始前先自检，再用固定低强度、短时长确认通道。</p>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px;">
-                    <button type="button" onclick="runMobileSelfCheck()">连接自检</button>
-                    <button type="button" onclick="sendMobileTestShock('a')">试 A</button>
-                    <button type="button" onclick="sendMobileTestShock('b')">试 B</button>
-                    <button type="button" onclick="sendMobileTestShock('ab')">试 A+B</button>
-                </div>
-                <p id="mobile-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
-            </section>
 
             <div class="game-select-container">
                 <details class="disclosure-panel">
@@ -591,15 +881,19 @@
         </div>
 
         <!-- 独立设置页：每个游戏一套参数，保存后进入游玩页。 -->
-        <div id="screen-settings" class="screen">
+        <div id="screen-settings" class="screen" hidden>
             <button class="back-btn" onclick="showSelectScreen()">返回列表</button>
             <div class="panel">
-                <h2 id="settings-title">游戏设置</h2>
+                <h2 id="settings-title" tabindex="-1" data-screen-heading>游戏设置</h2>
                 <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
 
-                <div id="common-output-settings" class="common-settings">
-                    <h3 style="margin-bottom: 12px;">输出位置</h3>
-                    <div class="settings-stack" style="margin-bottom: 0;">
+                <details id="common-output-settings" class="settings-group common-settings" data-default-open="true" open>
+                    <summary>
+                        <span>输出安全</span>
+                        <small id="common-output-summary">默认只用 A</small>
+                    </summary>
+                    <div class="settings-group-content">
+                    <div class="settings-stack settings-stack-flush">
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
                             <select id="common-output-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
@@ -630,9 +924,16 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                    </div>
+                </details>
 
                 <div id="settings-shake" class="setting-panel">
+                    <details class="settings-group" data-game="shake" data-default-open="true" open>
+                        <summary>
+                            <span>基础玩法</span>
+                            <small>模式、强度与安全区</small>
+                        </summary>
+                        <div class="settings-group-content">
                     <div class="settings-stack">
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">游戏模式</label>
@@ -670,6 +971,18 @@
                             <p class="field-help">安全半径模式下越大越容易；夹缝模式下它代表外圈边界。</p>
                         </div>
 
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="shake">
+                        <summary>
+                            <span>高级节奏</span>
+                            <small>夹缝、灵敏度与触发间隔</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
+
                         <div class="slider-container">
                             <div class="slider-label">
                                 <span>夹缝内圈半径</span>
@@ -706,14 +1019,17 @@
                             <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到安全区会立即停止。</p>
                         </div>
                     </div>
-
-                    <div class="settings-actions">
-                        <button onclick="calibrateCurrentPose('shake')">校准当前姿态</button>
-                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
+                    </details>
                 </div>
 
                 <div id="settings-angle" class="setting-panel">
+                    <details class="settings-group" data-game="angle" data-default-open="true" open>
+                        <summary>
+                            <span>基础玩法</span>
+                            <small>强度、目标角度与允许误差</small>
+                        </summary>
+                        <div class="settings-group-content">
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
@@ -751,6 +1067,18 @@
                             <p class="field-help">目标角度左右可接受的范围；越小越严格，越容易触发。</p>
                         </div>
 
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="angle">
+                        <summary>
+                            <span>高级节奏</span>
+                            <small>触发延迟、强度爬升与休息</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
+
                         <div class="slider-container">
                             <div class="slider-label">
                                 <span>偏多久才电</span>
@@ -778,14 +1106,17 @@
                             <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到允许范围会立即停止。</p>
                         </div>
                     </div>
-
-                    <div class="settings-actions">
-                        <button onclick="calibrateCurrentPose('angle')">校准当前姿态</button>
-                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
+                    </details>
                 </div>
 
                 <div id="settings-dice" class="setting-panel">
+                    <details class="settings-group" data-game="dice" data-default-open="true" open>
+                        <summary>
+                            <span>基础玩法</span>
+                            <small>每下强度与持续时间</small>
+                        </summary>
+                        <div class="settings-group-content">
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
@@ -804,6 +1135,18 @@
                             <input type="range" id="dice-single-seconds" min="0.5" max="5.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
                             <p class="field-help">每一下持续多久。输几下就按这个时间排队执行几下。</p>
                         </div>
+
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="dice">
+                        <summary>
+                            <span>高级规则</span>
+                            <small>间隔、豹子、上限与摇晃判定</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
 
                         <div class="slider-container">
                             <div class="slider-label">
@@ -859,13 +1202,17 @@
                             <p class="field-help">开启后可以点按钮开局；关闭后只能靠手机摇晃开局。</p>
                         </div>
                     </div>
-
-                    <div class="settings-actions single">
-                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
+                    </details>
                 </div>
 
                 <div id="settings-slot" class="setting-panel">
+                    <details class="settings-group" data-game="slot" data-default-open="true" open>
+                        <summary>
+                            <span>基础输出</span>
+                            <small>轻电强度、满槽强度与时长</small>
+                        </summary>
+                        <div class="settings-group-content">
                     <div class="settings-stack">
                         <div class="slider-container">
                             <div class="slider-label">
@@ -894,6 +1241,18 @@
                             <p class="field-help">压力条满格后单次输出多久；输出结束后还会按“电完休息”等一段时间。</p>
                         </div>
 
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="slot">
+                        <summary>
+                            <span>轻电与结算</span>
+                            <small>轻电开关、时长与满槽后压力</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
+
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">满槽后压力</label>
                             <select id="slot-pressure-after-punish" onchange="saveSelectedSettings(true)">
@@ -919,6 +1278,18 @@
                             <input type="range" id="slot-light-shock-seconds" min="0.1" max="2.0" step="0.1" value="0.4" oninput="updateSettingValue('slot-light-shock-seconds')">
                             <p class="field-help">每次没中奖轻电的持续时间。上一下还没结束时，不会叠新的轻电。</p>
                         </div>
+
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="slot">
+                        <summary>
+                            <span>游戏节奏</span>
+                            <small>开奖速度、休息与自动连转</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
 
                         <div class="slider-container">
                             <div class="slider-label">
@@ -954,6 +1325,18 @@
                             <input type="range" id="slot-auto-interval-ms" min="300" max="1800" step="50" value="650" oninput="updateSettingValue('slot-auto-interval-ms')">
                             <p class="field-help">自动连转时两次开奖之间等待多久；如果刚刚电过，会和“电完休息”取更慢的那个。</p>
                         </div>
+
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="slot">
+                        <summary>
+                            <span>压力规则</span>
+                            <small>没中奖加压与中奖降压</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
 
                         <div class="slider-container">
                             <div class="slider-label">
@@ -991,6 +1374,18 @@
                             <p class="field-help">三个相同图案时减少多少压力；设为 100 基本等于大奖清空压力。</p>
                         </div>
 
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="slot">
+                        <summary>
+                            <span>特殊规则</span>
+                            <small>中奖率与三个 7 彩蛋</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
+
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">中奖率档位</label>
                             <select id="slot-win-rate" onchange="saveSelectedSettings(true)">
@@ -1011,26 +1406,31 @@
                             <p class="field-help">三个 7 是独立彩蛋：可以当大奖清空，也可以直接推满压力或立刻按最大强度结算。</p>
                         </div>
                     </div>
-
-                    <div class="settings-actions single">
-                        <button class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                     </div>
+                    </details>
                 </div>
 
-                <div id="settings-message" class="inline-note" role="status" aria-live="polite"></div>
+                <div id="settings-message" class="inline-note" role="status" aria-live="polite">所有改动会自动保存在当前设备。</div>
+            </div>
+
+            <div class="settings-sticky-actions" role="region" aria-label="设置操作">
+                <button type="button" onclick="resetSelectedSettings()">恢复默认</button>
+                <button id="settings-calibrate-button" type="button" onclick="calibrateSelectedGame()">校准姿态</button>
+                <button type="button" class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
             </div>
         </div>
 
         <!-- 游玩页只展示当前玩法和必要控制，避免设置变更和惩罚判定混在一起。 -->
-        <div id="screen-play" class="screen">
-            <div class="flex-row" style="margin-bottom: 20px;">
+        <div id="screen-play" class="screen" hidden>
+            <div class="play-navigation">
                 <button onclick="exitGame()">返回列表</button>
-                <button class="danger-button" onclick="stopCurrentGame()">停止输出</button>
             </div>
+
+            <div id="wake-lock-warning" class="inline-warning" role="status" aria-live="assertive" hidden></div>
 
             <div class="grid">
                 <div class="panel">
-                    <h2 id="game-title">游戏进行中</h2>
+                    <h2 id="game-title" tabindex="-1" data-screen-heading>游戏进行中</h2>
                     <p id="game-help" class="game-help">-</p>
                     <p id="game-status" class="sub-text" role="status" aria-live="polite" style="margin-bottom: 15px;">-</p>
 
@@ -1092,8 +1492,9 @@
                     </div>
                 </div>
 
-                <div class="panel">
-                    <h2>当前参数</h2>
+                <details class="panel play-parameter-summary">
+                    <summary>当前参数</summary>
+                    <div class="play-parameter-content">
                     <table class="stats-table">
                         <tr>
                             <td>玩法</td>
@@ -1120,12 +1521,13 @@
                             <td id="summary-output">-</td>
                         </tr>
                     </table>
-                </div>
+                    </div>
+                </details>
             </div>
         </div>
     </div>
 
-    <script src="game-logic.js?v=20260714-safety-tests"></script>
-    <script src="game.js?v=20260720-v4-devices"></script>
+    <script src="game-logic.js?v=20260721-ui-safety"></script>
+    <script src="game.js?v=20260721-ui-safety"></script>
 </body>
 </html>

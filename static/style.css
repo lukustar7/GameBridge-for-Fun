@@ -162,17 +162,30 @@ h3 {
 }
 
 .tabs {
-    position: sticky;
-    top: 10px;
-    z-index: 20;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 7px;
     padding: 7px;
-    margin-bottom: 22px;
+    margin: 0;
     border: 1px solid var(--border);
     border-radius: 16px;
     background: rgba(7, 10, 18, 0.86);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(18px);
+}
+
+.console-sticky-bar {
+    position: sticky;
+    top: 10px;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    margin-bottom: 22px;
+}
+
+.console-emergency-stop {
+    min-width: 152px;
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(18px);
 }
@@ -570,9 +583,14 @@ canvas {
         padding: 6px 9px;
     }
 
-    .tabs {
+    .console-sticky-bar {
         top: 6px;
+        grid-template-columns: 1fr;
         margin-bottom: 16px;
+    }
+
+    .console-emergency-stop {
+        min-height: 42px;
     }
 
     .tab {

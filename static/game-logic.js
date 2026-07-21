@@ -151,6 +151,40 @@
         return currentTime - timestamp < ageLimit;
     }
 
+    function formatSettingLabel(id, value) {
+        // 由调用方传入字段 ID 和数值，统一生成带单位的设置标签。
+        const rawValue = Number(value);
+        const safeValue = Number.isFinite(rawValue) ? rawValue : 0;
+
+        if (id.endsWith("safe-radius") || id.endsWith("gap-inner") ||
+            id.endsWith("miss-gain") || id.endsWith("streak-bonus") ||
+            id.endsWith("small-win-drop") || id.endsWith("jackpot-drop") ||
+            id.endsWith("b-strength-percent")) {
+            return `${safeValue}%`;
+        }
+        if (id.endsWith("forgive-ms") || id.endsWith("trigger-ms") || id.endsWith("rest-ms") ||
+            id.endsWith("spin-ms") || id.endsWith("auto-interval-ms")) {
+            return `${safeValue}ms`;
+        }
+        if (id.endsWith("shock-seconds") || id.endsWith("single-seconds") || id.endsWith("gap-seconds")) {
+            return `${safeValue.toFixed(1)}s`;
+        }
+        if (["angle-target-offset", "angle-tolerance", "angle-ramp-degrees"].includes(id)) {
+            return `${safeValue}°`;
+        }
+        return String(safeValue);
+    }
+
+    function hasSafeOutputLimits(mode, limitA, limitB) {
+        // 顶部安全状态与正式输出共用同一判定：所选通道必须拿到大于 0 的真实硬件限幅。
+        const aReady = Number.isFinite(Number(limitA)) && Number(limitA) > 0;
+        const bReady = Number.isFinite(Number(limitB)) && Number(limitB) > 0;
+        if (mode === "a") return aReady;
+        if (mode === "b") return bReady;
+        if (mode === "ab") return aReady && bReady;
+        return false;
+    }
+
     function getSlotOdds(winRate) {
         if (winRate === "loose") return { small: 0.42, jackpot: 0.14 };
         if (winRate === "brutal") return { small: 0.22, jackpot: 0.06 };
@@ -280,8 +314,10 @@
         classifySlotResult,
         estimateDiceQueueSeconds,
         evaluateDiceRound,
+        formatSettingLabel,
         getSlotOdds,
         getTripleFace,
+        hasSafeOutputLimits,
         isTimestampFresh,
         restoreSettings,
         shuffleSlotReels

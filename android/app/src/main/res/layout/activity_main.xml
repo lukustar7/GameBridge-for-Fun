@@ -140,6 +140,8 @@
             android:layout_height="?attr/actionBarSize"
             android:background="@color/brand_surface"
             android:elevation="3dp"
+            app:itemIconTint="@color/brand_error"
+            app:menu="@menu/game_toolbar"
             app:navigationContentDescription="@string/back_to_connect"
             app:navigationIcon="@drawable/ic_arrow_back"
             app:title="@string/game_toolbar_title" />

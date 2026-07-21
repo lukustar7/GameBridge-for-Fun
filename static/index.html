@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 控制台</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260721-ui-navigation">
     <script src="qrcode.min.js?v=20260706-valid"></script>
 </head>
 <body>
@@ -21,15 +21,18 @@
             </div>
         </header>
 
-        <!-- 使用真实按钮和 ARIA 状态，让键盘操作与读屏软件都能正确识别分页。 -->
-        <nav class="tabs" aria-label="控制台页面">
-            <button type="button" class="tab active" data-tab="monitor" aria-controls="tab-monitor" aria-selected="true" onclick="switchTab('monitor')">状态监控</button>
-            <button type="button" class="tab" data-tab="cert" aria-controls="tab-cert" aria-selected="false" onclick="switchTab('cert')">手机证书</button>
-            <button type="button" class="tab" data-tab="settings" aria-controls="tab-settings" aria-selected="false" onclick="switchTab('settings')">技术信息</button>
-        </nav>
+        <!-- 页签和停止按钮共同置顶，滚动技术长页时仍能立即停机或切换任务。 -->
+        <div class="console-sticky-bar">
+            <nav class="tabs" role="tablist" aria-label="控制台页面">
+                <button id="tab-button-monitor" type="button" role="tab" class="tab active" data-tab="monitor" aria-controls="tab-monitor" aria-selected="true" tabindex="0" onclick="switchTab('monitor')">状态监控</button>
+                <button id="tab-button-cert" type="button" role="tab" class="tab" data-tab="cert" aria-controls="tab-cert" aria-selected="false" tabindex="-1" onclick="switchTab('cert')">手机证书</button>
+                <button id="tab-button-settings" type="button" role="tab" class="tab" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">技术信息</button>
+            </nav>
+            <button type="button" class="danger-button console-emergency-stop" onclick="stopConsoleOutput()">停止 A/B 输出</button>
+        </div>
 
         <!-- 状态监控面版 -->
-        <div id="tab-monitor" class="tab-content active">
+        <div id="tab-monitor" class="tab-content active" role="tabpanel" aria-labelledby="tab-button-monitor">
             <div class="status-badge">
                 <div>
                     <div class="status-label">设备控制链路</div>
@@ -135,7 +138,7 @@
         </div>
 
         <!-- 手机 HTTPS 证书安装引导 -->
-        <div id="tab-cert" class="tab-content">
+        <div id="tab-cert" class="tab-content" role="tabpanel" aria-labelledby="tab-button-cert" hidden>
             <div class="grid">
                 <div class="panel">
                     <h2>1. 安装本地根证书</h2>
@@ -212,7 +215,7 @@
         </div>
 
         <!-- 参数设置面版 -->
-        <div id="tab-settings" class="tab-content">
+        <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-button-settings" hidden>
             <div class="grid">
                 <!-- 技术参数配置 -->
                 <div class="panel">
@@ -271,11 +274,11 @@
                             <td id="stat-device-connected">未连接</td>
                         </tr>
                         <tr>
-                            <td>电脑 $\leftrightarrow$ 手机 App 延迟</td>
+                            <td>电脑 ↔ 手机 App 延迟</td>
                             <td id="stat-app-latency">-</td>
                         </tr>
                         <tr>
-                            <td>电脑 $\leftrightarrow$ 手机浏览器延迟</td>
+                            <td>电脑 ↔ 手机浏览器延迟</td>
                             <td id="stat-game-latency">-</td>
                         </tr>
                         <tr>
@@ -329,6 +332,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260720-v4-devices"></script>
+    <script src="console.js?v=20260721-ui-navigation"></script>
 </body>
 </html>

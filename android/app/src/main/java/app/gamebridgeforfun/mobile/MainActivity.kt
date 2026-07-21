@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -67,6 +68,9 @@ class MainActivity : AppCompatActivity() {
         activityResumed = true
         binding.gameWebView.onResume()
         val connection = trustedConnection
+        if (connection != null) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         if (reloadAfterResume && connection != null) {
             reloadAfterResume = false
             binding.gameWebView.loadUrl(connection.pageUrl)
@@ -80,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         // 必须先通知网页停机并关闭 WS，再暂停 WebView；顺序反过来可能让 JS 来不及发送停止请求。
         if (pageReady) evaluateNativeCommand("pause", "android_pause")
         sensorDispatcher.stop()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (trustedConnection != null) {
             // 销毁当前文档会从 WebView 网络层关闭 WS，作为 JS 停机消息之外的第二道硬兜底。
             pageReady = false
@@ -95,6 +100,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         sensorDispatcher.stop()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.gameWebView.apply {
             stopLoading()
             loadUrl("about:blank")
@@ -117,6 +123,13 @@ class MainActivity : AppCompatActivity() {
         }
         binding.backToConnectButton.setOnClickListener { returnToConnectionScreen() }
         binding.gameToolbar.setNavigationOnClickListener { returnToConnectionScreen() }
+        binding.gameToolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId != R.id.actionStopOutput) return@setOnMenuItemClickListener false
+            // 即使错误遮罩刚刚出现，也尝试调用旧文档里的停止入口；about:blank 中执行则安全地无效果。
+            evaluateNativeCommand("stop", requirePageReady = false)
+            Toast.makeText(this, R.string.stop_output_requested, Toast.LENGTH_SHORT).show()
+            true
+        }
         binding.retryButton.setOnClickListener { retryCurrentConnection() }
         binding.gameUrlInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId != EditorInfo.IME_ACTION_GO) return@setOnEditorActionListener false
@@ -177,6 +190,8 @@ class MainActivity : AppCompatActivity() {
         getPreferences(MODE_PRIVATE).edit {
             putString(PREF_LAST_GAME_URL, connection.pageUrl)
         }
+        // 原生壳负责屏幕常亮，网页无需再依赖不同 WebView 对 Wake Lock API 的支持差异。
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         binding.connectionScroll.visibility = View.GONE
         binding.gameContainer.visibility = View.VISIBLE
@@ -191,6 +206,7 @@ class MainActivity : AppCompatActivity() {
         pageLoadFailed = false
         reloadAfterResume = false
         trustedConnection = null
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.gameWebView.stopLoading()
         binding.gameWebView.loadUrl("about:blank")
         binding.gameWebView.clearHistory()
@@ -226,6 +242,7 @@ class MainActivity : AppCompatActivity() {
         pageReady = false
         pageLoadFailed = true
         sensorDispatcher.stop()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.pageLoadingOverlay.visibility = View.GONE
         binding.pageErrorText.text = message
         binding.pageErrorPanel.visibility = View.VISIBLE
@@ -265,8 +282,12 @@ class MainActivity : AppCompatActivity() {
         binding.gameWebView.webViewClient = RestrictedGameWebViewClient()
     }
 
-    private fun evaluateNativeCommand(command: String, argument: String? = null) {
-        if (!pageReady) return
+    private fun evaluateNativeCommand(
+        command: String,
+        argument: String? = null,
+        requirePageReady: Boolean = true,
+    ) {
+        if (requirePageReady && !pageReady) return
         val argumentScript = argument?.let { "'${it.replace("'", "")}'" }.orEmpty()
         val call = if (argument == null) "$command()" else "$command($argumentScript)"
         binding.gameWebView.evaluateJavascript(

@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_primary">#2563EB</color>
-    <color name="brand_on_primary">#FFFFFF</color>
-    <color name="brand_surface">#F7F9FC</color>
-    <color name="brand_surface_variant">#EDF2FA</color>
-    <color name="brand_outline">#C6D2E3</color>
-    <color name="brand_error">#B4233A</color>
+    <!-- 网页固定使用弱光深色界面，原生连接页同步采用同一主题，避免进入 WebView 时明暗突变。 -->
+    <color name="brand_primary">#67E8F9</color>
+    <color name="brand_on_primary">#04202A</color>
+    <color name="brand_surface">#080C17</color>
+    <color name="brand_surface_variant">#121C31</color>
+    <color name="brand_outline">#33445F</color>
+    <color name="brand_error">#FDA4AF</color>
     <color name="webview_background">#070A12</color>
     <color name="icon_background">#071225</color>
 </resources>

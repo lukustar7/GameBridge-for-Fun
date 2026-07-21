@@ -128,6 +128,25 @@ test("传感器时间戳超过硬期限后立即视为失效", () => {
     assert.equal(logic.isTimestampFresh(2000, 1600, 1000), false);
 });
 
+test("设置数值只给真正的角度字段添加度数单位", () => {
+    assert.equal(logic.formatSettingLabel("angle-strength-min", 15), "15");
+    assert.equal(logic.formatSettingLabel("angle-strength-max", 70), "70");
+    assert.equal(logic.formatSettingLabel("angle-target-offset", -12), "-12°");
+    assert.equal(logic.formatSettingLabel("angle-tolerance", 8), "8°");
+    assert.equal(logic.formatSettingLabel("angle-ramp-degrees", 28), "28°");
+    assert.equal(logic.formatSettingLabel("slot-shock-seconds", 2), "2.0s");
+    assert.equal(logic.formatSettingLabel("slot-miss-gain", 24), "24%");
+});
+
+test("安全就绪状态要求所选通道都拿到有效限幅", () => {
+    assert.equal(logic.hasSafeOutputLimits("a", 80, null), true);
+    assert.equal(logic.hasSafeOutputLimits("b", 80, 60), true);
+    assert.equal(logic.hasSafeOutputLimits("b", 80, 0), false);
+    assert.equal(logic.hasSafeOutputLimits("ab", 80, null), false);
+    assert.equal(logic.hasSafeOutputLimits("ab", 80, 60), true);
+    assert.equal(logic.hasSafeOutputLimits("unknown", 80, 60), false);
+});
+
 test("三档角子机中奖率保持固定规则", () => {
     assert.deepEqual(logic.getSlotOdds("loose"), { small: 0.42, jackpot: 0.14 });
     assert.deepEqual(logic.getSlotOdds("normal"), { small: 0.32, jackpot: 0.09 });

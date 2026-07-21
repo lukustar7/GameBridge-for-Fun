@@ -16,4 +16,6 @@
     <string name="load_error_title">无法打开游戏页面</string>
     <string name="load_error_default">请确认电脑服务仍在运行，并检查手机和电脑是否处于同一 Wi-Fi。</string>
     <string name="retry_action">重新连接</string>
+    <string name="stop_output_action">停止 A/B 输出</string>
+    <string name="stop_output_requested">已请求停止 A/B 输出</string>
 </resources>
