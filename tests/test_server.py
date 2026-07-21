@@ -49,6 +49,40 @@ class FakeDeviceAppClient:
         self.events.append(("reset_strength", channel))
 
 
+class ScriptedGameWebSocket:
+    """按预定时间向真实游戏处理器送消息，并记录服务端反馈。"""
+
+    def __init__(self, script):
+        # 每一项由“等待秒数 + 消息内容”组成；短暂停顿让后台输出任务真实获得执行机会。
+        self.script = iter(script)
+        self.sent_messages = []
+        self.closed = False
+        self.close_code = None
+        self.close_reason = None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            delay_seconds, payload = next(self.script)
+        except StopIteration as error:
+            raise StopAsyncIteration from error
+        if delay_seconds:
+            await asyncio.sleep(delay_seconds)
+        return payload if isinstance(payload, str) else server.json.dumps(payload)
+
+    async def send(self, message):
+        """保存状态广播和操作反馈，效果等同于浏览器收到了 WebSocket 消息。"""
+        self.sent_messages.append(server.json.loads(message))
+
+    async def close(self, code=1000, reason=""):
+        """记录鉴权拒绝，便于确认无令牌页面没有进入硬件控制流程。"""
+        self.closed = True
+        self.close_code = code
+        self.close_reason = reason
+
+
 class ServerLogicTests(unittest.TestCase):
     """验证不需要启动网络服务的纯逻辑。"""
 
@@ -486,6 +520,168 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleared_channels, [server.Channel.A, server.Channel.B])
         self.assertEqual(server.state["client_strength_a"], 0)
         self.assertIsNone(server.output_watchdog_mode)
+
+
+class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
+    """把四种游戏的真实 WebSocket 消息送进后端，用假设备核对整条安全链路。"""
+
+    async def asyncSetUp(self):
+        self.original_state = server.state.copy()
+        self.original_client = server.device_app_client
+        self.original_task = server.active_output_task
+        self.original_task_clear_after = server.active_output_clear_after
+        self.original_generation = server.shock_generation
+        self.original_watchdog_task = server.output_watchdog_task
+        self.original_watchdog_owner = server.output_watchdog_owner
+        self.original_watchdog_mode = server.output_watchdog_mode
+        self.original_watchdog_generation = server.output_watchdog_generation
+        self.original_shock_lock = server.shock_lock
+        self.original_state_lock = server.state_lock
+        self.original_console_connections = set(server.console_connections)
+        self.original_game_connections = set(server.game_connections)
+        self.original_last_pulses = dict(server.game_connection_last_pulse_at)
+
+        # 使用不对称上限能验证 A/B 分路限幅：即使网页恶意请求 999，也只能到 40/30。
+        server.state["app_connected"] = True
+        server.state["device_connected"] = True
+        server.state["limit_a"] = 40
+        server.state["limit_b"] = 30
+        server.state["client_strength_a"] = 0
+        server.state["client_strength_b"] = 0
+        server.state["game_client_connected"] = False
+        server.active_output_task = None
+        server.active_output_clear_after = True
+        server.output_watchdog_task = None
+        server.output_watchdog_owner = None
+        server.output_watchdog_mode = None
+        server.shock_lock = asyncio.Lock()
+        server.state_lock = asyncio.Lock()
+        server.console_connections.clear()
+        server.game_connections.clear()
+        server.game_connection_last_pulse_at.clear()
+        self.fake_client = FakeDeviceAppClient()
+        server.device_app_client = self.fake_client
+
+    async def asyncTearDown(self):
+        await server.stop_all_output()
+        server.state.clear()
+        server.state.update(self.original_state)
+        server.device_app_client = self.original_client
+        server.active_output_task = self.original_task
+        server.active_output_clear_after = self.original_task_clear_after
+        server.shock_generation = self.original_generation
+        server.output_watchdog_task = self.original_watchdog_task
+        server.output_watchdog_owner = self.original_watchdog_owner
+        server.output_watchdog_mode = self.original_watchdog_mode
+        server.output_watchdog_generation = self.original_watchdog_generation
+        server.shock_lock = self.original_shock_lock
+        server.state_lock = self.original_state_lock
+        server.console_connections.clear()
+        server.console_connections.update(self.original_console_connections)
+        server.game_connections.clear()
+        server.game_connections.update(self.original_game_connections)
+        server.game_connection_last_pulse_at.clear()
+        server.game_connection_last_pulse_at.update(self.original_last_pulses)
+
+    async def test_four_games_share_limits_reject_overlap_and_confirm_emergency_stop(self):
+        """模拟手持、角度、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
+        websocket = ScriptedGameWebSocket([
+            # 手持感应：先发一帧持续脉冲，再立即执行用户急停。
+            (0, {"type": "game_pulse", "strength": 18, "duration": 100, "outputMode": "a"}),
+            (0.03, {"type": "stop_shock"}),
+            # 角度挑战：故意提交超大数值，后端必须按 A=40、B=30 截断。
+            (0.24, {
+                "type": "game_pulse",
+                "strength": 999,
+                "duration": 999,
+                "outputMode": "ab",
+                "bStrengthMode": "percent",
+                "bStrengthPercent": 50,
+            }),
+            (0.03, {"type": "stop_shock"}),
+            # 骰子：同一瞬间重复提交只能接受第一条，不能把惩罚排成隐藏队列。
+            (0, {"type": "game_shock_trigger", "strength": 25, "duration": 100, "outputMode": "a"}),
+            (0, {"type": "game_shock_trigger", "strength": 25, "duration": 100, "outputMode": "a"}),
+            # 角子机：骰子输出完成后再走一次 A+B 结算型惩罚。
+            (0.15, {
+                "type": "game_shock_trigger",
+                "strength": 85,
+                "duration": 100,
+                "outputMode": "ab",
+                "bStrengthMode": "same",
+            }),
+            (0.15, {"type": "ping", "time": 123}),
+        ])
+
+        await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        temporary_events = [
+            event for event in self.fake_client.events
+            if event[0] == "set_temporary_strength"
+        ]
+        pulse_events = [event for event in self.fake_client.events if event[0] == "send_pulse"]
+        clear_channels = [event[1] for event in self.fake_client.events if event[0] == "clear_pulses"]
+
+        # 六次代表：手持 A；角度 A/B；骰子 A；角子机 A/B。若重叠请求被错误排队，这里会多一次。
+        self.assertEqual(len(temporary_events), 6, self.fake_client.events)
+        self.assertEqual(len(pulse_events), 6)
+        self.assertEqual(
+            [(event[1], event[2]) for event in temporary_events],
+            [
+                (server.Channel.A, 18),
+                (server.Channel.A, 40),
+                (server.Channel.B, 30),
+                (server.Channel.A, 25),
+                (server.Channel.A, 40),
+                (server.Channel.B, 30),
+            ],
+        )
+        self.assertTrue(all(event[2] <= 40 for event in temporary_events if event[1] == server.Channel.A))
+        self.assertTrue(all(event[2] <= 30 for event in temporary_events if event[1] == server.Channel.B))
+        self.assertGreaterEqual(clear_channels.count(server.Channel.A), 4)
+        self.assertGreaterEqual(clear_channels.count(server.Channel.B), 4)
+        self.assertEqual(server.state["client_strength_a"], 0)
+        self.assertEqual(server.state["client_strength_b"], 0)
+
+        stop_feedback = [message for message in websocket.sent_messages if message.get("type") == "stop_feedback"]
+        self.assertEqual(len(stop_feedback), 2)
+        self.assertTrue(all(message["ok"] for message in stop_feedback))
+
+    async def test_game_page_disconnect_cancels_long_output_and_clears_both_channels(self):
+        """模拟手机页面在长时惩罚中突然掉线，连接清理必须立即取消任务并清空两路。"""
+        websocket = ScriptedGameWebSocket([
+            (0, {
+                "type": "game_shock_trigger",
+                "strength": 35,
+                "duration": 5000,
+                "outputMode": "ab",
+                "bStrengthMode": "same",
+            }),
+            # 给后台任务 30ms 下发第一帧，随后脚本结束就等同于页面突然断线。
+            (0.03, {"type": "ping", "time": 456}),
+        ])
+
+        await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        clear_channels = [event[1] for event in self.fake_client.events if event[0] == "clear_pulses"]
+        self.assertIn(server.Channel.A, clear_channels)
+        self.assertIn(server.Channel.B, clear_channels)
+        self.assertIsNone(server.active_output_task)
+        self.assertEqual(server.state["client_strength_a"], 0)
+        self.assertEqual(server.state["client_strength_b"], 0)
+        self.assertFalse(server.state["game_client_connected"])
+
+    async def test_invalid_game_token_never_reaches_fake_hardware(self):
+        """没有正确配对令牌的网页应在入口关闭，不能触发任何假硬件命令。"""
+        websocket = ScriptedGameWebSocket([
+            (0, {"type": "game_shock_trigger", "strength": 40, "duration": 1000}),
+        ])
+
+        await server.web_ws_handler(websocket, "/game?token=wrong-token")
+
+        self.assertTrue(websocket.closed)
+        self.assertEqual(websocket.close_code, 1008)
+        self.assertEqual(self.fake_client.events, [])
 
 
 if __name__ == "__main__":

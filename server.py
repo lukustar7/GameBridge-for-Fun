@@ -1520,8 +1520,9 @@ async def web_ws_handler(websocket, path):
                 # 游戏 1 / 游戏 2 的持续线性惩罚数据上报 (每 100ms 触发一次)
                 elif data.get("type") == "game_pulse":
                     now = asyncio.get_running_loop().time()
-                    last_pulse_at = game_connection_last_pulse_at.get(websocket, 0)
-                    if now - last_pulse_at < MIN_PULSE_INTERVAL_SECONDS:
+                    last_pulse_at = game_connection_last_pulse_at.get(websocket)
+                    # “从未发送”不能伪装成时间 0；部分事件循环从 0 开始计时，否则服务刚启动时会吞掉首帧。
+                    if last_pulse_at is not None and now - last_pulse_at < MIN_PULSE_INTERVAL_SECONDS:
                         continue
                     game_connection_last_pulse_at[websocket] = now
 

@@ -66,6 +66,16 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn('id="screen-settings" class="screen" hidden', self.game_text)
         self.assertIn('id="screen-play" class="screen" hidden', self.game_text)
 
+    def test_mobile_emergency_stop_cancels_local_queues_before_another_game_can_start(self):
+        """手机急停不能只清当前硬件帧，还必须退出本局并取消骰子、角子机等预约任务。"""
+
+        function_start = self.game_script_text.index("function stopMobileOutput() {")
+        function_end = self.game_script_text.index("function closeGameSocketForEmergency()", function_start)
+        function_body = self.game_script_text[function_start:function_end]
+
+        self.assertIn("exitGame();", function_body)
+        self.assertNotIn('sendGameMessage({ type: "stop_shock" })', function_body)
+
     def test_each_game_has_one_default_open_basic_group(self):
         """每种玩法首次进入只展开一个基础分组，避免重新退化成长滚动页。"""
 

@@ -576,7 +576,13 @@ function sendMobileTestShock(outputMode) {
 }
 
 function stopMobileOutput() {
-    if (!sendGameMessage({ type: "stop_shock" })) {
+    const serviceAvailable = ws && ws.readyState === WebSocket.OPEN;
+
+    // 顶部按钮是人工急停，不只是“清掉当前一帧”：必须同时杀掉骰子队列、角子机延时和感应循环。
+    // exitGame 会先调用 stopCurrentGame 发出唯一一次 A/B 停止，再退回玩法列表，防止旧定时器稍后重新输出。
+    exitGame();
+
+    if (!serviceAvailable) {
         setMobileTestResult("后台连接已断开；服务端会按断线规则兜底停止输出。", false);
         return;
     }
