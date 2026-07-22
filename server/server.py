@@ -62,7 +62,8 @@ def normalize_private_ipv4(value):
 
 
 # --- 全局状态与配置 ---
-PROJECT_ROOT = Path(__file__).resolve().parent
+# 后端源码位于 server/ 子目录，static、certs、APK 等运行资源仍以项目根目录为准。
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = PROJECT_ROOT / "static"
 LOCAL_IP = "127.0.0.1"
 

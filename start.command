@@ -64,8 +64,8 @@ if [ "$(uname -s 2>/dev/null)" != "Darwin" ]; then
 fi
 echo "[通过] 当前系统为 macOS"
 
-if [ ! -f "$PROJECT_ROOT/macos_preflight.py" ] || [ ! -f "$PROJECT_ROOT/requirements.txt" ]; then
-    fail "项目文件不完整，缺少 macos_preflight.py 或 requirements.txt。"
+if [ ! -f "$PROJECT_ROOT/server/macos_preflight.py" ] || [ ! -f "$PROJECT_ROOT/requirements.txt" ]; then
+    fail "项目文件不完整，缺少 server/macos_preflight.py 或 requirements.txt。"
 fi
 
 if [ ! -w "$PROJECT_ROOT" ]; then
@@ -110,7 +110,7 @@ if ! "$VENV_PYTHON" -m pip --version >/dev/null 2>&1; then
 fi
 
 # 依赖完全匹配时不联网；首次安装或版本变化时，优先使用中国大陆的清华镜像。
-if ! "$VENV_PYTHON" "$PROJECT_ROOT/macos_preflight.py" --check-dependencies >/dev/null 2>&1; then
+if ! "$VENV_PYTHON" "$PROJECT_ROOT/server/macos_preflight.py" --check-dependencies >/dev/null 2>&1; then
     echo "[配置] 正在从清华 PyPI 镜像安装锁定依赖..."
     if ! "$VENV_PYTHON" -m pip install \
         --disable-pip-version-check \
@@ -146,18 +146,18 @@ if ! "$VENV_PYTHON" "$PROJECT_ROOT/macos_preflight.py" --check-dependencies >/de
     fi
 fi
 
-if ! "$VENV_PYTHON" "$PROJECT_ROOT/macos_preflight.py" --check-dependencies; then
+if ! "$VENV_PYTHON" "$PROJECT_ROOT/server/macos_preflight.py" --check-dependencies; then
     fail "依赖安装完成后仍未通过版本检查，请删除 .venv 文件夹后重试。"
 fi
 
 echo ""
 echo "正在检查局域网、运行文件和 HTTPS 证书..."
-if ! "$VENV_PYTHON" "$PROJECT_ROOT/macos_preflight.py" --prepare-runtime; then
+if ! "$VENV_PYTHON" "$PROJECT_ROOT/server/macos_preflight.py" --prepare-runtime; then
     fail "启动前检查没有通过，服务未启动。请按上面的具体提示处理。"
 fi
 
 echo ""
-"$VENV_PYTHON" "$PROJECT_ROOT/server.py"
+"$VENV_PYTHON" "$PROJECT_ROOT/server/server.py"
 SERVER_EXIT_CODE=$?
 if [ "$SERVER_EXIT_CODE" -ne 0 ] && [ "$SERVER_EXIT_CODE" -ne 130 ]; then
     fail "服务异常退出，退出码为 $SERVER_EXIT_CODE。"

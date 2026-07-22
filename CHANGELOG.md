@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 新增 uv 项目描述文件 `pyproject.toml` 与锁定文件 `uv.lock`，开发者可用 `uv sync` 一步创建与 `requirements.txt` 一致的 `.venv` 环境；`start.command` 面向普通用户的 pip 流程保持不变。
 - 新增 3 项团队仓库卫生测试，覆盖 11 类敏感或生成路径、APK 交付包保留和已跟踪文件误忽略；Python 自动化用例总数从 69 项增加到 72 项。
 - 新增 1 个四游戏共用的输出感觉选择器，提供游戏默认、按时长随机和 16 种经典波形共 18 个选项；各玩法不再重复增加控件，新增波形与边界回归后 Python 自动化用例总数从 54 项增加到 69 项。
 - 新增 3 项四游戏整链路无硬件彩排，覆盖 A/B 分路限幅、重叠拒绝、令牌鉴权、页面断线和急停确认；界面结构测试同步增加 1 项，Python 自动化用例总数从 50 项增加到 54 项。
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增 6 项界面结构回归测试，锁定唯一元素 ID、手机紧急停止、四种玩法默认折叠、控制台页签语义、Android 原生停止入口和角子机图标文案；Python 自动化用例总数从 44 项增加到 50 项。
 
 ### Changed
+- 将 4 个 Python 后端源码文件（`server.py`、`dglab_v4.py`、`coyote_waveforms.py`、`macos_preflight.py`）从项目根目录集中到 `server/` 子目录；开发启动命令相应变为 `python3 server/server.py`，`static/`、`certs/`、`APK/` 等运行资源目录不变，启动器、验收脚本、测试与文档已同步更新。
 - 根据郊狼 2.0 真机测试，将手机安全试电的固定强度和电脑端默认强度从 5 调整为 15；时长仍为 0.3 秒，后端最高强度 30、最长 1 秒和 1.5 秒冷却保持不变。
 - 波形下发从每 100ms 建立一个相同单帧任务改为单次提交完整序列；帧数按时长向上取整并限制在 1～600 帧，短波形压缩保留主要触感，随机模式按本次时长筛选且 A/B 共用同一结果。
 - macOS 双击启动改为仅在依赖缺失或版本变化时联网，首次安装优先使用清华 PyPI 镜像；清华镜像失败后必须由用户明确确认才会尝试官方 PyPI。

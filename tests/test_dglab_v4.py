@@ -3,10 +3,15 @@
 
 import asyncio
 import json
+import sys
 import unittest
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import websockets
+
+# 后端源码位于 server/ 子目录，测试导入前需要加入模块搜索路径。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 from dglab_v4 import (
     AppSession,

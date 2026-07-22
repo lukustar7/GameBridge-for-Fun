@@ -3,12 +3,17 @@
 
 import asyncio
 import subprocess
+import sys
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+# 后端源码位于 server/ 子目录，测试导入前需要加入模块搜索路径。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 import server
 

@@ -86,10 +86,10 @@ iPhone 安装描述文件后，还需进入 `设置 > 通用 > 关于本机 > �
 
 ## 目录
 
-- `server.py`：HTTP 静态服务、WebSocket 中转、设备 App 桥接与脉冲下发。
-- `macos_preflight.py`：macOS 启动前的依赖、文件、网络、证书与 APK 完整性检查。
-- `dglab_v4.py`：V4 握手、设备发现、状态合并、设备选择、安全 RPC 与 2.0/3.0 波形适配。
-- `coyote_waveforms.py`：经典波形、短时长压缩、随机策略与 V2/V3 帧编码。
+- `server/server.py`：HTTP 静态服务、WebSocket 中转、设备 App 桥接与脉冲下发。
+- `server/macos_preflight.py`：macOS 启动前的依赖、文件、网络、证书与 APK 完整性检查。
+- `server/dglab_v4.py`：V4 握手、设备发现、状态合并、设备选择、安全 RPC 与 2.0/3.0 波形适配。
+- `server/coyote_waveforms.py`：经典波形、短时长压缩、随机策略与 V2/V3 帧编码。
 - `static/index.html`：电脑端控制台。
 - `static/game.html`：手机端小游戏和独立设置页。
 - `static/game.js`：页面交互、传感器处理、参数持久化与惩罚上报。

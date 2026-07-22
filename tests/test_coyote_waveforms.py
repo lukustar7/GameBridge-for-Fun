@@ -2,7 +2,12 @@
 """波形时长适配、随机策略和郊狼双协议编码回归测试。"""
 
 import math
+import sys
 import unittest
+from pathlib import Path
+
+# 后端源码位于 server/ 子目录，测试导入前需要加入模块搜索路径。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 from coyote_waveforms import (
     DEFAULT_WAVEFORM_KEY,

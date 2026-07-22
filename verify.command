@@ -23,7 +23,7 @@ cd "$PROJECT_ROOT"
 echo "[1/5] 检查 Python 后端与 macOS 启动器"
 bash -n start.command
 PYTHONPYCACHEPREFIX="$PYTHON_CACHE_DIR" python3 -m py_compile \
-    server.py dglab_v4.py coyote_waveforms.py macos_preflight.py
+    server/server.py server/dglab_v4.py server/coyote_waveforms.py server/macos_preflight.py
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 echo "[2/5] 检查浏览器代码与游戏规则"
@@ -40,7 +40,7 @@ echo "[3/5] 检查 Android 并刷新已验签的调试安装包"
 ./android/build-debug.command
 
 echo "[4/5] 启动完整服务并执行本机 HTTP 冒烟检查"
-GAME_BRIDGE_FOR_FUN_NO_BROWSER=1 PYTHONUNBUFFERED=1 python3 server.py >"$SMOKE_LOG" 2>&1 &
+GAME_BRIDGE_FOR_FUN_NO_BROWSER=1 PYTHONUNBUFFERED=1 python3 server/server.py >"$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
 SMOKE_PORT=""
 SMOKE_READY=0

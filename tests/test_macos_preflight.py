@@ -3,9 +3,13 @@
 
 import hashlib
 import importlib.metadata
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# 后端源码位于 server/ 子目录，测试导入前需要加入模块搜索路径。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 import macos_preflight
 
@@ -65,8 +69,8 @@ class MacOSPreflightTests(unittest.TestCase):
             problems = macos_preflight.required_file_problems(Path(directory))
 
         self.assertEqual(len(problems), len(macos_preflight.REQUIRED_RUNTIME_FILES))
-        self.assertIn("缺少运行文件：server.py", problems)
-        self.assertIn("缺少运行文件：coyote_waveforms.py", problems)
+        self.assertIn("缺少运行文件：server/server.py", problems)
+        self.assertIn("缺少运行文件：server/coyote_waveforms.py", problems)
 
     def test_python_version_boundary(self):
         """Python 3.9 是最低支持线，3.8 必须给出升级提示。"""

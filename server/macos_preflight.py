@@ -13,15 +13,16 @@ import tempfile
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# 本文件与后端源码同在 server/ 子目录，检查目标仍是项目根目录。
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MINIMUM_PYTHON = (3, 9)
 TUNA_HOMEBREW_HELP = "https://mirrors.tuna.tsinghua.edu.cn/help/homebrew/"
 TUNA_HOMEBREW_API = "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
 TUNA_HOMEBREW_BOTTLES = "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
 REQUIRED_RUNTIME_FILES = (
-    "server.py",
-    "dglab_v4.py",
-    "coyote_waveforms.py",
+    "server/server.py",
+    "server/dglab_v4.py",
+    "server/coyote_waveforms.py",
     "requirements.txt",
     "static/index.html",
     "static/console.js",

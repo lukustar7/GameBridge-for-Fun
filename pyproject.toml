@@ -1,0 +1,10 @@
+[project]
+name = "gamebridge-for-fun"
+version = "0.1.0"
+description = "局域网小游戏与 DG-LAB 4 App 的本机桥接服务"
+# 与 server/macos_preflight.py 的 MINIMUM_PYTHON 保持一致。
+requires-python = ">=3.9"
+# 依赖与 requirements.txt 保持同步；start.command 的 pip 流程仍以 requirements.txt 为准。
+dependencies = [
+    "websockets==12.0",
+]
