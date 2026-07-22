@@ -22,7 +22,8 @@ cd "$PROJECT_ROOT"
 
 echo "[1/5] 检查 Python 后端与 macOS 启动器"
 bash -n start.command
-PYTHONPYCACHEPREFIX="$PYTHON_CACHE_DIR" python3 -m py_compile server.py dglab_v4.py macos_preflight.py
+PYTHONPYCACHEPREFIX="$PYTHON_CACHE_DIR" python3 -m py_compile \
+    server.py dglab_v4.py coyote_waveforms.py macos_preflight.py
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 echo "[2/5] 检查浏览器代码与游戏规则"

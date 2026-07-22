@@ -1,4 +1,44 @@
+# macOS 本地元数据
 .DS_Store
+
+# 本机证书、环境变量与密钥；APK 调试签名私钥不应进入仓库
 certs/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.csr
+*.srl
+*.jks
+*.keystore
+
+# Python 本地环境、缓存与测试产物
 .venv/
 .venv-broken-*/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Node.js 临时依赖；项目运行本身不要求安装 Node 包
+node_modules/
+
+# 编辑器、日志与临时文件
+.idea/
+.vscode/
+*.iml
+*.log
+*.swp
+*.tmp
+*.temp
+*~
+
+# APK/ 下的已验签调试包与 SHA-256 是团队测试交付物，故意保留跟踪。
