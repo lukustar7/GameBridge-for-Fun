@@ -13,8 +13,8 @@ from dglab_v4 import (
     Channel,
     DGLabV4Bridge,
     DeviceBridgeError,
-    build_coyote_pulse_frame,
 )
+from coyote_waveforms import build_coyote_waveform_frames
 
 
 class FakeAppWebSocket:
@@ -70,27 +70,29 @@ def build_device(slot_id="coyote", device_type="COYOTE_020", connected=True, lim
 
 
 class V4PulseFrameTests(unittest.TestCase):
-    """验证同一游戏强度会按硬件型号生成不同且合法的裸波形。"""
+    """验证同一感觉会按硬件型号生成不同且合法的完整波形。"""
 
-    def test_v3_frame_preserves_existing_wave_shape(self):
-        version, frame = build_coyote_pulse_frame("COYOTE_030", 200)
+    def test_v3_default_waveform_has_three_varying_frames_for_300ms(self):
+        version, frames = build_coyote_waveform_frames("COYOTE_030", "game_default", 300)
 
         self.assertEqual(version, 3)
-        self.assertEqual(frame, [100, 100, 100, 100, 100, 100, 100, 100])
+        self.assertEqual(len(frames), 3)
+        self.assertEqual(frames[0], [10, 10, 10, 10, 55, 55, 55, 55])
+        self.assertGreater(len({tuple(frame) for frame in frames}), 1)
 
-    def test_v2_frame_uses_little_endian_xyz_encoding(self):
-        version, frame = build_coyote_pulse_frame("COYOTE_020", 200)
+    def test_v2_breathing_waveform_matches_public_little_endian_example(self):
+        version, frames = build_coyote_waveform_frames("COYOTE_020", "breathing", 1200)
 
         self.assertEqual(version, 2)
-        self.assertEqual(frame, [0xE5, 0x0B, 0x0A])
-        packed = frame[0] | (frame[1] << 8) | (frame[2] << 16)
-        self.assertEqual(packed & 0x1F, 5)
-        self.assertEqual((packed >> 5) & 0x3FF, 95)
+        self.assertEqual(frames[:2], [[0x21, 0x01, 0x00], [0x21, 0x01, 0x02]])
+        packed = frames[5][0] | (frames[5][1] << 8) | (frames[5][2] << 16)
+        self.assertEqual(packed & 0x1F, 1)
+        self.assertEqual((packed >> 5) & 0x3FF, 9)
         self.assertEqual((packed >> 15) & 0x1F, 20)
 
     def test_unknown_device_type_is_rejected(self):
-        with self.assertRaises(DeviceBridgeError):
-            build_coyote_pulse_frame("UNKNOWN", 20)
+        with self.assertRaises(ValueError):
+            build_coyote_waveform_frames("UNKNOWN", "game_default", 100)
 
 
 class V4BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -206,19 +208,36 @@ class V4BridgeTests(unittest.IsolatedAsyncioTestCase):
         })
         await clear_task
 
-    async def test_v2_pulse_request_carries_version_and_three_byte_frame(self):
+    async def test_v2_pulse_request_carries_full_duration_aligned_frame_list(self):
         bridge = DGLabV4Bridge(target_id="controller-1")
         _session, websocket = self.attach_devices(bridge, [build_device()])
 
-        await bridge.send_pulse(Channel.B, 20, duration_ms=100)
+        await bridge.send_pulse(Channel.B, 20, "breathing", duration_ms=500)
         request = websocket.sent[-1]["data"]
         operation = request["data"]
 
         self.assertEqual(request["m"], "device.op")
         self.assertEqual(operation["c"], 1)
         self.assertEqual(operation["ver"], 2)
-        self.assertEqual(operation["v"], [[0xE5, 0x0B, 0x01]])
+        self.assertEqual(operation["d"], 500)
+        self.assertEqual(len(operation["v"]), 5)
+        self.assertTrue(all(len(frame) == 3 for frame in operation["v"]))
+        self.assertGreater(len({tuple(frame) for frame in operation["v"]}), 1)
         self.assertTrue(operation["im"])
+
+    async def test_longest_v3_waveform_stays_within_app_message_limit(self):
+        """60 秒波形不能膨胀到超过 App 网关的 64 KiB 消息边界。"""
+
+        bridge = DGLabV4Bridge(target_id="controller-1")
+        device = build_device()
+        device["type"] = "COYOTE_030"
+        _session, websocket = self.attach_devices(bridge, [device])
+
+        await bridge.send_pulse(Channel.A, 20, "pulse", duration_ms=60000)
+        request = websocket.sent[-1]["data"]
+
+        self.assertEqual(len(request["data"]["v"]), 600)
+        self.assertLess(len(json.dumps(request).encode("utf-8")), 65536)
 
     async def test_request_over_app_limit_is_rejected_server_side(self):
         bridge = DGLabV4Bridge(target_id="controller-1")

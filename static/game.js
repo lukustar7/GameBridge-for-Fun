@@ -31,6 +31,28 @@ let activeGame = null;
 
 // 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
+const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
+const DEFAULT_WAVEFORM = "game_default";
+const WAVEFORM_LABELS = Object.freeze({
+    game_default: "游戏默认",
+    random: "随机（按时长）",
+    extrusion: "挤压",
+    bubble: "气泡",
+    rhythm: "律动",
+    air_waves: "电波",
+    dance: "舞步",
+    climb: "攀登",
+    shade: "树荫",
+    pulse: "脉冲",
+    breathing: "呼吸",
+    tide: "潮汐",
+    pulsating: "连击",
+    quick_rub: "快速按捏",
+    gradual_rub: "按捏渐强",
+    heartbeat: "心跳节奏",
+    compress: "压缩",
+    rhythmic: "节奏步伐"
+});
 const DEFAULT_OUTPUT_SETTINGS = {
     outputMode: "a",
     bStrengthMode: "percent",
@@ -153,6 +175,7 @@ const GAME_META = {
 };
 
 let gameSettings = loadSettings();
+let selectedWaveform = loadWaveformSetting();
 
 // --- 2. 传感器、画布与游戏运行状态 ---
 
@@ -274,6 +297,41 @@ function persistSettings() {
     } catch (error) {
         console.warn("保存本地游戏设置失败:", error);
     }
+}
+
+function normalizeWaveformKey(value) {
+    // 本地缓存和页面表单都不可信，只允许后端同样认识的固定选项。
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(WAVEFORM_LABELS, value)
+        ? value
+        : DEFAULT_WAVEFORM;
+}
+
+function loadWaveformSetting() {
+    try {
+        return normalizeWaveformKey(localStorage.getItem(WAVEFORM_STORAGE_KEY));
+    } catch (error) {
+        console.warn("读取本地波形设置失败，已使用游戏默认:", error);
+        return DEFAULT_WAVEFORM;
+    }
+}
+
+function persistWaveformSetting() {
+    try {
+        localStorage.setItem(WAVEFORM_STORAGE_KEY, selectedWaveform);
+    } catch (error) {
+        console.warn("保存本地波形设置失败:", error);
+    }
+}
+
+function saveWaveformSetting() {
+    const selector = $("common-waveform");
+    selectedWaveform = normalizeWaveformKey(selector?.value);
+    if (selector) selector.value = selectedWaveform;
+    persistWaveformSetting();
+
+    const cfg = gameSettings[selectedGame] || DEFAULT_OUTPUT_SETTINGS;
+    setText("common-output-summary", formatCommonOutputSummary(cfg));
+    setText("settings-message", `输出感觉已设为“${formatWaveformLabel(selectedWaveform)}”，所有玩法共用`);
 }
 
 // --- 3. WebSocket 网络连接与心跳延迟监控 ---
@@ -569,6 +627,7 @@ function sendMobileTestShock(outputMode) {
         outputMode,
         bStrengthMode: "same",
         bStrengthPercent: 100,
+        waveform: DEFAULT_WAVEFORM,
         strength: 5,
         duration: 300
     });
@@ -1067,10 +1126,11 @@ function populateOutputSettings(cfg) {
     if (!$("common-output-mode")) return;
 
     $("common-output-mode").value = cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
+    $("common-waveform").value = selectedWaveform;
     $("common-b-strength-mode").value = cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
     setRangeValue("common-b-strength-percent", cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
     updateBChannelSettingsVisibility();
-    setText("common-output-summary", formatOutputLabel(cfg));
+    setText("common-output-summary", formatCommonOutputSummary(cfg));
 }
 
 function updateBChannelSettingsVisibility() {
@@ -1145,7 +1205,7 @@ function saveSelectedSettings(silent = false) {
     const cfg = collectSettingsFromForm(selectedGame);
     gameSettings[selectedGame] = cfg;
     persistSettings();
-    setText("common-output-summary", formatOutputLabel(cfg));
+    setText("common-output-summary", formatCommonOutputSummary(cfg));
     refreshGlobalSafetyStatus();
 
     if (!silent) {
@@ -1343,6 +1403,7 @@ function setupPlayScreen(gameName) {
     setText("summary-tolerance", GAME_META[gameName].toleranceLabel(cfg));
     setText("summary-trigger", GAME_META[gameName].triggerLabel(cfg));
     setText("summary-output", formatOutputLabel(cfg));
+    setText("summary-waveform", formatWaveformLabel(selectedWaveform));
 
     $("game-viewport").style.display = gameName === "dice" || gameName === "slot" ? "none" : "block";
     $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
@@ -1471,7 +1532,8 @@ function getOutputPayload() {
     return {
         outputMode: cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode,
         bStrengthMode: cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode,
-        bStrengthPercent: cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent
+        bStrengthPercent: cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
+        waveform: selectedWaveform
     };
 }
 
@@ -1502,6 +1564,15 @@ function formatOutputLabel(cfg) {
     }
 
     return "只用 A";
+}
+
+function formatWaveformLabel(value) {
+    const key = normalizeWaveformKey(value);
+    return WAVEFORM_LABELS[key];
+}
+
+function formatCommonOutputSummary(cfg) {
+    return `${formatWaveformLabel(selectedWaveform)} · ${formatOutputLabel(cfg)}`;
 }
 
 function vibrateBriefly(duration) {

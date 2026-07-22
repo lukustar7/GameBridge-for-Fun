@@ -818,7 +818,7 @@
             <details class="disclosure-panel test-disclosure">
                 <summary>低强度通道试电</summary>
                 <div class="disclosure-content">
-                    <p class="sub-text test-disclosure-help">固定使用强度 5、时长 0.3 秒；请先确认接线和通道限幅。</p>
+                    <p class="sub-text test-disclosure-help">固定使用强度 5、时长 0.3 秒和立即有感的游戏默认波形；请先确认接线和通道限幅。</p>
                     <div class="test-action-grid">
                         <button type="button" onclick="sendMobileTestShock('a')">试 A</button>
                         <button type="button" onclick="sendMobileTestShock('b')">试 B</button>
@@ -890,10 +890,37 @@
                 <details id="common-output-settings" class="settings-group common-settings" data-default-open="true" open>
                     <summary>
                         <span>输出安全</span>
-                        <small id="common-output-summary">默认只用 A</small>
+                        <small id="common-output-summary">游戏默认 · 只用 A</small>
                     </summary>
                     <div class="settings-group-content">
                     <div class="settings-stack settings-stack-flush">
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">输出感觉</label>
+                            <select id="common-waveform" onchange="saveWaveformSetting()">
+                                <option value="game_default">游戏默认（推荐）</option>
+                                <option value="random">随机（按本次时长）</option>
+                                <optgroup label="经典波形">
+                                    <option value="extrusion">挤压</option>
+                                    <option value="bubble">气泡</option>
+                                    <option value="rhythm">律动</option>
+                                    <option value="air_waves">电波</option>
+                                    <option value="dance">舞步</option>
+                                    <option value="climb">攀登</option>
+                                    <option value="shade">树荫</option>
+                                    <option value="pulse">脉冲</option>
+                                    <option value="breathing">呼吸</option>
+                                    <option value="tide">潮汐</option>
+                                    <option value="pulsating">连击</option>
+                                    <option value="quick_rub">快速按捏</option>
+                                    <option value="gradual_rub">按捏渐强</option>
+                                    <option value="heartbeat">心跳节奏</option>
+                                    <option value="compress">压缩</option>
+                                    <option value="rhythmic">节奏步伐</option>
+                                </optgroup>
+                            </select>
+                            <p class="field-help">“游戏默认”短时间也会立即有感；“随机”每次只选一种，并自动避开不适合短时长的波形。</p>
+                        </div>
+
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
                             <select id="common-output-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
@@ -1520,6 +1547,10 @@
                             <td>输出位置</td>
                             <td id="summary-output">-</td>
                         </tr>
+                        <tr>
+                            <td>输出感觉</td>
+                            <td id="summary-waveform">-</td>
+                        </tr>
                     </table>
                     </div>
                 </details>
@@ -1527,7 +1558,7 @@
         </div>
     </div>
 
-    <script src="game-logic.js?v=20260721-slot-rules"></script>
-    <script src="game.js?v=20260721-slot-rules"></script>
+    <script src="game-logic.js?v=20260722-waveforms"></script>
+    <script src="game.js?v=20260722-waveforms"></script>
 </body>
 </html>

@@ -21,6 +21,7 @@ TUNA_HOMEBREW_BOTTLES = "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
 REQUIRED_RUNTIME_FILES = (
     "server.py",
     "dglab_v4.py",
+    "coyote_waveforms.py",
     "requirements.txt",
     "static/index.html",
     "static/console.js",

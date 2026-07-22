@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import ipaddress
 import json
-import math
 import os
 import plistlib
 import re
@@ -26,6 +25,12 @@ from dglab_v4 import (
     Channel,
     DGLabV4Bridge,
     DeviceBridgeError,
+)
+from coyote_waveforms import (
+    DEFAULT_WAVEFORM_KEY,
+    normalize_waveform_key,
+    resolve_waveform_key,
+    waveform_label,
 )
 
 
@@ -1065,6 +1070,12 @@ def parse_output_config(data):
     return output_mode, b_strength_mode, b_strength_percent
 
 
+def parse_waveform_config(data):
+    """读取用户选择的感觉；未知值回退到立即有感的游戏默认。"""
+
+    return normalize_waveform_key(data.get("waveform", DEFAULT_WAVEFORM_KEY))
+
+
 def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_strength_percent):
     """把游戏强度换算成 A/B 两路最终强度，并分别套用设备限幅"""
     base = clamp_int(base_strength, 0, 200, fallback=0)
@@ -1217,7 +1228,8 @@ def schedule_game_shock(
     output_mode="a",
     b_strength_mode="percent",
     b_strength_percent=50,
-    clear_after=True
+    clear_after=True,
+    waveform_key=DEFAULT_WAVEFORM_KEY,
 ):
     """最多保留一个硬件输出任务，防止异常页面把 60 秒任务无限堆进内存"""
     global active_output_task, active_output_clear_after
@@ -1234,7 +1246,8 @@ def schedule_game_shock(
         output_mode,
         b_strength_mode,
         b_strength_percent,
-        clear_after
+        clear_after,
+        waveform_key,
     ))
     active_output_clear_after = clear_after
     active_output_task.add_done_callback(on_output_task_done)
@@ -1266,7 +1279,8 @@ async def handle_game_shock(
     output_mode="a",
     b_strength_mode="percent",
     b_strength_percent=50,
-    clear_after=True
+    clear_after=True,
+    waveform_key=DEFAULT_WAVEFORM_KEY,
 ):
     """向 App 客户端下发一段受限脉冲；所有硬件写入都在同一把锁内串行执行"""
     global device_app_client, state, shock_generation
@@ -1285,8 +1299,8 @@ async def handle_game_shock(
         if not channel_targets:
             return
 
-        # 向上取整，确保 101-199ms 这类时长不会被错误缩短到单帧；最后仍由临时强度期限兜底。
-        loops = max(1, math.ceil(safe_duration / 100))
+        # 随机只在本次输出开始时抽取一次；A/B 两路随后复用同一结果，不能各随机各的。
+        resolved_waveform_key = resolve_waveform_key(waveform_key, safe_duration)
         generation = shock_generation
 
         async with shock_lock:
@@ -1306,15 +1320,22 @@ async def handle_game_shock(
                 )
                 state[state_key] = safe_strength
 
-            for _ in range(loops):
-                if not state["device_connected"] or generation != shock_generation:
-                    break
-                for channel, safe_strength, _state_key in channel_targets:
-                    await asyncio.wait_for(
-                        device_app_client.send_pulse(channel, safe_strength, duration_ms=100),
-                        timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
-                    )
-                await asyncio.sleep(0.1)
+            # 每个通道只建立一个完整波形任务。App 会按 100ms 消费下一帧，不再由电脑
+            # 连续创建互相替换的单帧任务，从根源上避免横线波形和网络抖动造成的空档。
+            for channel, safe_strength, _state_key in channel_targets:
+                await asyncio.wait_for(
+                    device_app_client.send_pulse(
+                        channel,
+                        safe_strength,
+                        resolved_waveform_key,
+                        duration_ms=safe_duration,
+                    ),
+                    timeout=HARDWARE_COMMAND_TIMEOUT_SECONDS
+                )
+
+            # 任务已完整交给 App，但后端仍占有单任务锁直到本次时长结束；否则结算型
+            # 输出会立刻进入清理分支，或被下一次请求在 App 内提前替换。
+            await asyncio.sleep(safe_duration / 1000)
 
             # 结算型惩罚结束后在同一把锁内清空，避免结束动作和下一条硬件写入交叉。
             if clear_after:
@@ -1393,14 +1414,19 @@ async def handle_test_shock_request(websocket, data):
         output_mode,
         b_strength_mode,
         b_strength_percent,
-        clear_after=True
+        clear_after=True,
+        waveform_key=DEFAULT_WAVEFORM_KEY,
     )
     if not scheduled:
         await send_test_feedback(websocket, False, "输出忙，或所选通道限幅尚未读取/已设为 0")
         return
 
     last_test_shock_at = now
-    await send_test_feedback(websocket, True, f"已发送安全试电：{strength} 强度，{duration / 1000:.1f}s")
+    await send_test_feedback(
+        websocket,
+        True,
+        f"已发送安全试电：{strength} 强度，{duration / 1000:.1f}s，{waveform_label(DEFAULT_WAVEFORM_KEY)}波形",
+    )
 
 
 async def web_ws_handler(websocket, path):
@@ -1530,13 +1556,15 @@ async def web_ws_handler(websocket, path):
                     duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                        waveform_key = parse_waveform_config(data)
                         scheduled = schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
                             b_strength_mode,
                             b_strength_percent,
-                            clear_after=False
+                            clear_after=False,
+                            waveform_key=waveform_key,
                         )
                         if scheduled:
                             arm_output_watchdog(websocket, mode="continuous")
@@ -1552,6 +1580,7 @@ async def web_ws_handler(websocket, path):
                     )
                     if strength > 0:
                         output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                        waveform_key = parse_waveform_config(data)
                         # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
                         scheduled = schedule_game_shock(
                             strength,
@@ -1559,7 +1588,8 @@ async def web_ws_handler(websocket, path):
                             output_mode,
                             b_strength_mode,
                             b_strength_percent,
-                            clear_after=True
+                            clear_after=True,
+                            waveform_key=waveform_key,
                         )
                         if scheduled:
                             arm_output_watchdog(websocket)

@@ -33,8 +33,8 @@ class FakeDeviceAppClient:
     async def set_temporary_strength(self, channel, value, duration_ms):
         self.events.append(("set_temporary_strength", channel, value, duration_ms))
 
-    async def send_pulse(self, channel, strength, duration_ms=100):
-        self.events.append(("send_pulse", channel, strength, duration_ms))
+    async def send_pulse(self, channel, strength, waveform_key, duration_ms=100):
+        self.events.append(("send_pulse", channel, strength, waveform_key, duration_ms))
 
     async def clear_pulses(self, channel):
         self.events.append(("clear_pulses", channel))
@@ -140,6 +140,14 @@ class ServerLogicTests(unittest.TestCase):
                 (server.Channel.A, 40, "client_strength_a"),
                 (server.Channel.B, 30, "client_strength_b"),
             ],
+        )
+
+    def test_unknown_waveform_request_uses_immediate_default(self):
+        """局域网页面伪造波形名称时不能进入未知硬件分支。"""
+
+        self.assertEqual(
+            server.parse_waveform_config({"waveform": "not-supported"}),
+            server.DEFAULT_WAVEFORM_KEY,
         )
 
     def test_console_requires_loopback_peer_and_matching_local_origin(self):
@@ -399,8 +407,31 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.events[0][0], "set_temporary_strength")
         self.assertEqual(fake_client.events[0][1:3], (server.Channel.A, 20))
         self.assertGreaterEqual(fake_client.events[0][3], 100 + server.OUTPUT_AUTO_RESET_MARGIN_MS)
-        self.assertIn(("send_pulse", server.Channel.A, 20, 100), fake_client.events)
+        self.assertIn(
+            ("send_pulse", server.Channel.A, 20, server.DEFAULT_WAVEFORM_KEY, 100),
+            fake_client.events,
+        )
         self.assertEqual(server.state["client_strength_a"], 0)
+
+    async def test_safe_test_ignores_requested_waveform_and_uses_default(self):
+        """试电参数由后端决定，伪造页面不能换成更尖锐的固定波形。"""
+
+        websocket = ScriptedGameWebSocket([])
+        original_last_test = server.last_test_shock_at
+        server.last_test_shock_at = -1000
+        try:
+            with patch.object(server, "schedule_game_shock", return_value=True) as schedule:
+                await server.handle_test_shock_request(websocket, {
+                    "waveform": "shade",
+                    "strength": 5,
+                    "duration": 300,
+                    "outputMode": "a",
+                })
+        finally:
+            server.last_test_shock_at = original_last_test
+
+        self.assertEqual(schedule.call_args.kwargs["waveform_key"], server.DEFAULT_WAVEFORM_KEY)
+        self.assertIn("游戏默认波形", websocket.sent_messages[-1]["message"])
 
     async def test_stop_continues_with_b_when_a_clear_fails(self):
         fake_client = FakeDeviceAppClient(fail_clear_channel=server.Channel.A)
@@ -587,7 +618,13 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         """模拟手持、角度、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
         websocket = ScriptedGameWebSocket([
             # 手持感应：先发一帧持续脉冲，再立即执行用户急停。
-            (0, {"type": "game_pulse", "strength": 18, "duration": 100, "outputMode": "a"}),
+            (0, {
+                "type": "game_pulse",
+                "strength": 18,
+                "duration": 100,
+                "outputMode": "a",
+                "waveform": "game_default",
+            }),
             (0.03, {"type": "stop_shock"}),
             # 角度挑战：故意提交超大数值，后端必须按 A=40、B=30 截断。
             (0.24, {
@@ -597,11 +634,24 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
                 "outputMode": "ab",
                 "bStrengthMode": "percent",
                 "bStrengthPercent": 50,
+                "waveform": "breathing",
             }),
             (0.03, {"type": "stop_shock"}),
             # 骰子：同一瞬间重复提交只能接受第一条，不能把惩罚排成隐藏队列。
-            (0, {"type": "game_shock_trigger", "strength": 25, "duration": 100, "outputMode": "a"}),
-            (0, {"type": "game_shock_trigger", "strength": 25, "duration": 100, "outputMode": "a"}),
+            (0, {
+                "type": "game_shock_trigger",
+                "strength": 25,
+                "duration": 100,
+                "outputMode": "a",
+                "waveform": "random",
+            }),
+            (0, {
+                "type": "game_shock_trigger",
+                "strength": 25,
+                "duration": 100,
+                "outputMode": "a",
+                "waveform": "random",
+            }),
             # 角子机：骰子输出完成后再走一次 A+B 结算型惩罚。
             (0.15, {
                 "type": "game_shock_trigger",
@@ -609,6 +659,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
                 "duration": 100,
                 "outputMode": "ab",
                 "bStrengthMode": "same",
+                "waveform": "pulse",
             }),
             (0.15, {"type": "ping", "time": 123}),
         ])
@@ -625,6 +676,9 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         # 六次代表：手持 A；角度 A/B；骰子 A；角子机 A/B。若重叠请求被错误排队，这里会多一次。
         self.assertEqual(len(temporary_events), 6, self.fake_client.events)
         self.assertEqual(len(pulse_events), 6)
+        self.assertEqual([event[3] for event in pulse_events[1:3]], ["breathing", "breathing"])
+        self.assertEqual([event[3] for event in pulse_events[-2:]], ["pulse", "pulse"])
+        self.assertTrue(all(event[3] != "random" for event in pulse_events))
         self.assertEqual(
             [(event[1], event[2]) for event in temporary_events],
             [

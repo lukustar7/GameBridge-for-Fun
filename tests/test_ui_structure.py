@@ -66,6 +66,31 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn('id="screen-settings" class="screen" hidden', self.game_text)
         self.assertIn('id="screen-play" class="screen" hidden', self.game_text)
 
+    def test_waveform_choice_is_one_global_control_and_test_uses_safe_default(self):
+        """新增感觉不能散落到四个游戏；试电也必须显式走立即有感的默认波形。"""
+
+        waveform_selects = [
+            attrs
+            for tag, attrs in self.game.elements
+            if tag == "select" and attrs.get("id") == "common-waveform"
+        ]
+        waveform_values = {
+            attrs.get("value")
+            for tag, attrs in self.game.elements
+            if tag == "option" and attrs.get("value")
+        }
+
+        self.assertEqual(len(waveform_selects), 1)
+        self.assertIn("game_default", waveform_values)
+        self.assertIn("random", waveform_values)
+        self.assertIn("breathing", waveform_values)
+        self.assertIn("pulse", waveform_values)
+        self.assertIn("所有玩法共用", self.game_script_text)
+
+        test_start = self.game_script_text.index("function sendMobileTestShock(outputMode) {")
+        test_end = self.game_script_text.index("function stopMobileOutput() {", test_start)
+        self.assertIn("waveform: DEFAULT_WAVEFORM", self.game_script_text[test_start:test_end])
+
     def test_mobile_emergency_stop_cancels_local_queues_before_another_game_can_start(self):
         """手机急停不能只清当前硬件帧，还必须退出本局并取消骰子、角子机等预约任务。"""
 

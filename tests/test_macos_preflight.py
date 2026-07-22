@@ -66,6 +66,7 @@ class MacOSPreflightTests(unittest.TestCase):
 
         self.assertEqual(len(problems), len(macos_preflight.REQUIRED_RUNTIME_FILES))
         self.assertIn("缺少运行文件：server.py", problems)
+        self.assertIn("缺少运行文件：coyote_waveforms.py", problems)
 
     def test_python_version_boundary(self):
         """Python 3.9 是最低支持线，3.8 必须给出升级提示。"""

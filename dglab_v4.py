@@ -11,6 +11,8 @@ from enum import IntEnum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 
+from coyote_waveforms import build_coyote_waveform_frames
+
 
 SUPPORTED_DEVICE_TYPES = {
     "COYOTE_020": {"label": "郊狼 2.0", "wave_version": 2},
@@ -243,31 +245,6 @@ def _channel_snapshot(device: Dict[str, Any], channel_name: str) -> Dict[str, An
     }
 
 
-def build_coyote_pulse_frame(device_type: str, channel_strength: int) -> Tuple[int, List[int]]:
-    """按选中硬件生成一帧 100ms 波形，返回 ``(协议版本, 字节数组)``。
-
-    项目原有 V3 体感使用 100ms 周期、通道强度约一半作为波形强度。这里保持该行为；
-    郊狼 2.0 再按官方映射把 V3 波形强度除以 5，并编码为小端 X/Y/Z 三字节帧。
-    """
-
-    if device_type not in SUPPORTED_DEVICE_TYPES:
-        raise DeviceBridgeError("当前设备型号不是受支持的郊狼 2.0 或 3.0")
-
-    safe_strength = _clamp_int(channel_strength, 1, 200, fallback=1)
-    wave_strength = _clamp_int(round(safe_strength / 2), 1, 100, fallback=1)
-
-    if device_type == "COYOTE_030":
-        return 3, [100, 100, 100, 100, wave_strength, wave_strength, wave_strength, wave_strength]
-
-    # V2 的 Frequency = X + Y。100ms 周期按官方建议公式得到 X≈5、Y≈95。
-    frequency = 100
-    pulse_width_x = _clamp_int(round(math.sqrt(frequency / 1000) * 15), 1, 31, fallback=5)
-    pause_y = _clamp_int(frequency - pulse_width_x, 0, 1023, fallback=95)
-    wave_z = _clamp_int(round(wave_strength / 5), 1, 20, fallback=1)
-    packed = pulse_width_x | (pause_y << 5) | (wave_z << 15)
-    return 2, [packed & 0xFF, (packed >> 8) & 0xFF, (packed >> 16) & 0xFF]
-
-
 class DGLabV4Bridge:
     """直接在本机承接 DG-LAB 4 App，避免额外引入 Node/Bun 中继进程。"""
 
@@ -404,19 +381,33 @@ class DGLabV4Bridge:
         }
         await self._send_request(session, "device.op", payload, wait_for_response=False)
 
-    async def send_pulse(self, channel: Channel, channel_strength: int, duration_ms: int = 100) -> None:
-        """根据当前选中设备自动发送 V2 或 V3 裸波形帧。"""
+    async def send_pulse(
+        self,
+        channel: Channel,
+        channel_strength: int,
+        waveform_key: str,
+        duration_ms: int = 100,
+    ) -> None:
+        """一次发送完整波形序列，并按当前硬件自动选择 V2 或 V3 编码。"""
 
         session, device = self._active_target(channel, channel_strength)
-        wave_version, frame = build_coyote_pulse_frame(device["type"], channel_strength)
+        safe_duration = _clamp_int(duration_ms, 100, 60000, fallback=100)
+        try:
+            wave_version, frames = build_coyote_waveform_frames(
+                device["type"],
+                waveform_key,
+                safe_duration,
+            )
+        except ValueError as error:
+            raise DeviceBridgeError(str(error)) from error
         payload = {
             "s": device["slotId"],
             "t": 0,
             "c": int(channel),
             "p": 2,
-            "d": _clamp_int(duration_ms, 100, 1000, fallback=100),
+            "d": safe_duration,
             "im": True,
-            "v": [frame],
+            "v": frames,
             "ver": wave_version,
         }
         await self._send_request(session, "device.op", payload, wait_for_response=False)
