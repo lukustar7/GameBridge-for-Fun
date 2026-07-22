@@ -107,6 +107,7 @@ MIN_PULSE_INTERVAL_SECONDS = 0.22
 MAX_WEB_MESSAGE_BYTES = 4096
 MAX_WEB_MESSAGE_QUEUE = 8
 MAX_APP_MESSAGE_BYTES = 65536
+TEST_DEFAULT_STRENGTH = 15
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
@@ -1405,7 +1406,12 @@ async def handle_test_shock_request(websocket, data):
         await send_test_feedback(websocket, False, "郊狼设备尚未连接并就绪，无法试电")
         return
 
-    strength = clamp_int(data.get("strength", 5), 1, TEST_MAX_STRENGTH, fallback=5)
+    strength = clamp_int(
+        data.get("strength", TEST_DEFAULT_STRENGTH),
+        1,
+        TEST_MAX_STRENGTH,
+        fallback=TEST_DEFAULT_STRENGTH,
+    )
     duration = clamp_int(data.get("duration", 300), MIN_SHOCK_DURATION_MS, TEST_MAX_DURATION_MS, fallback=300)
     output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
     scheduled = schedule_game_shock(

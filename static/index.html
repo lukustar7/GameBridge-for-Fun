@@ -103,7 +103,7 @@
 
             <div class="panel section-gap">
                 <h2>4. 连接测试</h2>
-                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用低强度短时长试电。测试强度和时长会被后端硬限制。</p>
+                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用默认强度 15、时长 0.3 秒试电。测试强度最高 30、时长最长 1 秒。</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
                     <div>
                         <label class="slider-label" style="margin-bottom: 5px;">测试通道</label>
@@ -116,9 +116,9 @@
                     <div class="slider-container" style="margin: 0;">
                         <div class="slider-label">
                             <span>测试强度</span>
-                            <span id="val-console-test-strength">5</span>
+                            <span id="val-console-test-strength">15</span>
                         </div>
-                        <input type="range" id="console-test-strength" min="1" max="30" value="5" oninput="updateConsoleTestLabels()">
+                        <input type="range" id="console-test-strength" min="1" max="30" value="15" oninput="updateConsoleTestLabels()">
                     </div>
                     <div class="slider-container" style="margin: 0;">
                         <div class="slider-label">
@@ -332,6 +332,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260721-ui-navigation"></script>
+    <script src="console.js?v=20260722-test15"></script>
 </body>
 </html>

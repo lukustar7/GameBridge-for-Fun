@@ -23,6 +23,8 @@ let secureGameQR = null;
 let latestState = null;
 let renderedDeviceSignature = "";
 const renderedQrValues = new WeakMap();
+// 电脑端仍允许 1～30 手动微调，但默认值与手机端统一为真机可感知的 15。
+const DEFAULT_TEST_STRENGTH = 15;
 
 function setText(id, value) {
     const node = document.getElementById(id);
@@ -502,7 +504,9 @@ function sendConsoleTestShock() {
         return;
     }
 
-    const strength = Math.round(Number(document.getElementById("console-test-strength")?.value || 5));
+    const strength = Math.round(Number(
+        document.getElementById("console-test-strength")?.value || DEFAULT_TEST_STRENGTH
+    ));
     const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 0.3);
     ws.send(JSON.stringify({
         type: "test_shock",

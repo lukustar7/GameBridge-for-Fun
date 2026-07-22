@@ -33,6 +33,8 @@ let activeGame = null;
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
 const DEFAULT_WAVEFORM = "game_default";
+// 手机试电不再暴露额外强度控件；15 来自郊狼 2.0 真机可感知结果，时长仍保持 0.3 秒。
+const MOBILE_TEST_STRENGTH = 15;
 const WAVEFORM_LABELS = Object.freeze({
     game_default: "游戏默认",
     random: "随机（按时长）",
@@ -628,7 +630,7 @@ function sendMobileTestShock(outputMode) {
         bStrengthMode: "same",
         bStrengthPercent: 100,
         waveform: DEFAULT_WAVEFORM,
-        strength: 5,
+        strength: MOBILE_TEST_STRENGTH,
         duration: 300
     });
     setMobileTestResult("已发送测试请求，等待后台确认。");

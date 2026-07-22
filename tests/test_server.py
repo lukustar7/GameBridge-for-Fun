@@ -423,14 +423,15 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "schedule_game_shock", return_value=True) as schedule:
                 await server.handle_test_shock_request(websocket, {
                     "waveform": "shade",
-                    "strength": 5,
                     "duration": 300,
                     "outputMode": "a",
                 })
         finally:
             server.last_test_shock_at = original_last_test
 
+        self.assertEqual(schedule.call_args.args[0], server.TEST_DEFAULT_STRENGTH)
         self.assertEqual(schedule.call_args.kwargs["waveform_key"], server.DEFAULT_WAVEFORM_KEY)
+        self.assertIn("15 强度", websocket.sent_messages[-1]["message"])
         self.assertIn("游戏默认波形", websocket.sent_messages[-1]["message"])
 
     async def test_stop_continues_with_b_when_a_clear_fails(self):

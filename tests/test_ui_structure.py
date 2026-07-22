@@ -86,10 +86,22 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn("breathing", waveform_values)
         self.assertIn("pulse", waveform_values)
         self.assertIn("所有玩法共用", self.game_script_text)
+        self.assertIn("固定使用强度 15", self.game_text)
+        self.assertIn("const MOBILE_TEST_STRENGTH = 15;", self.game_script_text)
 
         test_start = self.game_script_text.index("function sendMobileTestShock(outputMode) {")
         test_end = self.game_script_text.index("function stopMobileOutput() {", test_start)
         self.assertIn("waveform: DEFAULT_WAVEFORM", self.game_script_text[test_start:test_end])
+        self.assertIn("strength: MOBILE_TEST_STRENGTH", self.game_script_text[test_start:test_end])
+
+        console_strength = [
+            attrs
+            for tag, attrs in self.console.elements
+            if tag == "input" and attrs.get("id") == "console-test-strength"
+        ]
+        self.assertEqual(len(console_strength), 1)
+        self.assertEqual(console_strength[0].get("value"), "15")
+        self.assertEqual(console_strength[0].get("max"), "30")
 
     def test_mobile_emergency_stop_cancels_local_queues_before_another_game_can_start(self):
         """手机急停不能只清当前硬件帧，还必须退出本局并取消骰子、角子机等预约任务。"""
