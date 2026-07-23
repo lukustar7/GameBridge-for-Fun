@@ -1,6 +1,10 @@
-# GameBridge for Fun 用户手册
+# GameBridge for Fun 1.0.0-beta.1 用户手册
 
 本文面向实际使用者，说明如何启动、连接、安装手机 HTTPS 证书、选择游戏、调整参数和处理紧急情况。
+
+本项目处于早期 Beta 阶段，仅部分功能完成实机验证。由于实机测试会消耗测试人员，暂未覆盖全部设备、玩法和极端情况。请从低强度开始，避免将软件自动保护作为唯一安全措施。
+
+角子机、骰宝等玩法仅用于无金钱游戏体验，不得用于赌博、押注、收费抽奖、代币兑换或任何涉及金钱与财物输赢的活动。
 
 ![设备 App、电脑桥接服务和 GameBridge for Fun APK 的协作关系](docs/images/01-system-overview.svg)
 
@@ -155,15 +159,17 @@ App 已扫码不代表硬件已经连接。控制台显示 `等待硬件连接`�
 
 可以给手机安装或下载的文件：
 
-- `certs/gamebridge-for-fun-root-ca.mobileconfig`
-- `certs/gamebridge-for-fun-root-ca.cer`
+- `gamebridge-for-fun-root-ca.mobileconfig`
+- `gamebridge-for-fun-root-ca.cer`
 
 绝对不要复制或发送的文件：
 
-- `certs/private/gamebridge-for-fun-root-ca-key.pem`
-- `certs/private/gamebridge-for-fun-server-key.pem`
+- `~/Library/Application Support/GameBridge for Fun/certs/private/gamebridge-for-fun-root-ca-key.pem`
+- `~/Library/Application Support/GameBridge for Fun/certs/private/gamebridge-for-fun-server-key.pem`
 
-私钥目录 `certs/private/` 已被网页访问保护和 Git 忽略保护，但仍不要手动分享。
+私钥目录仅允许当前 Mac 用户访问，不位于源码仓库中，仍不得手动分享、上传或同步到公共网盘。
+
+完全信任根证书会扩大手机的 HTTPS 信任范围。只在私人设备和可信局域网中安装；结束后建议关闭完全信任，长期不用时应删除描述文件。如果私钥可能泄露，应立即删除手机描述文件和 Mac 中的旧证书，再重新启动服务生成新证书。
 
 ## 6. 进入手机游戏页面
 
@@ -187,7 +193,8 @@ APK 支持 Android 15 或更高版本，不兼容 Android 14 及更早系统。
 
 APK 模式需要三个部分同时在线：设备 App 在手机后台维持硬件连接，电脑运行桥接服务，GameBridge for Fun APK 在手机前台读取动作并运行小游戏。设备 App 和 GameBridge for Fun APK 可以运行在同一台 Android 手机上。
 
-1. 安装项目 `APK/GameBridgeForFun-Android15-debug.apk` 并打开；该包已使用 Android 调试证书签名，不需要安装网页 HTTPS 根证书。
+1. 安装项目 `APK/GameBridgeForFun-Android15-v1.0.0-beta.1.apk` 并打开；该包使用项目独立正式签名，不需要安装网页 HTTPS 根证书。
+   如果手机装过旧的调试签名包，先卸载旧包再安装；旧包的本地游戏设置会一并清除。
 2. 在电脑运行 `start.command`，并先完成设备 App 远控绑定。
 3. 用手机系统相机扫描电脑控制台的 `Android APK` 二维码，系统会自动唤起 APK 并连接普通 HTTP/WS 游戏入口。
 4. 如果系统相机只显示二维码文本，可复制电脑控制台的普通 HTTP 游戏地址，粘贴到 APK 连接页。
@@ -437,7 +444,7 @@ B 通道强度有两种模式：
 
 ## 13. 首次使用前的低强度故障演练
 
-每次更换手机、路由器、郊狼型号或 App 版本后，先把 App 的 A/B 限幅降到 `10` 以下，再用强度 `5`、时长 `1` 秒以内逐项演练：
+每次更换手机、路由器、郊狼型号或 App 版本后，先把 App 的 A/B 限幅设为 `15`，再用固定强度 `15`、时长 `0.3` 秒的安全试电逐项演练：
 
 1. 输出中锁屏或把 Android APK 切到后台。
 2. 输出中关闭手机 Wi-Fi。

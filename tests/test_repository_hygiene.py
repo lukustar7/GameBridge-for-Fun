@@ -39,6 +39,8 @@ class RepositoryHygieneTests(unittest.TestCase):
             "android/app/build/outputs/apk/debug/app-debug.apk",
             "android/local.properties",
             "android/debug.keystore",
+            "android/signing/release.p12",
+            "android/signing/release.password",
         )
 
         for relative_path in ignored_paths:
@@ -53,9 +55,10 @@ class RepositoryHygieneTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_team_apk_remains_tracked_and_not_ignored(self):
-        """团队需要直接安装的 APK 是明确交付物，不能被通用构建规则误伤。"""
+        """公开测试 APK 是明确交付物，不能被通用构建规则误伤。"""
 
-        apk_path = "APK/GameBridgeForFun-Android15-debug.apk"
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        apk_path = f"APK/GameBridgeForFun-Android15-v{version}.apk"
         ignored = run_git("check-ignore", "--quiet", "--no-index", "--", apk_path)
         tracked = run_git("ls-files", "--error-unmatch", "--", apk_path)
 

@@ -336,6 +336,7 @@ function updateUI(data) {
     }
 
     // 5. 更新技术状态表格
+    setText("stat-app-version", data.app_version || "-");
     document.getElementById("stat-ip").innerText = data.local_ip;
     document.getElementById("stat-http-port").innerText = data.http_port;
     document.getElementById("stat-web-ws-port").innerText = data.web_ws_port;

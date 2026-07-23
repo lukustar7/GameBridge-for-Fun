@@ -32,7 +32,7 @@ The Android build needs Android Studio's bundled JBR and SDK; there is no other 
 
 Data flow: **desktop console (browser)** and **phone game page (browser or Android WebView APK)** connect via WebSocket to `server/server.py`, which bridges to the **DG-LAB 4 App** (phone scans a V4 QR code), which controls the hardware via Bluetooth.
 
-Fixed ports: HTTP 18080, web WS 18081, App bridge WS 15678, HTTPS 18443, secure web WS 18444. HTTPS exists because phone motion sensors require a secure context; the server auto-generates per-LAN-IP certificates with OpenSSL (root CA 90 days, server cert 7 days, private keys in `certs/private/`, gitignored).
+Fixed ports: HTTP 18080, web WS 18081, App bridge WS 15678, HTTPS 18443, secure web WS 18444. HTTPS exists because phone motion sensors require a secure context; the server auto-generates per-LAN-IP certificates with OpenSSL (root CA 90 days, server cert 7 days, private keys in `~/Library/Application Support/GameBridge for Fun/certs/private/`).
 
 - `server/server.py` — monolithic entry point: static file serving, HTTP/HTTPS, both WS endpoints, certificate generation, and all output scheduling/safety enforcement. Sections are marked with `# --- N. ... ---` comments.
 - `server/dglab_v4.py` — `DGLabV4Bridge`: V4 handshake, device discovery/selection, state sanitize/merge, request/response RPC with the App, and 2.0-vs-3.0 adaptation (V2 three-byte vs V3 eight-byte waveform frames, chosen by reported device type).
@@ -40,14 +40,14 @@ Fixed ports: HTTP 18080, web WS 18081, App bridge WS 15678, HTTPS 18443, secure 
 - `server/macos_preflight.py` — dependency/file/network/cert/APK integrity checks used by `start.command`.
 - `static/` — `index.html` + `console.js` (desktop console), `game.html` + `game.js` (four mini-games, sensors, settings persistence, punishment reporting), `game-logic.js` (pure rules, no DOM/network — shared by browser and `tests/test_game_logic.js`). `qrcode.min.js` is vendored; do not touch it in unrelated changes.
 - `android/` — Kotlin APK shell (`app.gamebridgeforfun.mobile`, Android 15+): native sensor bridge into the same web game pages over plain LAN HTTP/WS (no cert install needed), restricted WebView, URL/token validation. The signed debug APK and its SHA-256 in `APK/` are tracked deliverables that `build-debug.command` refreshes.
-- `coyote/` — protocol reference docs only, not runtime code. Verbatim vendored copy of the `coyote/` docs in upstream `dglab-bluetooth-protocol` (see below); fix errors upstream or re-vendor, don't edit locally.
+- `coyote/` — protocol source index only, not runtime code. Upstream documents are linked instead of copied so their current terms and corrections remain authoritative.
 - `tests/test_ui_structure.py` and `tests/test_repository_hygiene.py` assert on HTML structure and repo layout respectively — structural changes to `static/*.html` or top-level files can fail them.
 
 ## Upstream protocol documentation
 
 DG-LAB's official open-source org is https://github.com/dungeonlab-open. Verified mapping to this codebase (no upstream repo is a code dependency — local code reimplements the protocols):
 
-- [dglab-bluetooth-protocol](https://github.com/dungeonlab-open/dglab-bluetooth-protocol) — BLE V2/V3 waveform spec; local `coyote/` mirrors its `coyote/` docs byte-for-byte, and `coyote_waveforms.py` implements the documented V2 3-byte X/Y/Z packing and V3 8-byte (4×freq + 4×intensity, 10–240 encoding) frames.
+- [dglab-bluetooth-protocol](https://github.com/dungeonlab-open/dglab-bluetooth-protocol) — BLE V2/V3 waveform spec; `coyote_waveforms.py` implements the documented V2 3-byte X/Y/Z packing and V3 8-byte (4×freq + 4×intensity, 10–240 encoding) frames.
 - [dglab-kit](https://github.com/dungeonlab-open/dglab-kit) — its README is the primary spec for the **V4 socket protocol** `dglab_v4.py` speaks: the `dungeon-lab.cn/s/?v=1&action=socket` QR deep link, `/v4?tid=` path, `hello`/`controller_attached`/`heartbeat`/`pong` frames, `reqId` RPC (`device.op`, `device.op.clear`, `ping`), action types AppendPulseData=0/SetTempIntensity=4/SetIntensity=7, and `COYOTE_020`/`COYOTE_030`.
 - [dglab-kit-python](https://github.com/dungeonlab-open/dglab-kit-python) (`src/dglab_kit_python/socket/v4.py`) and [dglab-websocket-server](https://github.com/dungeonlab-open/dglab-websocket-server) (`v4-server.ts`) — official controller SDK and relay for the same V4 protocol; useful as reference implementations. `dglab_v4.py` plays the server+controller side so the DG-LAB 4 App connects directly to this machine (no cloud relay).
 - [dglab-websocket-simple](https://github.com/dungeonlab-open/dglab-websocket-simple) (archived) — `socket/DG_WAVES_V2_V3_simple.js` holds classic-waveform V2/V3 hex test vectors that match `coyote_waveforms.py` output frame-for-frame; good for validating encoder changes.

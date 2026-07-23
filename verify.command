@@ -20,13 +20,13 @@ trap cleanup EXIT INT TERM
 
 cd "$PROJECT_ROOT"
 
-echo "[1/5] 检查 Python 后端与 macOS 启动器"
+echo "[1/6] 检查 Python 后端与 macOS 启动器"
 bash -n start.command
 PYTHONPYCACHEPREFIX="$PYTHON_CACHE_DIR" python3 -m py_compile \
     server/server.py server/dglab_v4.py server/coyote_waveforms.py server/macos_preflight.py
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 
-echo "[2/5] 检查浏览器代码与游戏规则"
+echo "[2/6] 检查浏览器代码与游戏规则"
 if ! command -v node >/dev/null 2>&1; then
     echo "错误: 未找到 Node.js，无法执行浏览器规则测试。"
     exit 1
@@ -36,10 +36,13 @@ node --check static/game-logic.js
 node --check static/game.js
 node --test tests/test_game_logic.js
 
-echo "[3/5] 检查 Android 并刷新已验签的调试安装包"
+echo "[3/6] 检查 Android 调试构建、单元测试与 Lint"
 ./android/build-debug.command
 
-echo "[4/5] 启动完整服务并执行本机 HTTP 冒烟检查"
+echo "[4/6] 核对仓库内公开 APK 的版本、校验值和正式签名"
+./android/verify-packaged.command
+
+echo "[5/6] 启动完整服务并执行本机 HTTP 冒烟检查"
 GAME_BRIDGE_FOR_FUN_NO_BROWSER=1 PYTHONUNBUFFERED=1 python3 server/server.py >"$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
 SMOKE_PORT=""
@@ -88,7 +91,7 @@ if ! grep -q "正在安全停止服务" "$SMOKE_LOG"; then
     exit 1
 fi
 
-echo "[5/5] 检查 Git 差异格式"
+echo "[6/6] 检查 Git 差异格式"
 git diff --check
 
 echo "本地总体验收通过。"

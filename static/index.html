@@ -143,6 +143,7 @@
                 <div class="panel">
                     <h2>1. 安装本地根证书</h2>
                     <p class="sub-text" style="margin-bottom: 12px;">手机只需要安装根证书。服务器证书由电脑按当前 IP 自动生成和轮换，不需要手动安装。</p>
+                    <p class="warning-text" style="margin-bottom: 16px;">完全信任根证书会扩大手机的 HTTPS 信任范围。仅在私人设备和可信局域网中安装；结束后建议关闭完全信任，长期不用时应删除描述文件。</p>
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                         <div>
@@ -221,6 +222,10 @@
                 <div class="panel">
                     <h2>技术参数</h2>
                     <table class="stats-table">
+                        <tr>
+                            <td>程序版本</td>
+                            <td id="stat-app-version">-</td>
+                        </tr>
                         <tr>
                             <td>局域网 IP</td>
                             <td id="stat-ip">-</td>
@@ -332,6 +337,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260722-test15"></script>
+    <script src="console.js?v=20260723-beta1"></script>
 </body>
 </html>

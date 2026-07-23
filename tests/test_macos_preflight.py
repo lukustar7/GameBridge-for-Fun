@@ -77,12 +77,26 @@ class MacOSPreflightTests(unittest.TestCase):
         self.assertEqual(macos_preflight.python_version_problem((3, 9, 0)), "")
         self.assertIn("需要 Python 3.9", macos_preflight.python_version_problem((3, 8, 18)))
 
+    def test_project_version_rejects_unsafe_apk_filename_content(self):
+        """版本会进入 APK 文件名，路径符号、空格和残缺数字必须提前拒绝。"""
+        with tempfile.TemporaryDirectory() as directory:
+            project_root = Path(directory)
+            version_path = project_root / "VERSION"
+            for value in ("1.0", "1.0.0 beta", "../../private", ""):
+                with self.subTest(value=value):
+                    version_path.write_text(value, encoding="utf-8")
+                    self.assertIn("VERSION 必须使用", macos_preflight.project_version_problem(project_root))
+
+            version_path.write_text("1.0.0-beta.1", encoding="utf-8")
+            self.assertEqual(macos_preflight.project_version_problem(project_root), "")
+
     def test_apk_checksum_accepts_matching_artifact(self):
         """安装包与校验值相同时不产生误报。"""
         with tempfile.TemporaryDirectory() as directory:
             project_root = Path(directory)
             apk_path = project_root / macos_preflight.APK_RELATIVE_PATH
             checksum_path = project_root / macos_preflight.APK_CHECKSUM_RELATIVE_PATH
+            signer_path = project_root / macos_preflight.APK_SIGNER_RELATIVE_PATH
             apk_path.parent.mkdir(parents=True)
             apk_bytes = b"verified-apk"
             apk_path.write_bytes(apk_bytes)
@@ -90,6 +104,7 @@ class MacOSPreflightTests(unittest.TestCase):
                 f"{hashlib.sha256(apk_bytes).hexdigest()}  {apk_path.name}\n",
                 encoding="utf-8",
             )
+            signer_path.write_text(f"{'a' * 64}\n", encoding="utf-8")
 
             warning = macos_preflight.apk_integrity_warning(project_root)
 
@@ -101,9 +116,11 @@ class MacOSPreflightTests(unittest.TestCase):
             project_root = Path(directory)
             apk_path = project_root / macos_preflight.APK_RELATIVE_PATH
             checksum_path = project_root / macos_preflight.APK_CHECKSUM_RELATIVE_PATH
+            signer_path = project_root / macos_preflight.APK_SIGNER_RELATIVE_PATH
             apk_path.parent.mkdir(parents=True)
             apk_path.write_bytes(b"tampered-apk")
             checksum_path.write_text(f"{'0' * 64}  {apk_path.name}\n", encoding="utf-8")
+            signer_path.write_text(f"{'a' * 64}\n", encoding="utf-8")
 
             warning = macos_preflight.apk_integrity_warning(project_root)
 

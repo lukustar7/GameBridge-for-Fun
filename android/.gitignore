@@ -10,3 +10,5 @@
 *.iml
 *.jks
 *.keystore
+*.password
+signing/

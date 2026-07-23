@@ -20,6 +20,7 @@ TUNA_HOMEBREW_HELP = "https://mirrors.tuna.tsinghua.edu.cn/help/homebrew/"
 TUNA_HOMEBREW_API = "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
 TUNA_HOMEBREW_BOTTLES = "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
 REQUIRED_RUNTIME_FILES = (
+    "VERSION",
     "server/server.py",
     "server/dglab_v4.py",
     "server/coyote_waveforms.py",
@@ -32,8 +33,15 @@ REQUIRED_RUNTIME_FILES = (
     "static/style.css",
     "static/qrcode.min.js",
 )
-APK_RELATIVE_PATH = Path("APK/GameBridgeForFun-Android15-debug.apk")
+try:
+    PROJECT_VERSION = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+except (OSError, UnicodeError):
+    # 先让模块成功加载，稍后的运行文件检查才能向普通用户列出可理解的缺失项。
+    PROJECT_VERSION = "invalid-version"
+PUBLIC_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+APK_RELATIVE_PATH = Path(f"APK/GameBridgeForFun-Android15-v{PROJECT_VERSION}.apk")
 APK_CHECKSUM_RELATIVE_PATH = Path("APK/SHA256.txt")
+APK_SIGNER_RELATIVE_PATH = Path("APK/SIGNER_SHA256.txt")
 PINNED_REQUIREMENT_PATTERN = re.compile(
     r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)$"
 )
@@ -99,6 +107,20 @@ def required_file_problems(project_root):
     ]
 
 
+def project_version_problem(project_root):
+    """检查公开版本是否可用于页面、Android 清单和 APK 文件名。"""
+    version_path = project_root / "VERSION"
+    if not version_path.is_file():
+        return ""
+    try:
+        version = version_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as error:
+        return f"无法读取 VERSION：{error}"
+    if not PUBLIC_VERSION_PATTERN.fullmatch(version):
+        return "VERSION 必须使用主版本.次版本.修订号及可选预发布标记"
+    return ""
+
+
 def python_version_problem(version_info=sys.version_info):
     """验证最低 Python 版本；项目仍兼容 macOS 自带开发工具常见的 Python 3.9。"""
     if tuple(version_info[:2]) >= MINIMUM_PYTHON:
@@ -108,7 +130,7 @@ def python_version_problem(version_info=sys.version_info):
 
 
 def project_write_problem(project_root):
-    """实际创建并删除一个临时文件，确认虚拟环境和证书确实能写入当前目录。"""
+    """实际创建并删除一个临时文件，确认项目专用虚拟环境能够写入当前目录。"""
     try:
         descriptor, temporary_path = tempfile.mkstemp(
             prefix=".gamebridge-write-test-",
@@ -125,8 +147,9 @@ def apk_integrity_warning(project_root):
     """核对随项目交付的 APK；异常只影响 Android 安装，不阻断网页玩法启动。"""
     apk_path = project_root / APK_RELATIVE_PATH
     checksum_path = project_root / APK_CHECKSUM_RELATIVE_PATH
-    if not apk_path.is_file() or not checksum_path.is_file():
-        return "Android APK 或 SHA-256 校验文件缺失，APK 安装入口可能不可用"
+    signer_path = project_root / APK_SIGNER_RELATIVE_PATH
+    if not apk_path.is_file() or not checksum_path.is_file() or not signer_path.is_file():
+        return "Android APK、文件校验值或签名指纹缺失，APK 安装入口可能不可用"
 
     try:
         expected_match = re.search(
@@ -135,6 +158,9 @@ def apk_integrity_warning(project_root):
         )
         if expected_match is None:
             return "Android APK 校验文件格式错误，无法确认安装包完整性"
+        signer_fingerprint = signer_path.read_text(encoding="utf-8").strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", signer_fingerprint):
+            return "Android APK 签名指纹格式错误，无法确认长期升级身份"
 
         # 分块读取避免未来安装包变大时一次占用与文件等量的内存。
         digest = hashlib.sha256()
@@ -175,6 +201,9 @@ def prepare_runtime(project_root=PROJECT_ROOT):
     if version_problem:
         problems.append(version_problem)
     problems.extend(required_file_problems(project_root))
+    metadata_problem = project_version_problem(project_root)
+    if metadata_problem:
+        problems.append(metadata_problem)
 
     write_problem = project_write_problem(project_root)
     if write_problem:

@@ -14,6 +14,8 @@ certs/
 *.srl
 *.jks
 *.keystore
+*.password
+signing/
 
 # Python 本地环境、缓存与测试产物
 .venv/
@@ -41,4 +43,4 @@ node_modules/
 *.temp
 *~
 
-# APK/ 下的已验签调试包与 SHA-256 是团队测试交付物，故意保留跟踪。
+# APK/ 下的正式签名 Beta 包与 SHA-256 是公开测试交付物，故意保留跟踪。

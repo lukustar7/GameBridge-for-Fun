@@ -2,8 +2,10 @@
 """后端安全边界、硬件限幅与输出调度的回归测试。"""
 
 import asyncio
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
@@ -238,6 +240,70 @@ class ServerLogicTests(unittest.TestCase):
         ), patch("server.os.access", return_value=True):
             self.assertEqual(server.find_openssl_executable(), "/usr/bin/openssl")
 
+    def test_certificate_storage_migrates_out_of_project_and_locks_permissions(self):
+        """旧私钥应迁出源码目录，迁移后的证书与私钥目录只允许当前用户访问。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy_dir = root / "project" / "certs"
+            legacy_private_dir = legacy_dir / "private"
+            legacy_private_dir.mkdir(parents=True)
+            (legacy_private_dir / "gamebridge-for-fun-root-ca-key.pem").write_text(
+                "local-test-key",
+                encoding="utf-8",
+            )
+
+            app_support_dir = root / "Library" / "Application Support" / "GameBridge for Fun"
+            cert_dir = app_support_dir / "certs"
+            private_dir = cert_dir / "private"
+            replacements = {
+                "APP_SUPPORT_DIR": app_support_dir,
+                "CERT_DIR": cert_dir,
+                "LEGACY_CERT_DIR": legacy_dir,
+                "CERT_PRIVATE_DIR": private_dir,
+                "ROOT_CA_KEY": private_dir / "gamebridge-for-fun-root-ca-key.pem",
+                "SERVER_CERT_KEY": private_dir / "gamebridge-for-fun-server-key.pem",
+                "SERVER_CERT_CSR": private_dir / "gamebridge-for-fun-server.csr",
+                "SERVER_CERT_CONFIG": private_dir / "gamebridge-for-fun-server-openssl.cnf",
+                "ROOT_CA_PEM": cert_dir / "gamebridge-for-fun-root-ca.pem",
+                "SERVER_CERT_PEM": cert_dir / "gamebridge-for-fun-server.pem",
+            }
+
+            with patch.multiple(server, **replacements):
+                server.prepare_certificate_storage()
+
+            self.assertFalse(legacy_dir.exists())
+            self.assertEqual(
+                (private_dir / "gamebridge-for-fun-root-ca-key.pem").read_text(encoding="utf-8"),
+                "local-test-key",
+            )
+            self.assertEqual(stat.S_IMODE(cert_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(private_dir.stat().st_mode), 0o700)
+
+    def test_certificate_storage_rejects_symlink_directory(self):
+        """证书目录不能借符号链接跳到网盘、共享目录或其他非预期位置。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            actual_dir = root / "shared-cert-storage"
+            actual_dir.mkdir()
+            app_support_link = root / "GameBridge for Fun"
+            app_support_link.symlink_to(actual_dir, target_is_directory=True)
+
+            with patch.object(server, "APP_SUPPORT_DIR", app_support_link), patch.object(
+                server,
+                "CERT_DIR",
+                app_support_link / "certs",
+            ), patch.object(
+                server,
+                "CERT_PRIVATE_DIR",
+                app_support_link / "certs" / "private",
+            ), patch.object(
+                server,
+                "LEGACY_CERT_DIR",
+                root / "project" / "certs",
+            ):
+                with self.assertRaisesRegex(RuntimeError, "符号链接"):
+                    server.prepare_certificate_storage()
+
     def test_port_search_rejects_invalid_start_instead_of_looping(self):
         """端口越界时要立即失败，不能从 65536 开始无限递增。"""
         for value in (0, 65536, "not-a-port"):
@@ -282,6 +348,8 @@ class ServerLogicTests(unittest.TestCase):
         self.assertEqual(console_message["app_qrcode_url"], server.state["app_qrcode_url"])
         self.assertNotIn("client_id", console_message["compatible_devices"][0])
         self.assertNotIn("slot_id", console_message["compatible_devices"][0])
+        self.assertEqual(game_message["app_version"], server.APP_VERSION)
+        self.assertEqual(console_message["app_version"], server.APP_VERSION)
 
 
 class StaticHTTPBoundaryTests(unittest.TestCase):
@@ -332,6 +400,21 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
                 with self.assertRaises(HTTPError) as context:
                     urlopen(f"{self.base_url}{path}", timeout=2)
                 self.assertEqual(context.exception.code, 404)
+
+    def test_public_certificate_route_can_serve_file_outside_project(self):
+        """证书迁到应用数据目录后，公开路由仍只能读取明确列出的两个文件。"""
+        with tempfile.TemporaryDirectory() as directory:
+            certificate_path = Path(directory) / "local-root.cer"
+            certificate_path.write_bytes(b"public-root-certificate")
+            original_routes = server.StaticHTTPRequestHandler.PUBLIC_CERTIFICATE_ROUTES
+            server.StaticHTTPRequestHandler.PUBLIC_CERTIFICATE_ROUTES = {
+                server.ROOT_CA_CER_URL_PATH: certificate_path,
+            }
+            try:
+                with urlopen(f"{self.base_url}{server.ROOT_CA_CER_URL_PATH}", timeout=2) as response:
+                    self.assertEqual(response.read(), b"public-root-certificate")
+            finally:
+                server.StaticHTTPRequestHandler.PUBLIC_CERTIFICATE_ROUTES = original_routes
 
     def test_head_request_uses_same_public_boundary(self):
         request = Request(f"{self.base_url}/.git/HEAD", method="HEAD")

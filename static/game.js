@@ -520,6 +520,7 @@ function updateTechStatus(data) {
     latestDeviceConnected = deviceConnected;
 
     // 选择页的技术状态用于现场排障：端口、连接、延迟和硬件回读统一放在这里。
+    setText("tech-app-version", data.app_version || "-");
     setText("tech-local-ip", data.local_ip || window.location.hostname || "-");
     setText("tech-http-port", data.http_port || "-");
     setText("tech-web-ws-port", data.web_ws_port || currentWsPort || "-");

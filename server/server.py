@@ -62,9 +62,10 @@ def normalize_private_ipv4(value):
 
 
 # --- 全局状态与配置 ---
-# 后端源码位于 server/ 子目录，static、certs、APK 等运行资源仍以项目根目录为准。
+# 后端源码位于 server/ 子目录；静态资源与版本文件仍以项目根目录为准。
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = PROJECT_ROOT / "static"
+APP_VERSION = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 LOCAL_IP = "127.0.0.1"
 
 # 默认端口定义 (五位数起步)
@@ -82,7 +83,11 @@ CERT_IP_OVERRIDE = normalize_private_ipv4(RAW_CERT_IP_OVERRIDE)
 CERTIFIED_LAN_IP = CERT_IP_OVERRIDE
 ROOT_CA_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_ROOT_CA_DAYS", 90)
 SERVER_CERT_VALID_DAYS = read_positive_int_env("GAME_BRIDGE_FOR_FUN_SERVER_CERT_DAYS", 7)
-CERT_DIR = PROJECT_ROOT / "certs"
+# 私钥不再放进源码目录，避免用户把整个项目同步到网盘或公开仓库时一并带走。
+# 这是 macOS 的标准应用数据位置，也能让用户更新或更换项目目录后继续使用原证书。
+APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "GameBridge for Fun"
+CERT_DIR = APP_SUPPORT_DIR / "certs"
+LEGACY_CERT_DIR = PROJECT_ROOT / "certs"
 CERT_PRIVATE_DIR = CERT_DIR / "private"
 ROOT_CA_PEM = CERT_DIR / "gamebridge-for-fun-root-ca.pem"
 ROOT_CA_CER = CERT_DIR / "gamebridge-for-fun-root-ca.cer"
@@ -514,18 +519,58 @@ def generate_server_certificate():
     ])
 
 
+def prepare_certificate_storage():
+    """迁移旧证书并锁紧目录权限，避免私钥继续停留在可能被同步的源码目录。"""
+    if LEGACY_CERT_DIR.is_symlink():
+        raise RuntimeError("旧证书目录是符号链接，已拒绝自动迁移；请人工检查后删除")
+    if any(path.is_symlink() for path in (APP_SUPPORT_DIR, CERT_DIR, CERT_PRIVATE_DIR)):
+        raise RuntimeError("证书存储目录是符号链接，已拒绝使用；请人工检查用户应用数据目录")
+
+    APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        APP_SUPPORT_DIR.chmod(0o700)
+    except OSError:
+        pass
+
+    if LEGACY_CERT_DIR.is_dir() and not CERT_DIR.exists():
+        shutil.move(str(LEGACY_CERT_DIR), str(CERT_DIR))
+        print(f"HTTPS 证书已迁移到用户应用数据目录：{CERT_DIR}")
+    elif LEGACY_CERT_DIR.is_dir() and CERT_DIR.exists():
+        raise RuntimeError(
+            "源码目录和用户应用数据目录同时存在证书；为避免误用旧私钥，请人工检查并删除源码目录中的 certs"
+        )
+
+    CERT_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    CERT_PRIVATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for directory in (CERT_DIR, CERT_PRIVATE_DIR):
+        try:
+            directory.chmod(0o700)
+        except OSError:
+            pass
+
+    # 私钥或证书若被替换成符号链接，OpenSSL 可能读写到预期目录之外；启动前直接拒绝。
+    sensitive_paths = (
+        ROOT_CA_KEY,
+        SERVER_CERT_KEY,
+        SERVER_CERT_CSR,
+        SERVER_CERT_CONFIG,
+        ROOT_CA_PEM,
+        SERVER_CERT_PEM,
+    )
+    if any(path.is_symlink() for path in sensitive_paths):
+        raise RuntimeError("证书文件包含符号链接，已拒绝使用；请检查本机应用数据目录")
+
+
 def ensure_local_https_assets():
-    """确保本地 HTTPS 证书存在；服务器证书随当前 IP 自动重签，私钥只保存在 certs/private"""
+    """确保本地 HTTPS 证书存在；服务器证书随当前 IP 自动重签，私钥只放应用数据目录。"""
     global CERT_SHA256, CERT_ROOT_NOT_AFTER, CERT_SERVER_NOT_AFTER
 
     if not find_openssl_executable():
         print("HTTPS 已跳过: 未找到 openssl，无法生成本地证书")
         return False
 
-    CERT_DIR.mkdir(exist_ok=True)
-    CERT_PRIVATE_DIR.mkdir(exist_ok=True)
-
     try:
+        prepare_certificate_storage()
         existing_ip = CERT_IP_MARKER.read_text(encoding="utf-8").strip() if CERT_IP_MARKER.exists() else ""
         try:
             existing_policy = json.loads(CERT_POLICY_MARKER.read_text(encoding="utf-8")) if CERT_POLICY_MARKER.exists() else {}
@@ -666,9 +711,9 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         ".mobileconfig": "application/x-apple-aspen-config",
         ".pem": "application/x-pem-file"
     }
-    PUBLIC_CERTIFICATE_FILES = {
-        ROOT_CA_CER.resolve(),
-        ROOT_CA_MOBILECONFIG.resolve()
+    PUBLIC_CERTIFICATE_ROUTES = {
+        ROOT_CA_CER_URL_PATH: ROOT_CA_CER,
+        ROOT_CA_MOBILECONFIG_URL_PATH: ROOT_CA_MOBILECONFIG,
     }
 
     def __init__(self, *args, **kwargs):
@@ -690,11 +735,10 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         except (OSError, RuntimeError, ValueError):
             pass
 
-        try:
-            candidate = (PROJECT_ROOT / raw_path.lstrip("/")).resolve()
-        except (OSError, RuntimeError, ValueError):
+        certificate_path = self.PUBLIC_CERTIFICATE_ROUTES.get(raw_path)
+        if certificate_path is None or certificate_path.is_symlink():
             return None
-        return candidate if candidate in self.PUBLIC_CERTIFICATE_FILES else None
+        return certificate_path if certificate_path.is_file() else None
 
     def translate_path(self, path):
         """让标准库继续负责文件传输，但文件位置只能来自上面的公开清单"""
@@ -815,6 +859,7 @@ def build_state_message(include_console_details=False):
     """构造最小状态包；只有本机控制台能收到配对密钥、App 二维码与证书详情"""
     message = {
         "type": "state_update",
+        "app_version": APP_VERSION,
         "local_ip": LOCAL_IP,
         "http_port": HTTP_PORT,
         "web_ws_port": WEB_WS_PORT,
@@ -1725,7 +1770,7 @@ async def main():
     CERTIFIED_LAN_IP = CERT_IP_OVERRIDE or LOCAL_IP
     
     print("=" * 45)
-    print("GameBridge for Fun - 控制台")
+    print(f"GameBridge for Fun {APP_VERSION} - 控制台")
     print(f"本地局域网 IP 地址: {LOCAL_IP}")
     print(f"HTTPS 证书签发 IP: {CERTIFIED_LAN_IP} ({'手动指定' if CERT_IP_OVERRIDE else '自动检测'})")
     print("=" * 45)
