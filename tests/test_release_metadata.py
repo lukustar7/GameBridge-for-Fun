@@ -19,7 +19,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         cls.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
     def test_public_version_is_semver_beta(self):
-        """首次公开版本必须是可排序的标准 Beta 语义化版本。"""
+        """当前公开版本必须是可排序的标准 Beta 语义化版本。"""
         self.assertRegex(self.version, r"^\d+\.\d+\.\d+-beta\.\d+$")
 
     def test_python_android_lock_and_changelog_share_version(self):
@@ -32,8 +32,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(f'version = "{self.version}"', pyproject)
         self.assertIn(f'version = "{self.version}"', uv_lock)
         self.assertIn('versionName = publicVersion', android_build)
-        self.assertIn('versionCode = 2', android_build)
-        self.assertIn(f"## [{self.version}] - 2026-07-23", changelog)
+        self.assertIn('versionCode = 3', android_build)
+        self.assertRegex(
+            changelog,
+            rf"## \[{re.escape(self.version)}\] - \d{{4}}-\d{{2}}-\d{{2}}",
+        )
 
     def test_public_readme_has_required_beta_and_non_gambling_notices(self):
         """公开首页必须保留用户确认过的 Beta 原文和无金钱玩法边界。"""

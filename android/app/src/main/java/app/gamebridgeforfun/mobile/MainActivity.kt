@@ -1,10 +1,12 @@
 package app.gamebridgeforfun.mobile
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -21,6 +23,7 @@ import android.net.http.SslError
 import android.webkit.RenderProcessGoneDetail
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import androidx.core.view.ViewCompat
@@ -36,11 +39,28 @@ import java.io.ByteArrayInputStream
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var sensorDispatcher: NativeSensorDispatcher
+    private lateinit var locationDispatcher: NativeLocationDispatcher
     private var trustedConnection: GameConnection? = null
     private var pageReady = false
     private var pageLoadFailed = false
     private var activityResumed = false
     private var reloadAfterResume = false
+    private var nativePermissionFlowActive = false
+    private var locationRequestedByPage = false
+
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        nativePermissionFlowActive = false
+        val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (granted && pageReady && activityResumed && locationRequestedByPage) {
+            locationDispatcher.start()
+            Toast.makeText(this, "定位权限已允许，正在验证 GPS/GNSS 速度。", Toast.LENGTH_SHORT).show()
+        } else if (!granted) {
+            Toast.makeText(this, "定位权限未允许；可在系统应用设置中修改后重试。", Toast.LENGTH_LONG).show()
+        }
+        pushNativeCapabilities()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +70,9 @@ class MainActivity : AppCompatActivity() {
         configureSystemInsets()
         configureWebView()
         sensorDispatcher = NativeSensorDispatcher(this, binding.gameWebView) {
+            pageReady && activityResumed && trustedConnection != null
+        }
+        locationDispatcher = NativeLocationDispatcher(this, binding.gameWebView) {
             pageReady && activityResumed && trustedConnection != null
         }
         bindActions()
@@ -65,6 +88,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        nativePermissionFlowActive = false
         activityResumed = true
         binding.gameWebView.onResume()
         val connection = trustedConnection
@@ -76,7 +100,9 @@ class MainActivity : AppCompatActivity() {
             binding.gameWebView.loadUrl(connection.pageUrl)
         } else if (pageReady) {
             evaluateNativeCommand("resume")
+            pushNativeCapabilities()
             sensorDispatcher.start()
+            if (locationRequestedByPage) locationDispatcher.start()
         }
     }
 
@@ -84,10 +110,12 @@ class MainActivity : AppCompatActivity() {
         // 必须先通知网页停机并关闭 WS，再暂停 WebView；顺序反过来可能让 JS 来不及发送停止请求。
         if (pageReady) evaluateNativeCommand("pause", "android_pause")
         sensorDispatcher.stop()
+        locationDispatcher.stop()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (trustedConnection != null) {
+        if (trustedConnection != null && !nativePermissionFlowActive) {
             // 销毁当前文档会从 WebView 网络层关闭 WS，作为 JS 停机消息之外的第二道硬兜底。
             pageReady = false
+            locationRequestedByPage = false
             reloadAfterResume = true
             binding.gameWebView.stopLoading()
             binding.gameWebView.loadUrl("about:blank")
@@ -100,6 +128,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         sensorDispatcher.stop()
+        locationDispatcher.stop()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.gameWebView.apply {
             stopLoading()
@@ -181,7 +210,9 @@ class MainActivity : AppCompatActivity() {
     private fun showGame(connection: GameConnection) {
         if (pageReady) evaluateNativeCommand("pause", "android_reconnect")
         sensorDispatcher.stop()
+        locationDispatcher.stop()
         trustedConnection = connection
+        locationRequestedByPage = false
         pageReady = false
         pageLoadFailed = false
         reloadAfterResume = false
@@ -202,10 +233,12 @@ class MainActivity : AppCompatActivity() {
     private fun returnToConnectionScreen() {
         if (pageReady) evaluateNativeCommand("pause", "android_back")
         sensorDispatcher.stop()
+        locationDispatcher.stop()
         pageReady = false
         pageLoadFailed = false
         reloadAfterResume = false
         trustedConnection = null
+        locationRequestedByPage = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.gameWebView.stopLoading()
         binding.gameWebView.loadUrl("about:blank")
@@ -240,8 +273,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPageError(message: String = getString(R.string.load_error_default)) {
         pageReady = false
+        locationRequestedByPage = false
         pageLoadFailed = true
         sensorDispatcher.stop()
+        locationDispatcher.stop()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.pageLoadingOverlay.visibility = View.GONE
         binding.pageErrorText.text = message
@@ -296,6 +331,73 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun requestLocationCapability() {
+        locationRequestedByPage = true
+        if (!locationDispatcher.hasGpsHardware) {
+            Toast.makeText(this, "此设备没有 GPS/GNSS，不能使用雷电极速。", Toast.LENGTH_LONG).show()
+            pushNativeCapabilities()
+            return
+        }
+        if (!locationDispatcher.locationServiceEnabled) {
+            Toast.makeText(this, "请先开启 Android 系统定位服务，返回后重新检查。", Toast.LENGTH_LONG).show()
+            nativePermissionFlowActive = true
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            return
+        }
+        if (locationDispatcher.permissionGranted) {
+            locationDispatcher.start()
+            pushNativeCapabilities()
+            return
+        }
+
+        val permissionWasRequested = getPreferences(MODE_PRIVATE)
+            .getBoolean(PREF_LOCATION_PERMISSION_REQUESTED, false)
+        if (permissionWasRequested &&
+            !shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)
+        ) {
+            Toast.makeText(this, "请在应用权限中允许精确位置，返回后重新检查。", Toast.LENGTH_LONG).show()
+            nativePermissionFlowActive = true
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            return
+        }
+
+        getPreferences(MODE_PRIVATE).edit { putBoolean(PREF_LOCATION_PERMISSION_REQUESTED, true) }
+        nativePermissionFlowActive = true
+        locationPermissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ),
+        )
+    }
+
+    private fun stopLocationCapability() {
+        locationRequestedByPage = false
+        locationDispatcher.stop()
+        pushNativeCapabilities()
+    }
+
+    private fun pushNativeCapabilities() {
+        if (!pageReady) return
+        val permissionState = when {
+            locationDispatcher.permissionGranted -> "granted"
+            getPreferences(MODE_PRIVATE).getBoolean(PREF_LOCATION_PERMISSION_REQUESTED, false) -> "denied"
+            else -> "prompt"
+        }
+        val script = "window.GameBridgeForFunNative&&window.GameBridgeForFunNative.updateCapabilities(" +
+            "${sensorDispatcher.hasOrientationSensor}," +
+            "${sensorDispatcher.hasMotionSensor}," +
+            "${locationDispatcher.hasGpsHardware}," +
+            "'$permissionState'," +
+            "${locationDispatcher.locationServiceEnabled});"
+        binding.gameWebView.evaluateJavascript(script, null)
+    }
+
     private fun hideKeyboard() {
         val manager = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         manager.hideSoftInputFromWindow(binding.gameUrlInput.windowToken, 0)
@@ -325,6 +427,15 @@ class MainActivity : AppCompatActivity() {
 
     private inner class RestrictedGameWebViewClient : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (request.isForMainFrame &&
+                request.url.scheme.equals("gamebridgeforfun", ignoreCase = true) &&
+                request.url.host.equals("capability", ignoreCase = true) &&
+                request.url.path in setOf("/location/start", "/location/stop")
+            ) {
+                if (request.url.path == "/location/start") requestLocationCapability()
+                else stopLocationCapability()
+                return true
+            }
             return request.isForMainFrame && !isAllowedMainFrame(request.url)
         }
 
@@ -341,7 +452,9 @@ class MainActivity : AppCompatActivity() {
             if (trustedConnection?.pageUrl != url) return
             pageReady = false
             pageLoadFailed = false
+            locationRequestedByPage = false
             sensorDispatcher.stop()
+            locationDispatcher.stop()
             showPageLoading()
         }
 
@@ -353,8 +466,11 @@ class MainActivity : AppCompatActivity() {
             pageReady = true
             binding.pageLoadingOverlay.visibility = View.GONE
             binding.pageErrorPanel.visibility = View.GONE
-            evaluateNativeCommand("enable")
-            if (activityResumed) sensorDispatcher.start()
+            pushNativeCapabilities()
+            if (activityResumed) {
+                sensorDispatcher.start()
+                if (locationRequestedByPage) locationDispatcher.start()
+            }
         }
 
         override fun onReceivedError(
@@ -396,7 +512,9 @@ class MainActivity : AppCompatActivity() {
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
             Toast.makeText(this@MainActivity, "游戏页面异常退出，已停止连接。", Toast.LENGTH_LONG).show()
             sensorDispatcher.stop()
+            locationDispatcher.stop()
             pageReady = false
+            locationRequestedByPage = false
             pageLoadFailed = true
             reloadAfterResume = false
             trustedConnection = null
@@ -408,6 +526,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PREF_LAST_GAME_URL = "last_game_url"
+        private const val PREF_LOCATION_PERMISSION_REQUESTED = "location_permission_requested"
         private val ALLOWED_STATIC_RESOURCES = setOf(
             "/static/game-logic.js",
             "/static/game.js",

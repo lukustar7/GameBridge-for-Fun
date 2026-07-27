@@ -186,6 +186,69 @@
             margin-top: 10px;
         }
 
+        .capability-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .capability-card {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 9px;
+            padding: 13px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-small);
+            background: rgba(3, 7, 15, 0.54);
+        }
+
+        .capability-card-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .capability-card-heading strong {
+            color: var(--text);
+            font-size: 0.9rem;
+        }
+
+        .capability-state {
+            color: var(--warning);
+            font-size: 0.74rem;
+            font-weight: 720;
+        }
+
+        .capability-state.ready {
+            color: var(--success);
+        }
+
+        .capability-state.blocked {
+            color: var(--danger);
+        }
+
+        .capability-card p {
+            min-height: 42px;
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            line-height: 1.42;
+        }
+
+        .capability-card button {
+            width: 100%;
+            min-height: 40px;
+        }
+
+        .capability-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
         .settings-global-output {
             display: flex;
             align-items: center;
@@ -713,6 +776,120 @@
             gap: 10px;
         }
 
+        .lightning-dashboard {
+            display: grid;
+            gap: 14px;
+            padding: 6px 0;
+        }
+
+        .lightning-speed-panel {
+            padding: 20px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-medium);
+            background: radial-gradient(circle at top, rgba(59, 130, 246, 0.18), rgba(3, 7, 15, 0.72));
+            text-align: center;
+        }
+
+        .lightning-speed-value {
+            color: var(--text);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: clamp(2.8rem, 16vw, 5rem);
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .lightning-speed-unit {
+            margin-top: 7px;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+        }
+
+        .lightning-state-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .lightning-state-card {
+            padding: 13px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-small);
+            background: rgba(3, 7, 15, 0.54);
+        }
+
+        .lightning-state-card span,
+        .lightning-state-card strong {
+            display: block;
+        }
+
+        .lightning-state-card span {
+            color: var(--text-muted);
+            font-size: 0.72rem;
+        }
+
+        .lightning-state-card strong {
+            margin-top: 4px;
+            color: var(--text);
+            font-size: 0.94rem;
+        }
+
+        .safety-dialog {
+            width: min(calc(100% - 28px), 620px);
+            max-height: min(88vh, 760px);
+            overflow: auto;
+            padding: 0;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-large);
+            color: var(--text);
+            background: #0b1220;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+        }
+
+        .safety-dialog::backdrop {
+            background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(5px);
+        }
+
+        .safety-dialog-content {
+            padding: 20px;
+        }
+
+        .safety-dialog h2 {
+            margin-bottom: 8px;
+            font-size: 1.3rem;
+        }
+
+        .safety-check-list {
+            display: grid;
+            gap: 10px;
+            margin: 18px 0;
+        }
+
+        .safety-check-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: start;
+            gap: 10px;
+            padding: 11px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-small);
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            line-height: 1.45;
+        }
+
+        .safety-check-row input {
+            width: auto;
+            margin-top: 3px;
+        }
+
+        .safety-dialog-actions {
+            display: grid;
+            grid-template-columns: auto minmax(150px, 1fr);
+            gap: 9px;
+        }
+
         @media (max-width: 420px) {
             .mobile-app-header {
                 padding: 14px 16px;
@@ -791,6 +968,12 @@
                 grid-template-columns: 1fr;
             }
 
+            .capability-grid,
+            .capability-actions,
+            .lightning-state-grid {
+                grid-template-columns: 1fr;
+            }
+
             .dice-area {
                 gap: 12px;
             }
@@ -866,6 +1049,55 @@
                 <button type="button" class="full-width" onclick="runMobileSelfCheck()">连接自检</button>
                 <p id="mobile-test-result" class="sub-text readiness-result" role="status" aria-live="polite">尚未自检；正式开始前建议先确认连接。</p>
             </section>
+
+            <details id="capability-center" class="disclosure-panel">
+                <summary>
+                    <span>设备能力与权限</span>
+                    <small id="capability-summary">尚未检查</small>
+                </summary>
+                <div class="disclosure-content">
+                    <p class="sub-text test-disclosure-help">所有玩法共用。检查只读取是否可用以及必要的传感器数据，不保存位置或行驶路线。</p>
+                    <div class="capability-grid">
+                        <div class="capability-card">
+                            <div class="capability-card-heading">
+                                <strong>动作与方向</strong>
+                                <span id="capability-motion-state" class="capability-state">待检查</span>
+                            </div>
+                            <p id="capability-motion-detail">手抖、角度和摇晃玩法使用；手动骰子和角子机不依赖此能力。</p>
+                            <button type="button" onclick="checkCapability('motion')">检查或重试</button>
+                        </div>
+                        <div class="capability-card">
+                            <div class="capability-card-heading">
+                                <strong>GPS/GNSS 速度</strong>
+                                <span id="capability-location-state" class="capability-state">待检查</span>
+                            </div>
+                            <p id="capability-location-detail">雷电极速专用；没有 GPS/GNSS，或浏览器无法直接取得系统速度的设备不能使用。</p>
+                            <button type="button" onclick="checkCapability('location')">检查或重试</button>
+                        </div>
+                        <div class="capability-card">
+                            <div class="capability-card-heading">
+                                <strong>屏幕常亮</strong>
+                                <span id="capability-wake-state" class="capability-state">待检查</span>
+                            </div>
+                            <p id="capability-wake-detail">游玩时尽量保持屏幕开启；不支持时锁屏仍会触发安全停止。</p>
+                            <button type="button" onclick="checkCapability('wake')">检查支持情况</button>
+                        </div>
+                        <div class="capability-card">
+                            <div class="capability-card-heading">
+                                <strong>本机震动反馈</strong>
+                                <span id="capability-vibration-state" class="capability-state">待检查</span>
+                            </div>
+                            <p id="capability-vibration-detail">仅用于手机反馈，不影响外接设备输出；部分 iPhone 浏览器不提供此能力。</p>
+                            <button type="button" onclick="checkCapability('vibration')">检查支持情况</button>
+                        </div>
+                    </div>
+                    <div class="capability-actions">
+                        <button type="button" class="primary-button" onclick="runAllCapabilityChecks()">运行全部检查</button>
+                        <button type="button" onclick="showCapabilityHelp()">权限修改方法</button>
+                    </div>
+                    <p id="capability-message" class="sub-text readiness-result" role="status" aria-live="polite">权限被拒绝后可以修改系统或网站设置，再回到这里重试。</p>
+                </div>
+            </details>
 
             <details id="global-output-settings" class="disclosure-panel global-output-disclosure">
                 <summary>
@@ -969,6 +1201,10 @@
                     <span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">04</span></span>
                     <span class="sub-text" style="display: block; margin-top: 5px;">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span>
                 </button>
+                <button type="button" class="game-card" onclick="openGameSettings('lightning')">
+                    <span class="game-card-heading"><span class="game-card-title">雷电极速</span><span class="game-card-index">05</span></span>
+                    <span class="sub-text" style="display: block; margin-top: 5px;">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span>
+                </button>
             </div>
 
             <div class="game-select-container">
@@ -997,7 +1233,8 @@
                         <ul class="info-list">
                             <li>切后台、锁屏、刷新或关闭页面时，页面和服务端都会请求停止 A/B 两路。</li>
                             <li>开始游戏后会请求屏幕常亮；仍需把网页或 APK 保持在前台。</li>
-                            <li>iPhone 感应玩法需要 HTTPS；Android APK 使用原生感应器，不需要网页证书。</li>
+                            <li>手机浏览器的感应玩法需要 HTTPS；Android APK 使用原生感应器，不需要网页证书。</li>
+                            <li>雷电极速需要 GPS/GNSS。手机浏览器需要 HTTPS；Android APK 通过系统定位权限读取速度。</li>
                             <li>默认只用 A。选择 B 或 A+B 前，必须确认接法和可接受强度。</li>
                         </ul>
                     </div>
@@ -1503,6 +1740,178 @@
                     </details>
                 </div>
 
+                <div id="settings-lightning" class="setting-panel">
+                    <details class="settings-group" data-game="lightning" data-default-open="true" open>
+                        <summary>
+                            <span>基础玩法</span>
+                            <small>起始强度、最高强度与满强度速度</small>
+                        </summary>
+                        <div class="settings-group-content">
+                            <div class="settings-stack">
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>起始强度</span>
+                                        <span id="val-lightning-start-strength">20</span>
+                                    </div>
+                                    <input type="range" id="lightning-start-strength" min="0" max="100" value="20" oninput="updateSettingValue('lightning-start-strength')">
+                                    <p class="field-help">达到启动速度时使用。实际输出仍受全局通道设置和设备 App 限幅。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>最高强度</span>
+                                        <span id="val-lightning-max-strength">80</span>
+                                    </div>
+                                    <input type="range" id="lightning-max-strength" min="0" max="100" value="80" oninput="updateSettingValue('lightning-max-strength')">
+                                    <p class="field-help">达到满强度速度后使用；55 km/h 起进入保护区，达到 60 km/h 会立即停止。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>满强度速度</span>
+                                        <span id="val-lightning-full-speed">50 km/h</span>
+                                    </div>
+                                    <input type="range" id="lightning-full-speed" min="15" max="55" value="50" oninput="updateSettingValue('lightning-full-speed')">
+                                    <p class="field-help">从启动速度到这里线性增加强度；必须至少比启动速度高 10 km/h。</p>
+                                </div>
+
+                                <div>
+                                    <label class="switch-row">
+                                        <span>堵车模式“都是你的错”</span>
+                                        <input type="checkbox" id="lightning-jam-enabled" onchange="updateLightningJamVisibility(); saveSelectedSettings(true)">
+                                    </label>
+                                    <p class="field-help">关闭时长时间低速只会暂停；开启后按下面的间歇规则随机输出。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <details class="settings-group" data-game="lightning">
+                        <summary>
+                            <span>行驶与保护</span>
+                            <small>启动速度、输出节奏与超速恢复</small>
+                        </summary>
+                        <div class="settings-group-content">
+                            <div class="settings-stack">
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>启动速度</span>
+                                        <span id="val-lightning-start-speed">10 km/h</span>
+                                    </div>
+                                    <input type="range" id="lightning-start-speed" min="5" max="20" value="10" oninput="updateSettingValue('lightning-start-speed')">
+                                    <p class="field-help">可以从任意速度进入；当前速度达到这里并稳定 2 秒后启动，不要求从静止起步。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>每轮连续输出</span>
+                                        <span id="val-lightning-continuous-seconds">8.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-continuous-seconds" min="3" max="8" step="1" value="8" oninput="updateSettingValue('lightning-continuous-seconds')">
+                                    <p class="field-help">每轮 3–8 秒；低速、超速、定位异常或急停会提前中断当前一轮。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>每轮强制休息</span>
+                                        <span id="val-lightning-driving-rest-seconds">3.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-driving-rest-seconds" min="3" max="10" step="1" value="3" oninput="updateSettingValue('lightning-driving-rest-seconds')">
+                                    <p class="field-help">一轮结束后至少等待 3–10 秒，不能关闭。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>超速恢复等待</span>
+                                        <span id="val-lightning-overspeed-recovery-seconds">10.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-overspeed-recovery-seconds" min="5" max="10" step="1" value="10" oninput="updateSettingValue('lightning-overspeed-recovery-seconds')">
+                                    <p class="field-help">达到 60 km/h 会立即停止；重新低于 60 后连续保持这段时间才解除暂停。</p>
+                                </div>
+
+                                <div>
+                                    <label class="slider-label" style="margin-bottom: 5px;">单局时长</label>
+                                    <select id="lightning-session-minutes" onchange="saveSelectedSettings(true)">
+                                        <option value="5">5 分钟</option>
+                                        <option value="10">10 分钟</option>
+                                        <option value="15">15 分钟</option>
+                                    </select>
+                                    <p class="field-help">到时立即停止输出，重新开始前必须再次确认移动安全。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <details id="lightning-jam-settings" class="settings-group" data-game="lightning">
+                        <summary>
+                            <span>堵车高级设置</span>
+                            <small>强度、触发间隔与整轮休息</small>
+                        </summary>
+                        <div class="settings-group-content">
+                            <div class="settings-stack">
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>堵车输出强度</span>
+                                        <span id="val-lightning-jam-strength">30</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-strength" min="0" max="100" value="30" oninput="updateSettingValue('lightning-jam-strength')">
+                                    <p class="field-help">不会超过当前玩法的最高强度和设备 App 限幅。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>低速多久进入堵车</span>
+                                        <span id="val-lightning-jam-entry-seconds">40.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-entry-seconds" min="20" max="120" step="5" value="40" oninput="updateSettingValue('lightning-jam-entry-seconds')">
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>堵车单次输出</span>
+                                        <span id="val-lightning-jam-shock-seconds">1.5s</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-shock-seconds" min="1" max="3" step="0.5" value="1.5" oninput="updateSettingValue('lightning-jam-shock-seconds')">
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>随机间隔下限</span>
+                                        <span id="val-lightning-jam-gap-min-seconds">12.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-gap-min-seconds" min="10" max="60" step="1" value="12" oninput="updateSettingValue('lightning-jam-gap-min-seconds')">
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>随机间隔上限</span>
+                                        <span id="val-lightning-jam-gap-max-seconds">25.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-gap-max-seconds" min="15" max="120" step="1" value="25" oninput="updateSettingValue('lightning-jam-gap-max-seconds')">
+                                    <p class="field-help">每次输出后在上下限之间随机休息；上限始终至少比下限多 5 秒。</p>
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>每轮最多次数</span>
+                                        <span id="val-lightning-jam-batch-count">5</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-batch-count" min="1" max="10" step="1" value="5" oninput="updateSettingValue('lightning-jam-batch-count')">
+                                </div>
+
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>每轮结束休息</span>
+                                        <span id="val-lightning-jam-batch-rest-seconds">60.0s</span>
+                                    </div>
+                                    <input type="range" id="lightning-jam-batch-rest-seconds" min="30" max="180" step="5" value="60" oninput="updateSettingValue('lightning-jam-batch-rest-seconds')">
+                                    <p class="field-help">达到每轮次数后强制进入 30–180 秒的长休息。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
                 <div id="settings-message" class="inline-note" role="status" aria-live="polite">所有改动会自动保存在当前设备。</div>
             </div>
 
@@ -1583,6 +1992,34 @@
                             </div>
                         </div>
                     </div>
+
+                    <div id="lightning-viewport" style="display: none; padding: 12px 0;">
+                        <div class="lightning-dashboard">
+                            <div class="lightning-speed-panel">
+                                <div id="lightning-speed" class="lightning-speed-value">--</div>
+                                <div class="lightning-speed-unit">km/h</div>
+                            </div>
+                            <div class="lightning-state-grid">
+                                <div class="lightning-state-card">
+                                    <span>当前规则</span>
+                                    <strong id="lightning-mode">等待可靠速度</strong>
+                                </div>
+                                <div class="lightning-state-card">
+                                    <span>请求强度</span>
+                                    <strong id="lightning-strength">0</strong>
+                                </div>
+                                <div class="lightning-state-card">
+                                    <span>定位状态</span>
+                                    <strong id="lightning-location-quality">等待数据</strong>
+                                </div>
+                                <div class="lightning-state-card">
+                                    <span>下一动作</span>
+                                    <strong id="lightning-next-action">保持页面在前台</strong>
+                                </div>
+                            </div>
+                            <div class="inline-warning">达到 60 km/h、定位中断、切后台或离开页面都会立即请求停止 A/B 输出。</div>
+                        </div>
+                    </div>
                 </div>
 
                 <details class="panel play-parameter-summary">
@@ -1624,7 +2061,37 @@
         </div>
     </div>
 
-    <script src="game-logic.js?v=20260723-beta1"></script>
-    <script src="game.js?v=20260723-beta1"></script>
+    <dialog id="lightning-safety-dialog" class="safety-dialog" aria-labelledby="lightning-safety-title">
+        <div class="safety-dialog-content">
+            <h2 id="lightning-safety-title">开始前确认移动安全</h2>
+            <p class="sub-text">本玩法只允许在封闭、清场、禁止无关人员进入的非公共区域使用。软件无法识别道路性质，内置限制不能代替现场判断。</p>
+            <div class="inline-warning" style="margin-top: 14px;">驾驶员、骑行者或载具操作者不得操作软件，也不得作为输出接收者。禁止在公路、高速公路、开放停车场、人行道和非机动车道使用。</div>
+            <div class="safety-check-list">
+                <label class="safety-check-row">
+                    <input type="checkbox" data-lightning-safety-check onchange="updateLightningSafetyConfirmation()">
+                    <span>操作者和输出接收者都不是驾驶员、骑行者或载具控制者。</span>
+                </label>
+                <label class="safety-check-row">
+                    <input type="checkbox" data-lightning-safety-check onchange="updateLightningSafetyConfirmation()">
+                    <span>接收者稳定坐在有充分支撑的多轮载具内；没有使用摩托车、自行车、电动自行车、滑板或平衡车。</span>
+                </label>
+                <label class="safety-check-row">
+                    <input type="checkbox" data-lightning-safety-check onchange="updateLightningSafetyConfirmation()">
+                    <span>活动区域已经物理封闭并完成清场，不会危害行人、其他车辆或社会公共安全。</span>
+                </label>
+                <label class="safety-check-row">
+                    <input type="checkbox" data-lightning-safety-check onchange="updateLightningSafetyConfirmation()">
+                    <span>现场有人可以随时按下停止 A/B 输出，并且没有把软件保护当作唯一安全措施。</span>
+                </label>
+            </div>
+            <div class="safety-dialog-actions">
+                <button type="button" onclick="closeLightningSafetyDialog()">取消</button>
+                <button id="lightning-safety-confirm" type="button" class="primary-button" onclick="confirmLightningSafetyAndStart()" disabled>确认并检查定位</button>
+            </div>
+        </div>
+    </dialog>
+
+    <script src="game-logic.js?v=20260727-lightning"></script>
+    <script src="game.js?v=20260727-lightning"></script>
 </body>
 </html>

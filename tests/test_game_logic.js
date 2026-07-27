@@ -232,6 +232,257 @@ test("传感器时间戳超过硬期限后立即视为失效", () => {
     assert.equal(logic.isTimestampFresh(2000, 1600, 1000), false);
 });
 
+test("雷电极速设置会被限制在允许调整的安全范围", () => {
+    const normalized = logic.normalizeLightningSettings({
+        startSpeed: 2,
+        startStrength: 40,
+        maxStrength: 20,
+        fullSpeed: 59,
+        continuousSeconds: 99,
+        drivingRestSeconds: 0,
+        overspeedRecoverySeconds: 1,
+        sessionMinutes: 99,
+        jamEnabled: true,
+        jamStrength: 200,
+        jamEntrySeconds: 1,
+        jamShockSeconds: 0.2,
+        jamGapMinSeconds: 4,
+        jamGapMaxSeconds: 5,
+        jamBatchCount: 99,
+        jamBatchRestSeconds: 2
+    }, {});
+
+    assert.deepEqual(normalized, {
+        startSpeed: 5,
+        startStrength: 40,
+        maxStrength: 40,
+        fullSpeed: 55,
+        continuousSeconds: 8,
+        drivingRestSeconds: 3,
+        overspeedRecoverySeconds: 5,
+        sessionMinutes: 10,
+        jamEnabled: true,
+        jamStrength: 40,
+        jamEntrySeconds: 20,
+        jamShockSeconds: 1,
+        jamGapMinSeconds: 10,
+        jamGapMaxSeconds: 15,
+        jamBatchCount: 10,
+        jamBatchRestSeconds: 30
+    });
+});
+
+test("雷电极速强度先线性增加并在 55 后主动回落", () => {
+    const cfg = {
+        startSpeed: 10,
+        startStrength: 20,
+        maxStrength: 80,
+        fullSpeed: 50
+    };
+
+    assert.equal(logic.calculateLightningStrength(9.9, cfg), 0);
+    assert.equal(logic.calculateLightningStrength(10, cfg), 20);
+    assert.equal(logic.calculateLightningStrength(30, cfg), 50);
+    assert.equal(logic.calculateLightningStrength(50, cfg), 80);
+    assert.equal(logic.calculateLightningStrength(55, cfg), 80);
+    assert.equal(logic.calculateLightningStrength(57.5, cfg), 50);
+    assert.equal(logic.calculateLightningStrength(60, cfg), 0);
+});
+
+test("雷电极速允许从任意合规速度进入但必须稳定两秒", () => {
+    const cfg = { startSpeed: 10, sessionMinutes: 10 };
+    let state = logic.createLightningState(1000);
+
+    let result = logic.advanceLightningState(state, cfg, {
+        valid: true,
+        speedKmh: 32,
+        timestamp: 1000
+    }, 1000);
+    assert.equal(result.state.mode, "waiting_speed");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 32,
+        timestamp: 2999
+    }, 2999);
+    assert.equal(result.state.mode, "waiting_speed");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 32,
+        timestamp: 3000
+    }, 3000);
+    assert.equal(result.state.mode, "driving");
+    assert.ok(result.strength > 0);
+});
+
+test("雷电极速达到 60 立即停止并按用户设置等待恢复", () => {
+    const cfg = { startSpeed: 10, overspeedRecoverySeconds: 5, sessionMinutes: 10 };
+    let state = {
+        ...logic.createLightningState(1000),
+        mode: "driving",
+        modeSince: 3000
+    };
+    let result = logic.advanceLightningState(state, cfg, {
+        valid: true,
+        speedKmh: 60,
+        timestamp: 4000
+    }, 4000);
+    assert.equal(result.state.mode, "overspeed");
+    assert.equal(result.shouldStop, true);
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 40,
+        timestamp: 5000
+    }, 5000);
+    assert.equal(result.state.mode, "overspeed");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 40,
+        timestamp: 9999
+    }, 9999);
+    assert.equal(result.state.mode, "overspeed");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 40,
+        timestamp: 10000
+    }, 10000);
+    assert.equal(result.state.mode, "driving");
+});
+
+test("雷电极速超速恢复期间丢失定位会重新计算完整等待时间", () => {
+    const cfg = { startSpeed: 10, overspeedRecoverySeconds: 5, sessionMinutes: 10 };
+    let result = logic.advanceLightningState({
+        ...logic.createLightningState(1000),
+        mode: "driving"
+    }, cfg, { valid: true, speedKmh: 62, timestamp: 2000 }, 2000);
+    assert.equal(result.state.mode, "overspeed");
+
+    result = logic.advanceLightningState(
+        result.state,
+        cfg,
+        { valid: true, speedKmh: 40, timestamp: 3000 },
+        3000
+    );
+    assert.equal(result.state.mode, "overspeed");
+
+    result = logic.advanceLightningState(
+        result.state,
+        cfg,
+        { valid: false, speedKmh: null, timestamp: 3500 },
+        3500
+    );
+    assert.equal(result.state.mode, "gps_blocked");
+    assert.equal(result.state.overspeedLatched, true);
+
+    result = logic.advanceLightningState(
+        result.state,
+        cfg,
+        { valid: true, speedKmh: 40, timestamp: 4000 },
+        4000
+    );
+    assert.equal(result.state.mode, "overspeed");
+    result = logic.advanceLightningState(
+        result.state,
+        cfg,
+        { valid: true, speedKmh: 40, timestamp: 8999 },
+        8999
+    );
+    assert.equal(result.state.mode, "overspeed");
+    result = logic.advanceLightningState(
+        result.state,
+        cfg,
+        { valid: true, speedKmh: 40, timestamp: 9000 },
+        9000
+    );
+    assert.equal(result.state.mode, "driving");
+});
+
+test("雷电极速低速只使用一个计时器并在恢复后重置", () => {
+    const cfg = { startSpeed: 10, jamEnabled: true, jamEntrySeconds: 20, sessionMinutes: 10 };
+    let result = logic.advanceLightningState({
+        ...logic.createLightningState(1000),
+        mode: "driving",
+        modeSince: 3000
+    }, cfg, {
+        valid: true,
+        speedKmh: 8,
+        timestamp: 4000
+    }, 4000);
+    assert.equal(result.state.mode, "low_pending");
+    assert.equal(result.shouldStop, true);
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 8,
+        timestamp: 9000
+    }, 9000);
+    assert.equal(result.state.mode, "low_paused");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 8,
+        timestamp: 24000
+    }, 24000);
+    assert.equal(result.state.mode, "jam");
+
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 12,
+        timestamp: 26000
+    }, 26000);
+    assert.equal(result.state.mode, "low_pending");
+    assert.equal(result.shouldStop, true);
+    result = logic.advanceLightningState(result.state, cfg, {
+        valid: true,
+        speedKmh: 12,
+        timestamp: 28000
+    }, 28000);
+    assert.equal(result.state.mode, "driving");
+    assert.equal(result.state.lowSince, null);
+});
+
+test("雷电极速刚低于用户启动线就停止而不是继续使用迟滞区", () => {
+    const cfg = { startSpeed: 10, sessionMinutes: 10 };
+    const state = {
+        ...logic.createLightningState(1000),
+        mode: "driving",
+        modeSince: 1000,
+        startCandidateSince: null,
+        lowSince: null
+    };
+
+    const result = logic.advanceLightningState(state, cfg, {
+        valid: true,
+        speedKmh: 9.9,
+        timestamp: 2000
+    }, 2000);
+
+    assert.equal(result.state.mode, "low_pending");
+    assert.equal(result.shouldStop, true);
+    assert.equal(result.strength, 0);
+});
+
+test("雷电极速定位超过三秒未更新时停止且不会误入堵车", () => {
+    const cfg = { startSpeed: 10, jamEnabled: true, sessionMinutes: 10 };
+    const result = logic.advanceLightningState({
+        ...logic.createLightningState(1000),
+        mode: "driving",
+        modeSince: 3000
+    }, cfg, {
+        valid: true,
+        speedKmh: 20,
+        timestamp: 4000
+    }, 7000);
+
+    assert.equal(result.state.mode, "gps_blocked");
+    assert.equal(result.shouldStop, true);
+    assert.equal(result.state.lowSince, null);
+});
+
 test("设置数值只给真正的角度字段添加度数单位", () => {
     assert.equal(logic.formatSettingLabel("angle-strength-min", 15), "15");
     assert.equal(logic.formatSettingLabel("angle-strength-max", 70), "70");

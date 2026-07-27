@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import plistlib
 import re
@@ -119,6 +120,14 @@ TEST_DEFAULT_STRENGTH = 15
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
+LIGHTNING_MAX_STRENGTH = 100
+LIGHTNING_DRIVING_MIN_DURATION_MS = 3000
+LIGHTNING_DRIVING_MAX_DURATION_MS = 8000
+LIGHTNING_DRIVING_MIN_REST_MS = 3000
+LIGHTNING_DRIVING_MAX_REST_MS = 10000
+LIGHTNING_JAM_MIN_DURATION_MS = 1000
+LIGHTNING_JAM_MAX_DURATION_MS = 3000
+LIGHTNING_JAM_MIN_REST_MS = 10000
 HARDWARE_COMMAND_TIMEOUT_SECONDS = 1.0
 # V4 非零强度必须带自动到期时间。额外余量覆盖最后一帧、网络抖动和停止指令往返，
 # 即使电脑进程意外退出，App 端也会在有限时间内自行把临时强度恢复为 0。
@@ -182,6 +191,8 @@ shock_lock = asyncio.Lock()
 
 # 记录每个游戏 WebSocket 最近一次惩罚请求时间，用于抑制疯狂点击或恶意刷包。
 game_connection_last_pulse_at = {}
+# 雷电极速使用长任务，后端仍独立记录最早可再次输出时间，不能只相信前端计时器。
+game_connection_lightning_next_at = {}
 shock_generation = 0
 last_test_shock_at = 0
 active_output_task = None
@@ -773,7 +784,15 @@ class StaticHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        request_path = urlparse(self.path).path
+        geolocation_policy = "(self)" if request_path == "/static/game.html" else "()"
+        sensor_policy = "(self)" if request_path == "/static/game.html" else "()"
+        self.send_header(
+            "Permissions-Policy",
+            "camera=(), microphone=(), "
+            f"geolocation={geolocation_policy}, "
+            f"accelerometer={sensor_policy}, gyroscope={sensor_policy}"
+        )
         # 页面仍使用本地内联事件和样式，因此保留 unsafe-inline；其余资源只能来自本机，且禁止插件对象和外部跳转表单。
         self.send_header(
             "Content-Security-Policy",
@@ -1100,6 +1119,15 @@ def clamp_int(value, minimum, maximum, fallback=0):
     return max(minimum, min(maximum, number))
 
 
+def parse_finite_float(value):
+    """把网页数值解析为有限浮点数；空值、NaN 与无穷大一律返回 None。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def parse_output_config(data):
     """解析游戏端传来的输出通道配置，默认只使用 A 通道"""
     output_mode = data.get("outputMode", data.get("output_mode", "a"))
@@ -1411,6 +1439,19 @@ async def send_test_feedback(websocket, ok, message):
         pass
 
 
+async def send_lightning_feedback(websocket, request_id, ok, message):
+    """向雷电极速返回是否真正进入后端调度，避免前端把拒绝请求显示成正在输出。"""
+    try:
+        await websocket.send(json.dumps({
+            "type": "lightning_feedback",
+            "requestId": request_id,
+            "ok": ok,
+            "message": message,
+        }))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
 async def send_stop_feedback(websocket, ok):
     """明确告知页面停止命令是否得到两路硬件确认，失败时要求用户转到设备 App 处理"""
     message = (
@@ -1622,6 +1663,95 @@ async def web_ws_handler(websocket, path):
                         )
                         if scheduled:
                             arm_output_watchdog(websocket, mode="continuous")
+
+                # 雷电极速使用独立消息：后端强制限制强度、单轮时长与最短休息，
+                # 即使网页计时器损坏或被篡改，也不能退化成长时间连续输出。
+                elif data.get("type") == "lightning_shock_trigger":
+                    request_id = clamp_int(data.get("requestId"), 0, 2_147_483_647, fallback=0)
+                    phase = data.get("phase")
+                    if phase not in {"driving", "jam"}:
+                        await send_lightning_feedback(websocket, request_id, False, "未知的雷电极速输出阶段")
+                        continue
+
+                    # 页面不发送经纬度。后端只核对速度与样本年龄，阻止前端计时器卡死、
+                    # 定位停更或刚达到 60 km/h 时仍把上一轮输出请求送进硬件调度。
+                    speed_kmh = parse_finite_float(data.get("speedKmh"))
+                    sample_age_ms = parse_finite_float(data.get("sampleAgeMs"))
+                    if speed_kmh is None or speed_kmh < 0 or speed_kmh >= 60:
+                        await send_lightning_feedback(websocket, request_id, False, "速度数据无效或已达到 60 km/h，保持停止")
+                        continue
+                    if sample_age_ms is None or sample_age_ms < 0 or sample_age_ms > 3000:
+                        await send_lightning_feedback(websocket, request_id, False, "定位样本已过期，保持停止")
+                        continue
+
+                    now = asyncio.get_running_loop().time()
+                    next_allowed_at = game_connection_lightning_next_at.get(websocket, 0)
+                    if now < next_allowed_at:
+                        remaining = next_allowed_at - now
+                        await send_lightning_feedback(
+                            websocket,
+                            request_id,
+                            False,
+                            f"安全休息中，约 {remaining:.1f}s 后才允许下一轮输出",
+                        )
+                        continue
+
+                    if phase == "driving":
+                        duration = clamp_int(
+                            data.get("duration"),
+                            LIGHTNING_DRIVING_MIN_DURATION_MS,
+                            LIGHTNING_DRIVING_MAX_DURATION_MS,
+                            fallback=LIGHTNING_DRIVING_MIN_DURATION_MS,
+                        )
+                        rest_ms = clamp_int(
+                            data.get("restMs"),
+                            LIGHTNING_DRIVING_MIN_REST_MS,
+                            LIGHTNING_DRIVING_MAX_REST_MS,
+                            fallback=LIGHTNING_DRIVING_MIN_REST_MS,
+                        )
+                    else:
+                        duration = clamp_int(
+                            data.get("duration"),
+                            LIGHTNING_JAM_MIN_DURATION_MS,
+                            LIGHTNING_JAM_MAX_DURATION_MS,
+                            fallback=LIGHTNING_JAM_MIN_DURATION_MS,
+                        )
+                        # 堵车模式允许前端选择更长随机间隔；后端只负责不可绕过的 10 秒下限。
+                        rest_ms = LIGHTNING_JAM_MIN_REST_MS
+
+                    strength = clamp_int(
+                        data.get("strength"),
+                        0,
+                        LIGHTNING_MAX_STRENGTH,
+                        fallback=0,
+                    )
+                    if strength <= 0:
+                        await send_lightning_feedback(websocket, request_id, False, "请求强度为 0，未输出")
+                        continue
+
+                    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                    waveform_key = parse_waveform_config(data)
+                    scheduled = schedule_game_shock(
+                        strength,
+                        duration,
+                        output_mode,
+                        b_strength_mode,
+                        b_strength_percent,
+                        clear_after=True,
+                        waveform_key=waveform_key,
+                    )
+                    if not scheduled:
+                        await send_lightning_feedback(
+                            websocket,
+                            request_id,
+                            False,
+                            "输出忙，或所选通道限幅尚未读取/已设为 0",
+                        )
+                        continue
+
+                    game_connection_lightning_next_at[websocket] = now + (duration + rest_ms) / 1000
+                    arm_output_watchdog(websocket)
+                    await send_lightning_feedback(websocket, request_id, True, "雷电极速输出已进入安全调度")
                         
                 # 结算型惩罚上报：骰子、角子机满槽和角子机轻惩罚都走这里。
                 elif data.get("type") == "game_shock_trigger":
@@ -1658,6 +1788,7 @@ async def web_ws_handler(websocket, path):
         finally:
             game_connections.discard(websocket)
             game_connection_last_pulse_at.pop(websocket, None)
+            game_connection_lightning_next_at.pop(websocket, None)
             state["game_client_connected"] = len(game_connections) > 0
             if not state["game_client_connected"]:
                 state["game_latency"] = -1

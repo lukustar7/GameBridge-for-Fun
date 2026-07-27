@@ -29,7 +29,7 @@ let latestTechState = null;
 let selectedGame = null;
 let activeGame = null;
 
-// 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
+// 统一保存五套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
 const GLOBAL_OUTPUT_STORAGE_KEY = "game_bridge_for_fun_global_output_v1";
@@ -108,12 +108,31 @@ const DEFAULT_SETTINGS = {
         winRate: "normal",
         sevenRule: "fill",
         pressureAfterPunish: "clear"
+    },
+    lightning: {
+        startSpeed: 10,
+        startStrength: 20,
+        maxStrength: 80,
+        fullSpeed: 50,
+        continuousSeconds: 8,
+        drivingRestSeconds: 3,
+        overspeedRecoverySeconds: 10,
+        sessionMinutes: 10,
+        jamEnabled: false,
+        jamStrength: 30,
+        jamEntrySeconds: 40,
+        jamShockSeconds: 1.5,
+        jamGapMinSeconds: 12,
+        jamGapMaxSeconds: 25,
+        jamBatchCount: 5,
+        jamBatchRestSeconds: 60
     }
 };
 
 // 规则计算放在独立纯逻辑文件中，浏览器和 Node 自动化测试执行的是同一份代码。
 const {
     advanceSlotState,
+    advanceLightningState,
     buildSlotResult,
     capPunishmentCount,
     clamp,
@@ -123,8 +142,11 @@ const {
     formatSettingLabel,
     hasSafeOutputLimits,
     isTimestampFresh,
+    calculateLightningStrength,
+    createLightningState,
     applyStandaloneShockDurationFloor,
     migrateLegacyOutputSettings,
+    normalizeLightningSettings,
     resolveStoredGlobalOutputSettings,
     restoreSettings
 } = window.GameBridgeForFunLogic;
@@ -173,6 +195,17 @@ const GAME_META = {
         secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => `没中 +${cfg.missGain}% | 小奖 -${cfg.smallWinDrop}%`,
         triggerLabel: (cfg) => `${cfg.spinMs}ms 开奖 | 电完休息 ${cfg.restMs}ms`
+    },
+    lightning: {
+        title: "雷电极速",
+        subtitle: "设置速度对应强度、行驶输出节奏和可选堵车规则；60 km/h 为固定硬停止线。",
+        help: "速度达到启动值并稳定 2 秒后开始。速度越快请求强度越高；低速、超速、定位异常和切后台都会安全停止或切换规则。",
+        primaryLabel: "起始强度",
+        secondaryLabel: "最高强度",
+        primaryValue: (cfg) => cfg.startStrength,
+        secondaryValue: (cfg) => cfg.maxStrength,
+        toleranceLabel: (cfg) => `${cfg.startSpeed} km/h 启动 | ${cfg.fullSpeed} km/h 满强度`,
+        triggerLabel: (cfg) => `${cfg.continuousSeconds}s 输出 | ${cfg.drivingRestSeconds}s 休息`
     }
 };
 
@@ -196,6 +229,39 @@ let shakeAcc = 0;    // 三轴加速度合成值，摇骰子时用于判断晃�
 let lastOrientationAt = 0;
 let lastMotionAt = 0;
 let sensorStopRequestedForStaleData = false;
+
+// 所有玩法共用同一份能力状态。页面只保存“是否可用”和传感器质量，不持久化坐标。
+const capabilityState = {
+    motion: { status: "unchecked", detail: "尚未检查动作与方向感应器" },
+    location: { status: "unchecked", detail: "尚未检查 GPS/GNSS 速度" },
+    wake: { status: "unchecked", detail: "尚未检查屏幕常亮支持" },
+    vibration: { status: "unchecked", detail: "尚未检查本机震动支持" }
+};
+let capabilityCheckInProgress = false;
+let locationWatchId = null;
+let locationTrackingActive = false;
+let nativeLocationHostEnabled = false;
+let nativeHasGpsHardware = false;
+let nativeHasOrientationSensor = false;
+let nativeHasMotionSensor = false;
+let nativeLocationPermission = "unknown";
+let nativeLocationServiceEnabled = false;
+let latestLocationSample = null;
+let lastLocationErrorMessage = "";
+let locationValidSampleCount = 0;
+let locationValidationStartedAt = 0;
+
+// 雷电极速只消费脱敏后的速度、精度和时间；经纬度不会进入游戏状态、网络消息或本地存储。
+let lightningState = null;
+let lightningLoopTimer = null;
+let lightningNextOutputAt = 0;
+let lightningJamBatchCount = 0;
+let lightningJamBatchRestUntil = 0;
+let lightningLastMode = "";
+let lightningRequestSequence = 0;
+let lightningOutputPending = false;
+let lightningCurrentOutputUntil = 0;
+let lightningSafetyAcceptedForAttempt = false;
 
 let canvas = null;
 let ctx = null;
@@ -289,7 +355,9 @@ function loadSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : {};
-        return applyStandaloneShockDurationFloor(restoreSettings(DEFAULT_SETTINGS, parsed));
+        const restored = applyStandaloneShockDurationFloor(restoreSettings(DEFAULT_SETTINGS, parsed));
+        restored.lightning = normalizeLightningSettings(restored.lightning, DEFAULT_SETTINGS.lightning);
+        return restored;
     } catch (error) {
         console.warn("读取本地游戏设置失败，已回退默认值:", error);
         return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -318,7 +386,7 @@ function loadGlobalOutputSettings() {
         const migrated = migrateLegacyOutputSettings(
             DEFAULT_OUTPUT_SETTINGS,
             legacySettings,
-            Object.keys(DEFAULT_SETTINGS)
+            ["shake", "angle", "dice", "slot"]
         );
         localStorage.setItem(GLOBAL_OUTPUT_STORAGE_KEY, JSON.stringify({
             ...migrated.settings,
@@ -445,6 +513,17 @@ function connectWebSocket() {
             const message = data.message || "停止请求已处理";
             setMobileTestResult(message, data.ok);
             setText("game-status", message);
+            if (activeGame === "lightning" && !data.ok) {
+                lightningNextOutputAt = Number.POSITIVE_INFINITY;
+                setText("lightning-next-action", "停止未确认，请在设备 App 中手动停止");
+            }
+        } else if (data.type === "lightning_feedback") {
+            if (!data.ok && activeGame === "lightning") {
+                lightningOutputPending = false;
+                lightningCurrentOutputUntil = 0;
+                lightningNextOutputAt = Math.max(lightningNextOutputAt, Date.now() + 1000);
+                setText("game-status", data.message || "雷电极速输出被安全规则拒绝");
+            }
         } else if (data.type === "button_feedback") {
             vibrateBriefly(20);
         }
@@ -759,6 +838,7 @@ async function releaseScreenWakeLock() {
 
 function emergencyStop(reason) {
     // 即使只在做“安全试电”，页面离开前台也必须触发同一套停机和断线兜底。
+    if (activeGame === "lightning") stopLocationTracking();
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
@@ -811,7 +891,7 @@ async function requestSensorPermission() {
         return true;
     }
 
-    const needsSecureHint = isIOSLikeDevice() && !window.isSecureContext;
+    const needsSecureHint = !window.isSecureContext;
     const permissionRequests = [];
 
     try {
@@ -843,13 +923,13 @@ async function requestSensorPermission() {
     } catch (error) {
         console.error("传感器授权失败:", error);
         lastSensorPermissionMessage = needsSecureHint
-            ? "iPhone 可能要求 HTTPS 安全页面才会弹出感应器权限；请先用手动玩法，或后续改用 HTTPS/受信任证书访问"
+            ? "手机浏览器需要 HTTPS 安全页面才能使用动作与方向感应器；请安装本项目证书后扫描 HTTPS 二维码"
             : "感应器权限请求失败，请确认浏览器允许动作与方向访问";
         return false;
     }
 
     if (needsSecureHint) {
-        lastSensorPermissionMessage = "iPhone 当前通过普通 HTTP 局域网页面访问，浏览器可能不会开放动作/方向感应权限";
+        lastSensorPermissionMessage = "当前通过普通 HTTP 局域网页面访问；手机浏览器不会开放动作与方向感应权限，请改用 HTTPS";
         return false;
     }
 
@@ -868,12 +948,6 @@ function bindSensors() {
 
     window.addEventListener("deviceorientation", handleOrientation);
     window.addEventListener("devicemotion", handleMotion);
-}
-
-function isIOSLikeDevice() {
-    const ua = navigator.userAgent || "";
-    const platform = navigator.platform || "";
-    return /iPad|iPhone|iPod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 function waitForSensorReadiness(gameName, timeoutMs = 1400) {
@@ -939,7 +1013,290 @@ function getSensorNotReadyMessage(gameName) {
         return "还没有收到摇晃感应数据；可以先用手动摇号，或检查浏览器动作感应权限";
     }
 
-    return "还没有收到倾斜感应数据；请确认 iPhone 已允许动作与方向访问，并保持网页在前台";
+    return "还没有收到倾斜感应数据；请确认手机浏览器已允许动作与方向访问，并保持网页在前台";
+}
+
+function updateCapabilityPresentation() {
+    const names = ["motion", "location", "wake", "vibration"];
+    let readyCount = 0;
+    names.forEach((name) => {
+        const state = capabilityState[name];
+        const statusNode = $(`capability-${name}-state`);
+        const detailNode = $(`capability-${name}-detail`);
+        if (statusNode) {
+            statusNode.classList.toggle("ready", state.status === "ready");
+            statusNode.classList.toggle("blocked", state.status === "blocked");
+            statusNode.innerText = {
+                ready: "已就绪",
+                partial: "部分可用",
+                checking: "检查中",
+                blocked: "不可用",
+                unchecked: "待检查"
+            }[state.status] || "待检查";
+        }
+        if (detailNode) detailNode.innerText = state.detail;
+        if (state.status === "ready") readyCount++;
+    });
+    setText("capability-summary", `${readyCount} 项就绪 · ${names.length - readyCount} 项待处理`);
+}
+
+function setCapabilityState(name, status, detail) {
+    if (!capabilityState[name]) return;
+    capabilityState[name] = { status, detail };
+    updateCapabilityPresentation();
+}
+
+function showCapabilityCenter(message = "") {
+    showSelectScreen();
+    const center = $("capability-center");
+    if (!center) return;
+    center.open = true;
+    if (message) setText("capability-message", message);
+    window.requestAnimationFrame(() => center.querySelector("summary")?.focus({ preventScroll: true }));
+}
+
+function showCapabilityHelp() {
+    const nativeHint = nativeSensorHostEnabled
+        ? "Android APK：在系统设置的本应用权限中允许定位，并打开系统定位服务；返回后点击“检查或重试”。"
+        : "Safari：打开当前网站的页面菜单与网站设置，把位置、动作与方向改为询问或允许；也可到系统设置的 Safari 与定位服务中修改。Android 浏览器：在网站设置与系统应用权限中允许定位和动作传感器。";
+    setText("capability-message", `${nativeHint} 权限被系统永久拒绝时，网页或 APK 不能强行再次弹窗。`);
+}
+
+function waitUntil(predicate, timeoutMs) {
+    return new Promise((resolve) => {
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+            if (predicate()) {
+                clearInterval(timer);
+                resolve(true);
+            } else if (Date.now() - startedAt >= timeoutMs) {
+                clearInterval(timer);
+                resolve(false);
+            }
+        }, 80);
+    });
+}
+
+async function checkMotionCapability() {
+    setCapabilityState("motion", "checking", "正在请求并验证动作与方向数据...");
+    lastSensorPermissionMessage = "";
+    const allowed = await requestSensorPermission();
+    if (!allowed) {
+        setCapabilityState("motion", "blocked", getSensorNotReadyMessage("shake"));
+        return false;
+    }
+
+    bindSensors();
+    const received = await waitUntil(() => hasFreshOrientation() || hasFreshMotion(), 1800);
+    const orientationAvailable = hasFreshOrientation() || (nativeSensorHostEnabled && nativeHasOrientationSensor);
+    const motionAvailable = hasFreshMotion() || (nativeSensorHostEnabled && nativeHasMotionSensor);
+    if (!received && !orientationAvailable && !motionAvailable) {
+        setCapabilityState("motion", "blocked", "已允许权限，但没有收到动作或方向数据；请保持页面在前台并重试。");
+        return false;
+    }
+
+    if (orientationAvailable && motionAvailable) {
+        setCapabilityState("motion", "ready", "方向与摇晃数据均可用，支持手抖、角度和感应骰子。");
+        return true;
+    }
+
+    const supported = orientationAvailable ? "倾斜方向" : "摇晃动作";
+    setCapabilityState("motion", "partial", `只检测到${supported}数据；依赖另一类数据的玩法会被阻止或要求使用手动操作。`);
+    return true;
+}
+
+function inspectPassiveCapabilities() {
+    if (nativeSensorHostEnabled || "wakeLock" in navigator) {
+        setCapabilityState("wake", "ready", nativeSensorHostEnabled
+            ? "Android APK 连接游戏后由原生外壳保持屏幕开启。"
+            : "当前浏览器支持屏幕常亮；开始游戏后会请求启用。");
+    } else {
+        setCapabilityState("wake", "blocked", "当前浏览器不支持屏幕常亮；锁屏仍会触发安全停止，请手动保持屏幕开启。");
+    }
+
+    if (typeof navigator.vibrate === "function") {
+        setCapabilityState("vibration", "ready", "当前设备支持网页震动反馈；这不会改变外接设备强度。");
+    } else {
+        setCapabilityState("vibration", "blocked", "当前浏览器不提供本机震动反馈；游戏和外接设备输出仍可正常运行。");
+    }
+}
+
+function recordLocationSample(speedKmh, accuracyMeters, speedAccuracyKmh, timestamp, source) {
+    const speed = Number(speedKmh);
+    const accuracy = Number(accuracyMeters);
+    const speedAccuracy = speedAccuracyKmh === null || speedAccuracyKmh === undefined
+        ? null
+        : Number(speedAccuracyKmh);
+    const sampleTime = Number(timestamp);
+    const valid = Number.isFinite(speed) && speed >= 0 && speed <= 250 &&
+        Number.isFinite(accuracy) && accuracy > 0 && accuracy <= 50 &&
+        Number.isFinite(sampleTime) && Math.abs(Date.now() - sampleTime) <= 3000 &&
+        (speedAccuracy === null || (Number.isFinite(speedAccuracy) && speedAccuracy <= 12));
+
+    latestLocationSample = {
+        valid,
+        speedKmh: valid ? speed : null,
+        accuracyMeters: Number.isFinite(accuracy) ? accuracy : null,
+        speedAccuracyKmh: speedAccuracy,
+        timestamp: sampleTime,
+        source
+    };
+
+    if (valid) {
+        if (locationValidationStartedAt === 0) locationValidationStartedAt = Date.now();
+        locationValidSampleCount++;
+        if (locationValidSampleCount >= 2 && Date.now() - locationValidationStartedAt >= 700) {
+            setCapabilityState(
+                "location",
+                "ready",
+                `已验证可靠速度数据；当前精度约 ${Math.round(accuracy)} 米。经纬度不会保存或发送到电脑。`
+            );
+        } else {
+            setCapabilityState("location", "checking", "已收到速度，正在确认数据持续性...");
+        }
+    } else {
+        locationValidSampleCount = 0;
+        locationValidationStartedAt = 0;
+        const detail = !Number.isFinite(speed)
+            ? "定位已返回，但没有可用速度；无法确认设备具备可靠 GPS/GNSS 测速能力。"
+            : `定位精度不足（约 ${Number.isFinite(accuracy) ? Math.round(accuracy) : "未知"} 米），暂不允许启动。`;
+        setCapabilityState("location", "checking", detail);
+    }
+}
+
+function handleWebLocation(position) {
+    const coords = position?.coords;
+    if (!coords) return;
+    const timestamp = Number(position.timestamp) || Date.now();
+    const speedKmh = Number.isFinite(Number(coords.speed)) && Number(coords.speed) >= 0
+        ? Number(coords.speed) * 3.6
+        : null;
+
+    // 网页没有标准接口能直接查询“是否装有 GPS”。因此这里必须拿到系统直接给出的 speed；
+    // 不再读取经纬度计算替代速度，防止仅 Wi-Fi 定位被误判成具备 GPS/GNSS 的设备。
+    recordLocationSample(speedKmh, coords.accuracy, null, timestamp, "web");
+}
+
+function handleWebLocationError(error) {
+    const code = Number(error?.code);
+    if (code === 1) {
+        lastLocationErrorMessage = "定位权限被拒绝。请修改当前网站和系统定位权限后，点击“检查或重试”。";
+        setCapabilityState("location", "blocked", lastLocationErrorMessage);
+    } else if (code === 2) {
+        lastLocationErrorMessage = "设备暂时无法提供位置。请确认已开启定位服务、处于开阔区域，并检查设备是否具有 GPS/GNSS。";
+        setCapabilityState("location", "blocked", lastLocationErrorMessage);
+    } else {
+        lastLocationErrorMessage = "定位请求超时。请保持页面在前台并到开阔区域重试。";
+        setCapabilityState("location", "blocked", lastLocationErrorMessage);
+    }
+}
+
+function startWebLocationWatch() {
+    if (locationWatchId !== null || !navigator.geolocation) return;
+    locationWatchId = navigator.geolocation.watchPosition(
+        handleWebLocation,
+        handleWebLocationError,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    locationTrackingActive = true;
+}
+
+function requestNativeLocationPermission(action = "start") {
+    // 受限 WebView 只拦截这个固定地址，不向网页暴露任意原生方法或系统对象。
+    window.location.href = `gamebridgeforfun://capability/location/${action}`;
+    locationTrackingActive = action === "start";
+}
+
+function stopLocationTracking() {
+    if (nativeSensorHostEnabled) {
+        requestNativeLocationPermission("stop");
+    } else if (locationWatchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+    }
+    locationTrackingActive = false;
+}
+
+async function checkLocationCapability(keepTracking = false) {
+    setCapabilityState("location", "checking", "正在请求定位并验证 GPS/GNSS 速度...");
+    lastLocationErrorMessage = "";
+    locationValidSampleCount = 0;
+    locationValidationStartedAt = 0;
+    latestLocationSample = null;
+
+    if (nativeSensorHostEnabled) {
+        if (!nativeHasGpsHardware) {
+            setCapabilityState("location", "blocked", "此 Android 设备没有 GPS/GNSS 硬件，不能使用雷电极速。");
+            return false;
+        }
+        if (!nativeLocationServiceEnabled || nativeLocationPermission !== "granted") {
+            requestNativeLocationPermission("start");
+        } else {
+            requestNativeLocationPermission("start");
+        }
+    } else {
+        if (!window.isSecureContext) {
+            setCapabilityState("location", "blocked", "手机浏览器必须通过 HTTPS 打开游戏页才能申请定位；请安装本项目证书后扫描 HTTPS 二维码。");
+            return false;
+        }
+        if (!navigator.geolocation) {
+            setCapabilityState("location", "blocked", "当前浏览器没有定位接口，不能使用雷电极速。");
+            return false;
+        }
+        if (locationWatchId !== null) {
+            navigator.geolocation.clearWatch(locationWatchId);
+            locationWatchId = null;
+        }
+        startWebLocationWatch();
+    }
+
+    await waitUntil(
+        () => capabilityState.location.status === "ready" || capabilityState.location.status === "blocked",
+        10000
+    );
+    const ready = capabilityState.location.status === "ready";
+    if (!ready && capabilityState.location.status === "checking") {
+        const message = latestLocationSample
+            ? capabilityState.location.detail
+            : "10 秒内没有收到可靠速度。没有 GPS/GNSS、定位服务关闭或当前环境遮挡严重时都不能启动。";
+        setCapabilityState("location", "blocked", message);
+    }
+    if (!keepTracking || !ready) stopLocationTracking();
+    return ready;
+}
+
+async function checkCapability(name) {
+    if (capabilityCheckInProgress && (name === "motion" || name === "location")) {
+        setText("capability-message", "另一项权限检查正在进行，请稍等。");
+        return false;
+    }
+    if (!capabilityState[name]) return false;
+    if (name === "wake" || name === "vibration") {
+        inspectPassiveCapabilities();
+        setText("capability-message", "支持情况已更新。");
+        return capabilityState[name].status === "ready";
+    }
+
+    capabilityCheckInProgress = true;
+    try {
+        const ok = name === "motion"
+            ? await checkMotionCapability()
+            : await checkLocationCapability(false);
+        setText("capability-message", ok
+            ? "能力检查通过。后续如果系统撤销权限或数据中断，游戏仍会立即停止。"
+            : "检查未通过。请按提示修改权限或更换具备所需传感器的设备后重试。");
+        return ok;
+    } finally {
+        capabilityCheckInProgress = false;
+    }
+}
+
+async function runAllCapabilityChecks() {
+    if (capabilityCheckInProgress) return;
+    inspectPassiveCapabilities();
+    const motionOk = await checkCapability("motion");
+    const locationOk = await checkCapability("location");
+    setText("capability-message", `全部检查完成：动作与方向${motionOk ? "可用" : "未通过"}；GPS/GNSS 速度${locationOk ? "可用" : "未通过"}。不依赖失败能力的玩法仍可使用。`);
 }
 
 function handleOrientation(event) {
@@ -968,10 +1325,34 @@ function handleMotion(event) {
 
 // Android 原生壳只调用这组纯数据入口，不向网页开放任何系统对象或高权限方法。
 window.GameBridgeForFunNative = {
-    enable() {
+    enable(hasOrientation = true, hasMotion = true, hasGps = false, locationPermission = "unknown", locationEnabled = false) {
         nativeSensorHostEnabled = true;
+        nativeLocationHostEnabled = true;
+        nativeHasOrientationSensor = Boolean(hasOrientation);
+        nativeHasMotionSensor = Boolean(hasMotion);
+        nativeHasGpsHardware = Boolean(hasGps);
+        nativeLocationPermission = String(locationPermission);
+        nativeLocationServiceEnabled = Boolean(locationEnabled);
         sensorsAllowed = true;
         document.documentElement.classList.add("native-host");
+        inspectPassiveCapabilities();
+        if (nativeHasOrientationSensor && nativeHasMotionSensor) {
+            setCapabilityState("motion", "ready", "Android 原生方向与摇晃传感器均可用。");
+        } else if (nativeHasOrientationSensor || nativeHasMotionSensor) {
+            setCapabilityState("motion", "partial", "Android 只检测到部分动作传感器，相关玩法会在启动时再次验证。");
+        } else {
+            setCapabilityState("motion", "blocked", "此 Android 设备没有可用的动作或方向传感器。");
+        }
+        if (!nativeHasGpsHardware) {
+            setCapabilityState("location", "blocked", "此 Android 设备没有 GPS/GNSS 硬件，不能使用雷电极速。");
+        } else if (nativeLocationPermission === "denied") {
+            setCapabilityState("location", "blocked", "Android 定位权限未允许。请点击检查重试，或到系统设置中修改权限。");
+        } else if (!nativeLocationServiceEnabled) {
+            setCapabilityState("location", "blocked", "Android 系统定位服务未开启。开启后返回权限中心重试。");
+        }
+    },
+    updateCapabilities(hasOrientation, hasMotion, hasGps, locationPermission, locationEnabled) {
+        this.enable(hasOrientation, hasMotion, hasGps, locationPermission, locationEnabled);
     },
     receiveSensorFrame(beta, gamma, x, y, z, hasOrientation, hasMotion) {
         if (!nativeSensorHostEnabled) return;
@@ -987,6 +1368,18 @@ window.GameBridgeForFunNative = {
                 }
             });
         }
+    },
+    receiveLocationSample(speedKmh, accuracyMeters, speedAccuracyKmh, timestamp) {
+        if (!nativeLocationHostEnabled) return;
+        locationTrackingActive = true;
+        const speedAccuracy = Number(speedAccuracyKmh);
+        recordLocationSample(
+            Number(speedKmh),
+            Number(accuracyMeters),
+            Number.isFinite(speedAccuracy) && speedAccuracy >= 0 ? speedAccuracy : null,
+            Number(timestamp),
+            "android_native"
+        );
     },
     pause(reason = "android_pause") {
         emergencyStop(reason);
@@ -1078,7 +1471,10 @@ function showScreen(screenId) {
 }
 
 function showSelectScreen() {
+    if (activeGame === "lightning") stopLocationTracking();
     selectedGame = null;
+    lightningSafetyAcceptedForAttempt = false;
+    closeLightningSafetyDialog();
     stopRuntimeLoops();
     showScreen("screen-select");
 }
@@ -1086,6 +1482,7 @@ function showSelectScreen() {
 function openGameSettings(gameName) {
     selectedGame = gameName;
     activeGame = null;
+    lightningSafetyAcceptedForAttempt = false;
     stopRuntimeLoops();
 
     document.querySelectorAll(".setting-panel").forEach((node) => {
@@ -1100,6 +1497,35 @@ function openGameSettings(gameName) {
     resetSettingsDisclosureState(gameName);
     updateSettingsActionVisibility(gameName);
     showScreen("screen-settings");
+}
+
+function openLightningSafetyDialog() {
+    const dialog = $("lightning-safety-dialog");
+    if (!dialog) return;
+    dialog.querySelectorAll("[data-lightning-safety-check]").forEach((checkbox) => {
+        checkbox.checked = false;
+    });
+    updateLightningSafetyConfirmation();
+    if (!dialog.open) dialog.showModal();
+}
+
+function closeLightningSafetyDialog() {
+    const dialog = $("lightning-safety-dialog");
+    if (dialog?.open) dialog.close();
+}
+
+function updateLightningSafetyConfirmation() {
+    const checks = Array.from(document.querySelectorAll("[data-lightning-safety-check]"));
+    const confirmButton = $("lightning-safety-confirm");
+    if (confirmButton) confirmButton.disabled = checks.length === 0 || checks.some((item) => !item.checked);
+}
+
+async function confirmLightningSafetyAndStart() {
+    const checks = Array.from(document.querySelectorAll("[data-lightning-safety-check]"));
+    if (checks.length === 0 || checks.some((item) => !item.checked)) return;
+    lightningSafetyAcceptedForAttempt = true;
+    closeLightningSafetyDialog();
+    await startConfiguredGame();
 }
 
 function resetSettingsDisclosureState(gameName) {
@@ -1170,7 +1596,35 @@ function populateSettingsForm(gameName) {
         $("slot-pressure-after-punish").value = ["clear", "keep"].includes(cfg.pressureAfterPunish)
             ? cfg.pressureAfterPunish
             : DEFAULT_SETTINGS.slot.pressureAfterPunish;
+    } else if (gameName === "lightning") {
+        const normalized = normalizeLightningSettings(cfg, DEFAULT_SETTINGS.lightning);
+        gameSettings.lightning = normalized;
+        setRangeValue("lightning-start-speed", normalized.startSpeed);
+        setRangeValue("lightning-start-strength", normalized.startStrength);
+        setRangeValue("lightning-max-strength", normalized.maxStrength);
+        setRangeValue("lightning-full-speed", normalized.fullSpeed);
+        setRangeValue("lightning-continuous-seconds", normalized.continuousSeconds);
+        setRangeValue("lightning-driving-rest-seconds", normalized.drivingRestSeconds);
+        setRangeValue("lightning-overspeed-recovery-seconds", normalized.overspeedRecoverySeconds);
+        $("lightning-session-minutes").value = String(normalized.sessionMinutes);
+        $("lightning-jam-enabled").checked = normalized.jamEnabled;
+        setRangeValue("lightning-jam-strength", normalized.jamStrength);
+        setRangeValue("lightning-jam-entry-seconds", normalized.jamEntrySeconds);
+        setRangeValue("lightning-jam-shock-seconds", normalized.jamShockSeconds);
+        setRangeValue("lightning-jam-gap-min-seconds", normalized.jamGapMinSeconds);
+        setRangeValue("lightning-jam-gap-max-seconds", normalized.jamGapMaxSeconds);
+        setRangeValue("lightning-jam-batch-count", normalized.jamBatchCount);
+        setRangeValue("lightning-jam-batch-rest-seconds", normalized.jamBatchRestSeconds);
+        updateLightningJamVisibility();
     }
+}
+
+function updateLightningJamVisibility() {
+    const group = $("lightning-jam-settings");
+    const enabled = Boolean($("lightning-jam-enabled")?.checked);
+    if (!group) return;
+    group.hidden = !enabled;
+    if (!enabled) group.open = false;
 }
 
 function populateGlobalOutputForm() {
@@ -1380,6 +1834,27 @@ function collectSettingsFromForm(gameName) {
         };
     }
 
+    if (gameName === "lightning") {
+        return normalizeLightningSettings({
+            startSpeed: readNumber("lightning-start-speed", 10),
+            startStrength: readNumber("lightning-start-strength", 20),
+            maxStrength: readNumber("lightning-max-strength", 80),
+            fullSpeed: readNumber("lightning-full-speed", 50),
+            continuousSeconds: readNumber("lightning-continuous-seconds", 8),
+            drivingRestSeconds: readNumber("lightning-driving-rest-seconds", 3),
+            overspeedRecoverySeconds: readNumber("lightning-overspeed-recovery-seconds", 10),
+            sessionMinutes: readNumber("lightning-session-minutes", 10),
+            jamEnabled: Boolean($("lightning-jam-enabled")?.checked),
+            jamStrength: readNumber("lightning-jam-strength", 30),
+            jamEntrySeconds: readNumber("lightning-jam-entry-seconds", 40),
+            jamShockSeconds: readNumber("lightning-jam-shock-seconds", 1.5),
+            jamGapMinSeconds: readNumber("lightning-jam-gap-min-seconds", 12),
+            jamGapMaxSeconds: readNumber("lightning-jam-gap-max-seconds", 25),
+            jamBatchCount: readNumber("lightning-jam-batch-count", 5),
+            jamBatchRestSeconds: readNumber("lightning-jam-batch-rest-seconds", 60)
+        }, DEFAULT_SETTINGS.lightning);
+    }
+
     return { ...DEFAULT_SETTINGS[gameName] };
 }
 
@@ -1433,11 +1908,18 @@ async function startConfiguredGame() {
         return;
     }
 
+    if (selectedGame === "lightning" && !lightningSafetyAcceptedForAttempt) {
+        openLightningSafetyDialog();
+        return;
+    }
+
     const gameName = selectedGame;
     sensorActionInProgress = true;
     try {
         saveSelectedSettings(true);
-        const needsSensors = gameName === "shake" || gameName === "angle" || gameName === "dice";
+        // 手动骰子不消费摇晃数据，不应为了一个关闭的可选功能索要传感器权限。
+        const needsSensors = gameName === "shake" || gameName === "angle" ||
+            (gameName === "dice" && !gameSettings.dice.manualRoll);
         if (needsSensors) {
             resetRequiredSensorState(gameName);
             setText("settings-message", "正在请求手机感应器权限...");
@@ -1455,12 +1937,29 @@ async function startConfiguredGame() {
             }
 
             if (!ready && gameName === "dice" && !gameSettings.dice.manualRoll) {
-                setText("settings-message", "未收到摇晃感应数据；请先开启手动摇号，或检查 iPhone 动作感应权限");
+                setText("settings-message", "未收到摇晃感应数据；请先开启手动摇号，或检查手机动作感应权限");
                 return;
             }
 
             if (!ready && gameName === "dice") {
                 setText("settings-message", "未收到摇晃感应数据，进入后仍可用手动摇号");
+            }
+        }
+
+
+        if (gameName === "lightning") {
+            setText("settings-message", "正在检查 GPS/GNSS 和可靠速度数据...");
+            const hasFreshLocation = locationTrackingActive &&
+                capabilityState.location.status === "ready" &&
+                latestLocationSample?.valid === true &&
+                isTimestampFresh(latestLocationSample.timestamp, 3000);
+            const locationReady = hasFreshLocation
+                ? true
+                : await checkLocationCapability(true);
+            if (!locationReady) {
+                setText("settings-message", capabilityState.location.detail);
+                showCapabilityCenter(capabilityState.location.detail);
+                return;
             }
         }
 
@@ -1504,9 +2003,10 @@ function setupPlayScreen(gameName) {
     setText("summary-output", formatOutputLabel(globalOutputSettings));
     setText("summary-waveform", formatWaveformLabel(selectedWaveform));
 
-    $("game-viewport").style.display = gameName === "dice" || gameName === "slot" ? "none" : "block";
+    $("game-viewport").style.display = gameName === "shake" || gameName === "angle" ? "block" : "none";
     $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
     $("slot-viewport").style.display = gameName === "slot" ? "block" : "none";
+    $("lightning-viewport").style.display = gameName === "lightning" ? "block" : "none";
 
     stopRuntimeLoops();
 
@@ -1522,6 +2022,9 @@ function setupPlayScreen(gameName) {
     } else if (gameName === "slot") {
         setText("game-status", "点击开转，高频开奖");
         initSlotGame();
+    } else if (gameName === "lightning") {
+        setText("game-status", "等待可靠速度达到启动值并稳定 2 秒");
+        initLightningGame();
     }
 }
 
@@ -1548,6 +2051,15 @@ function stopRuntimeLoops() {
     slotAutoTimer = null;
     clearTimeout(slotCooldownTimer);
     slotCooldownTimer = null;
+    clearInterval(lightningLoopTimer);
+    lightningLoopTimer = null;
+    lightningState = null;
+    lightningNextOutputAt = 0;
+    lightningJamBatchCount = 0;
+    lightningJamBatchRestUntil = 0;
+    lightningLastMode = "";
+    lightningOutputPending = false;
+    lightningCurrentOutputUntil = 0;
     nextPulseAllowedAt = 0;
     sensorStopRequestedForStaleData = false;
 }
@@ -1560,6 +2072,7 @@ function exitGame() {
 }
 
 function stopCurrentGame() {
+    if (activeGame === "lightning") stopLocationTracking();
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
@@ -2565,7 +3078,213 @@ function getSlotPressureColor(value) {
     return "#22c55e";
 }
 
-// --- 11. 初始化入口 ---
+// --- 11. 游戏 5：雷电极速 ---
+
+function initLightningGame() {
+    if (!locationTrackingActive) {
+        if (nativeSensorHostEnabled) requestNativeLocationPermission("start");
+        else startWebLocationWatch();
+    }
+    const now = Date.now();
+    lightningState = createLightningState(now);
+    lightningNextOutputAt = now + 1200;
+    lightningJamBatchCount = 0;
+    lightningJamBatchRestUntil = 0;
+    lightningLastMode = "";
+    lightningOutputPending = false;
+    lightningCurrentOutputUntil = 0;
+    setText("lightning-speed", "--");
+    setText("lightning-strength", "0");
+    setText("lightning-mode", "等待可靠速度");
+    setText("lightning-location-quality", "正在读取 GPS/GNSS");
+    setText("lightning-next-action", "达到启动速度并稳定 2 秒");
+    clearInterval(lightningLoopTimer);
+    lightningLoopTimer = setInterval(runLightningLoop, 250);
+    runLightningLoop();
+}
+
+function requestLightningStop(reason, message) {
+    lightningOutputPending = false;
+    lightningCurrentOutputUntil = 0;
+    lightningNextOutputAt = Math.max(lightningNextOutputAt, Date.now() + 500);
+    sendGameMessage({ type: "stop_shock", reason });
+    if (message) setText("game-status", message);
+}
+
+function randomBetween(minimum, maximum) {
+    const low = Math.min(minimum, maximum);
+    const high = Math.max(minimum, maximum);
+    return low + Math.random() * (high - low);
+}
+
+function sendLightningOutput(phase, strength, durationSeconds, restSeconds) {
+    const requestId = ++lightningRequestSequence;
+    const now = Date.now();
+    const sampleAgeMs = latestLocationSample
+        ? Math.max(0, now - Number(latestLocationSample.timestamp))
+        : Number.POSITIVE_INFINITY;
+    const sent = sendGameMessage({
+        type: "lightning_shock_trigger",
+        requestId,
+        phase,
+        strength: Math.round(strength),
+        duration: Math.round(durationSeconds * 1000),
+        restMs: Math.round(restSeconds * 1000),
+        // 后端不接收坐标，只用速度与样本年龄做第二道安全校验。
+        speedKmh: latestLocationSample?.speedKmh,
+        sampleAgeMs,
+        ...getOutputPayload()
+    });
+    if (!sent) return false;
+
+    lightningOutputPending = true;
+    lightningCurrentOutputUntil = now + durationSeconds * 1000;
+    lightningNextOutputAt = lightningCurrentOutputUntil + restSeconds * 1000;
+    return true;
+}
+
+function formatLightningMode(mode) {
+    return {
+        waiting_speed: "等待启动速度",
+        driving: "正常行驶",
+        low_pending: "低速确认中",
+        low_paused: "低速暂停",
+        jam: "堵车模式",
+        overspeed: "超速暂停",
+        gps_blocked: "定位安全暂停",
+        session_complete: "本局已结束"
+    }[mode] || "安全暂停";
+}
+
+function updateLightningDashboard(result, cfg, now) {
+    const sample = latestLocationSample;
+    setText("lightning-speed", result.sampleValid ? result.state.lastSpeedKmh.toFixed(1) : "--");
+    setText("lightning-strength", String(result.strength || 0));
+    setText("lightning-mode", formatLightningMode(result.state.mode));
+    setText(
+        "lightning-location-quality",
+        result.sampleValid && sample?.accuracyMeters !== null
+            ? `有效 · 约 ${Math.round(sample.accuracyMeters)} 米`
+            : "无有效速度"
+    );
+
+    let nextAction = "保持页面在前台";
+    if (result.state.mode === "waiting_speed") {
+        const candidateAt = result.state.startCandidateSince;
+        nextAction = candidateAt === null
+            ? `达到 ${cfg.startSpeed} km/h`
+            : `稳定验证 ${Math.max(0, (2000 - (now - candidateAt)) / 1000).toFixed(1)}s`;
+    } else if (result.state.mode === "overspeed") {
+        const recoveryAt = result.state.overspeedRecoverySince;
+        nextAction = recoveryAt === null
+            ? `低于 60 后等待 ${cfg.overspeedRecoverySeconds}s`
+            : `恢复倒计时 ${Math.max(0, cfg.overspeedRecoverySeconds - (now - recoveryAt) / 1000).toFixed(1)}s`;
+    } else if (result.state.mode === "low_pending") {
+        nextAction = `低速暂停确认 ${Math.max(0, 5 - (now - result.state.lowSince) / 1000).toFixed(1)}s`;
+    } else if (result.state.mode === "low_paused" && cfg.jamEnabled) {
+        nextAction = `堵车模式还有 ${Math.max(0, cfg.jamEntrySeconds - (now - result.state.lowSince) / 1000).toFixed(0)}s`;
+    } else if (result.state.mode === "jam") {
+        nextAction = now < lightningJamBatchRestUntil
+            ? `整轮休息 ${Math.ceil((lightningJamBatchRestUntil - now) / 1000)}s`
+            : `本轮 ${lightningJamBatchCount}/${cfg.jamBatchCount}`;
+    } else if (result.state.mode === "driving") {
+        nextAction = now < lightningNextOutputAt
+            ? `强制休息 ${Math.ceil((lightningNextOutputAt - now) / 1000)}s`
+            : "准备下一轮输出";
+    } else if (result.state.mode === "gps_blocked") {
+        nextAction = "恢复可靠定位后重新判断";
+    } else if (result.state.mode === "session_complete") {
+        nextAction = "返回列表后可重新开始";
+    }
+    setText("lightning-next-action", nextAction);
+}
+
+function runLightningLoop() {
+    if (activeGame !== "lightning" || !lightningState) return;
+    const now = Date.now();
+    const cfg = gameSettings.lightning;
+    const result = advanceLightningState(lightningState, cfg, latestLocationSample, now);
+    const modeChanged = lightningLastMode && lightningLastMode !== result.state.mode;
+    lightningState = result.state;
+
+    if (lightningOutputPending && now >= lightningCurrentOutputUntil) {
+        lightningOutputPending = false;
+        lightningCurrentOutputUntil = 0;
+    }
+
+    if (result.shouldStop) {
+        if (result.state.mode === "gps_blocked") {
+            setCapabilityState("location", "blocked", "GPS/GNSS 速度数据超过 3 秒未更新或质量不足；输出已停止。");
+        }
+        requestLightningStop(
+            `lightning_${result.state.mode}`,
+            result.state.mode === "overspeed"
+                ? "速度达到 60 km/h，已请求立即停止 A/B 输出"
+                : result.state.mode === "gps_blocked"
+                    ? "定位数据中断或不可靠，已请求停止 A/B 输出"
+                    : result.state.mode === "session_complete"
+                        ? "本局时间结束，已请求停止 A/B 输出"
+                        : "速度低于启动范围，已请求停止 A/B 输出"
+        );
+    }
+
+    if (modeChanged && result.state.mode === "jam") {
+        lightningJamBatchCount = 0;
+        lightningJamBatchRestUntil = 0;
+        lightningNextOutputAt = now + 500;
+    }
+    if (modeChanged && lightningLastMode === "jam" && result.state.mode === "driving") {
+        // 堵车规则切回行驶规则时先强制产生一段无输出间隔，不能把两套规则首尾粘在一起。
+        requestLightningStop("lightning_jam_to_driving", "已离开堵车模式，确认停止后切换到行驶规则");
+        lightningNextOutputAt = now + 1000;
+        lightningJamBatchCount = 0;
+        lightningJamBatchRestUntil = 0;
+    }
+
+    lightningLastMode = result.state.mode;
+    updateLightningDashboard(result, cfg, now);
+
+    if (result.state.mode !== "driving" && result.state.mode !== "jam") return;
+    if (lightningOutputPending || now < lightningNextOutputAt) return;
+    const blockReason = getOutputBlockReason();
+    if (blockReason) {
+        setText("game-status", `${blockReason}，雷电极速保持停止`);
+        lightningNextOutputAt = now + 1000;
+        return;
+    }
+
+    if (result.state.mode === "driving") {
+        const strength = calculateLightningStrength(result.state.lastSpeedKmh, cfg);
+        if (strength <= 0) return;
+        const sent = sendLightningOutput("driving", strength, cfg.continuousSeconds, cfg.drivingRestSeconds);
+        setText("game-status", sent
+            ? `行驶输出请求：强度 ${strength}，${cfg.continuousSeconds}s；随后休息 ${cfg.drivingRestSeconds}s`
+            : "后台通信不可用，未发送行驶输出");
+        return;
+    }
+
+    if (now < lightningJamBatchRestUntil) return;
+    if (lightningJamBatchCount >= cfg.jamBatchCount) {
+        lightningJamBatchCount = 0;
+        lightningJamBatchRestUntil = now + cfg.jamBatchRestSeconds * 1000;
+        lightningNextOutputAt = lightningJamBatchRestUntil;
+        setText("game-status", `堵车模式完成一轮，强制休息 ${cfg.jamBatchRestSeconds}s`);
+        return;
+    }
+
+    const sent = sendLightningOutput("jam", cfg.jamStrength, cfg.jamShockSeconds, 0);
+    if (!sent) {
+        setText("game-status", "后台通信不可用，未发送堵车输出");
+        lightningNextOutputAt = now + 1000;
+        return;
+    }
+    lightningJamBatchCount++;
+    const randomGapSeconds = randomBetween(cfg.jamGapMinSeconds, cfg.jamGapMaxSeconds);
+    lightningNextOutputAt = lightningCurrentOutputUntil + randomGapSeconds * 1000;
+    setText("game-status", `堵车随机输出：强度 ${cfg.jamStrength}，${cfg.jamShockSeconds}s；随后随机休息`);
+}
+
+// --- 12. 初始化入口 ---
 
 function enhanceControlAccessibility() {
     // 旧页面的大量滑块只在视觉上有标题；这里统一补齐读屏名称，避免逐项复制绑定代码。
@@ -2599,7 +3318,10 @@ window.onload = () => {
     populateSettingsForm("angle");
     populateSettingsForm("dice");
     populateSettingsForm("slot");
+    populateSettingsForm("lightning");
     enhanceControlAccessibility();
+    inspectPassiveCapabilities();
+    updateCapabilityPresentation();
     bindEmergencyStopEvents();
     updateGlobalSafetyStatus("正在连接电脑服务", false);
     connectWebSocket();

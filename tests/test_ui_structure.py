@@ -117,7 +117,7 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertEqual(console_strength[0].get("max"), "30")
 
     def test_all_games_send_one_confirmed_global_output_config(self):
-        """四个游戏不得再保存各自通道；冲突旧配置未确认前必须阻止正式输出。"""
+        """五个游戏不得再保存各自通道；冲突旧配置未确认前必须阻止正式输出。"""
 
         defaults_start = self.game_script_text.index("const DEFAULT_SETTINGS = {")
         defaults_end = self.game_script_text.index("const {", defaults_start)
@@ -154,6 +154,7 @@ class InterfaceStructureTests(unittest.TestCase):
             "dice-single-seconds": ("1.0", "2.0"),
             "slot-shock-seconds": ("1.0", "2.0"),
             "slot-light-shock-seconds": ("1.0", "1.0"),
+            "lightning-jam-shock-seconds": ("1", "1.5"),
         }
         inputs = {
             attrs.get("id"): attrs
@@ -190,7 +191,7 @@ class InterfaceStructureTests(unittest.TestCase):
             for tag, attrs in self.game.elements
             if tag == "details" and "settings-group" in attrs.get("class", "").split()
         ]
-        for game in ("shake", "angle", "dice", "slot"):
+        for game in ("shake", "angle", "dice", "slot", "lightning"):
             with self.subTest(game=game):
                 defaults = [
                     attrs
@@ -198,6 +199,65 @@ class InterfaceStructureTests(unittest.TestCase):
                     if attrs.get("data-game") == game and attrs.get("data-default-open") == "true"
                 ]
                 self.assertEqual(len(defaults), 1)
+
+    def test_global_capability_center_and_lightning_safety_gate_are_present(self):
+        """权限检查必须是全局入口，雷电极速每次开始还必须通过不可持久化的现场确认。"""
+
+        self.assertIn('id="capability-center"', self.game_text)
+        self.assertIn("runAllCapabilityChecks()", self.game_text)
+        self.assertIn("checkCapability('motion')", self.game_text)
+        self.assertIn("checkCapability('location')", self.game_text)
+        self.assertIn('id="lightning-safety-dialog"', self.game_text)
+        self.assertEqual(self.game_text.count("data-lightning-safety-check"), 4)
+        self.assertIn("没有 GPS/GNSS", self.game_text)
+        self.assertIn("60 km/h", self.game_text)
+        self.assertNotIn("lightningSafetyAcceptedForAttempt", self.game_text)
+        self.assertIn("let lightningSafetyAcceptedForAttempt = false;", self.game_script_text)
+        self.assertNotIn("localStorage.setItem(\"lightning", self.game_script_text)
+        self.assertNotIn("haversineDistanceMeters", self.game_script_text)
+        self.assertIn("必须拿到系统直接给出的 speed", self.game_script_text)
+        self.assertIn("sampleAgeMs", self.game_script_text)
+
+    def test_manual_dice_does_not_request_unused_motion_permission(self):
+        """开启手动摇号时不得仍索要摇晃权限，避免全局能力中心变成强制授权。"""
+
+        start = self.game_script_text.index("async function startConfiguredGame() {")
+        end = self.game_script_text.index("function setupPlayScreen", start)
+        function_body = self.game_script_text[start:end]
+        self.assertIn('(gameName === "dice" && !gameSettings.dice.manualRoll)', function_body)
+
+    def test_android_declares_optional_gps_and_runtime_location_permissions(self):
+        """APK 应允许无 GPS 设备安装其他游戏，但雷电极速必须能申请系统精确定位。"""
+
+        manifest = ET.parse(ROOT / "android" / "app" / "src" / "main" / "AndroidManifest.xml")
+        android_namespace = "{http://schemas.android.com/apk/res/android}"
+        permissions = {
+            element.attrib.get(f"{android_namespace}name")
+            for element in manifest.getroot().findall("uses-permission")
+        }
+        gps_feature = next(
+            element
+            for element in manifest.getroot().findall("uses-feature")
+            if element.attrib.get(f"{android_namespace}name") == "android.hardware.location.gps"
+        )
+
+        self.assertIn("android.permission.ACCESS_FINE_LOCATION", permissions)
+        self.assertIn("android.permission.ACCESS_COARSE_LOCATION", permissions)
+        self.assertEqual(gps_feature.attrib.get(f"{android_namespace}required"), "false")
+
+        native_location = (
+            ROOT / "android" / "app" / "src" / "main" / "java" /
+            "app" / "gamebridgeforfun" / "mobile" / "NativeLocationDispatcher.kt"
+        ).read_text(encoding="utf-8")
+        main_activity = (
+            ROOT / "android" / "app" / "src" / "main" / "java" /
+            "app" / "gamebridgeforfun" / "mobile" / "MainActivity.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("LocationManager.GPS_PROVIDER", native_location)
+        self.assertNotIn("location.latitude", native_location)
+        self.assertNotIn("location.longitude", native_location)
+        self.assertNotIn("addJavascriptInterface", main_activity)
+        self.assertIn('setOf("/location/start", "/location/stop")', main_activity)
 
     def test_slot_special_event_copy_and_symbols_are_unambiguous(self):
         """界面只能把三个 7️⃣ 图标称为特殊事件，图标池不得再混入自带 777 的老虎机图标。"""

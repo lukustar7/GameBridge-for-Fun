@@ -4,6 +4,13 @@
     <!-- APK 只访问用户当前局域网中的电脑桥接服务，不连接云端业务服务器。 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- 其他四个玩法不依赖 GPS，因此没有该硬件的 Android 设备仍可安装 APK。 -->
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
 
     <application
         android:allowBackup="false"

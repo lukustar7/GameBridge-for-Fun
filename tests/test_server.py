@@ -128,6 +128,10 @@ class ServerLogicTests(unittest.TestCase):
         """JSON 可解析出 Infinity/NaN；这些值不能让整数转换抛异常并断开连接。"""
         self.assertEqual(server.clamp_int(float("inf"), 0, 200, fallback=7), 7)
         self.assertEqual(server.clamp_int(float("nan"), 0, 200, fallback=9), 9)
+        self.assertIsNone(server.parse_finite_float(float("inf")))
+        self.assertIsNone(server.parse_finite_float(float("nan")))
+        self.assertIsNone(server.parse_finite_float("not-a-number"))
+        self.assertEqual(server.parse_finite_float("59.5"), 59.5)
 
     def test_non_ascii_game_token_is_rejected_without_exception(self):
         """恶意查询参数可能包含中文；校验应稳定返回失败，而不是抛出字符串比较异常。"""
@@ -385,6 +389,21 @@ class StaticHTTPBoundaryTests(unittest.TestCase):
         self.assertIn("object-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertNotIn("Python", response.headers["Server"])
+
+    def test_only_game_document_may_request_geolocation(self):
+        """定位权限只能由小游戏主文档申请，控制台和其他资源继续显式禁止。"""
+        with urlopen(f"{self.base_url}/static/game.html", timeout=2) as game_response:
+            game_policy = game_response.headers["Permissions-Policy"]
+            game_response.read()
+        with urlopen(f"{self.base_url}/static/index.html", timeout=2) as console_response:
+            console_policy = console_response.headers["Permissions-Policy"]
+            console_response.read()
+
+        self.assertIn("geolocation=(self)", game_policy)
+        self.assertIn("accelerometer=(self)", game_policy)
+        self.assertIn("gyroscope=(self)", game_policy)
+        self.assertIn("geolocation=()", console_policy)
+        self.assertIn("accelerometer=()", console_policy)
 
     def test_project_and_private_files_are_not_public(self):
         blocked_paths = (
@@ -660,6 +679,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.original_console_connections = set(server.console_connections)
         self.original_game_connections = set(server.game_connections)
         self.original_last_pulses = dict(server.game_connection_last_pulse_at)
+        self.original_lightning_next = dict(server.game_connection_lightning_next_at)
 
         # 使用不对称上限能验证 A/B 分路限幅：即使网页恶意请求 999，也只能到 40/30。
         server.state["app_connected"] = True
@@ -679,6 +699,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         server.console_connections.clear()
         server.game_connections.clear()
         server.game_connection_last_pulse_at.clear()
+        server.game_connection_lightning_next_at.clear()
         self.fake_client = FakeDeviceAppClient()
         server.device_app_client = self.fake_client
 
@@ -702,6 +723,8 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         server.game_connections.update(self.original_game_connections)
         server.game_connection_last_pulse_at.clear()
         server.game_connection_last_pulse_at.update(self.original_last_pulses)
+        server.game_connection_lightning_next_at.clear()
+        server.game_connection_lightning_next_at.update(self.original_lightning_next)
 
     async def test_four_games_share_limits_reject_overlap_and_confirm_emergency_stop(self):
         """模拟手持、角度、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
@@ -814,6 +837,67 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.state["client_strength_a"], 0)
         self.assertEqual(server.state["client_strength_b"], 0)
         self.assertFalse(server.state["game_client_connected"])
+
+    async def test_lightning_game_has_authoritative_strength_duration_and_rest_limits(self):
+        """第五个游戏即使被伪造超大参数，也只能执行受限的一轮并拒绝冷却期重叠。"""
+        websocket = ScriptedGameWebSocket([
+            (0, {
+                "type": "lightning_shock_trigger",
+                "requestId": 1,
+                "phase": "driving",
+                "strength": 50,
+                "duration": 3000,
+                "restMs": 3000,
+                "speedKmh": 60,
+                "sampleAgeMs": 0,
+                "outputMode": "a",
+            }),
+            (0, {
+                "type": "lightning_shock_trigger",
+                "requestId": 2,
+                "phase": "driving",
+                "strength": 50,
+                "duration": 3000,
+                "restMs": 3000,
+                "speedKmh": 30,
+                "sampleAgeMs": 3001,
+                "outputMode": "a",
+            }),
+            (0, {
+                "type": "lightning_shock_trigger",
+                "requestId": 3,
+                "phase": "driving",
+                "strength": 999,
+                "duration": 999999,
+                "restMs": 0,
+                "speedKmh": 30,
+                "sampleAgeMs": 0,
+                "outputMode": "a",
+            }),
+            (0.03, {
+                "type": "lightning_shock_trigger",
+                "requestId": 4,
+                "phase": "jam",
+                "strength": 50,
+                "duration": 1000,
+                "speedKmh": 3,
+                "sampleAgeMs": 0,
+                "outputMode": "a",
+            }),
+        ])
+
+        await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        temporary_events = [event for event in self.fake_client.events if event[0] == "set_temporary_strength"]
+        pulse_events = [event for event in self.fake_client.events if event[0] == "send_pulse"]
+        feedback = [message for message in websocket.sent_messages if message.get("type") == "lightning_feedback"]
+        self.assertEqual(len(temporary_events), 1)
+        self.assertEqual(temporary_events[0][2], 40)
+        self.assertEqual(pulse_events[0][4], server.LIGHTNING_DRIVING_MAX_DURATION_MS)
+        self.assertEqual([message["ok"] for message in feedback], [False, False, True, False])
+        self.assertIn("60 km/h", feedback[0]["message"])
+        self.assertIn("过期", feedback[1]["message"])
+        self.assertIn("安全休息", feedback[3]["message"])
 
     async def test_invalid_game_token_never_reaches_fake_hardware(self):
         """没有正确配对令牌的网页应在入口关闭，不能触发任何假硬件命令。"""

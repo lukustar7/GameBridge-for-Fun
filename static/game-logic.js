@@ -171,6 +171,236 @@
         return normalized;
     }
 
+    function normalizeLightningSettings(candidate, defaults) {
+        // 雷电极速允许玩家调节玩法节奏，但所有滑块都必须再次经过规则层收口。
+        // 这样即使 localStorage 被旧版本或手工修改过，也无法绕过界面上的安全范围。
+        const source = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+            ? candidate
+            : {};
+        const fallback = defaults && typeof defaults === "object" ? defaults : {};
+        const startSpeed = clamp(source.startSpeed ?? fallback.startSpeed ?? 10, 5, 20);
+        const startStrength = clamp(source.startStrength ?? fallback.startStrength ?? 20, 0, 100);
+        const maxStrength = clamp(
+            source.maxStrength ?? fallback.maxStrength ?? 80,
+            startStrength,
+            100
+        );
+        const fullSpeed = clamp(
+            source.fullSpeed ?? fallback.fullSpeed ?? 50,
+            startSpeed + 10,
+            55
+        );
+        const jamGapMinSeconds = clamp(
+            source.jamGapMinSeconds ?? fallback.jamGapMinSeconds ?? 12,
+            10,
+            60
+        );
+        const jamGapMaxSeconds = clamp(
+            source.jamGapMaxSeconds ?? fallback.jamGapMaxSeconds ?? 25,
+            jamGapMinSeconds + 5,
+            120
+        );
+
+        return {
+            startSpeed,
+            startStrength,
+            maxStrength,
+            fullSpeed,
+            continuousSeconds: clamp(
+                source.continuousSeconds ?? fallback.continuousSeconds ?? 8,
+                3,
+                8
+            ),
+            drivingRestSeconds: clamp(
+                source.drivingRestSeconds ?? fallback.drivingRestSeconds ?? 3,
+                3,
+                10
+            ),
+            overspeedRecoverySeconds: clamp(
+                source.overspeedRecoverySeconds ?? fallback.overspeedRecoverySeconds ?? 10,
+                5,
+                10
+            ),
+            sessionMinutes: [5, 10, 15].includes(Number(source.sessionMinutes))
+                ? Number(source.sessionMinutes)
+                : ([5, 10, 15].includes(Number(fallback.sessionMinutes)) ? Number(fallback.sessionMinutes) : 10),
+            jamEnabled: typeof source.jamEnabled === "boolean"
+                ? source.jamEnabled
+                : Boolean(fallback.jamEnabled),
+            jamStrength: clamp(
+                source.jamStrength ?? fallback.jamStrength ?? 30,
+                0,
+                maxStrength
+            ),
+            jamEntrySeconds: clamp(
+                source.jamEntrySeconds ?? fallback.jamEntrySeconds ?? 40,
+                20,
+                120
+            ),
+            jamShockSeconds: clamp(
+                source.jamShockSeconds ?? fallback.jamShockSeconds ?? 1.5,
+                1,
+                3
+            ),
+            jamGapMinSeconds,
+            jamGapMaxSeconds,
+            jamBatchCount: Math.round(clamp(
+                source.jamBatchCount ?? fallback.jamBatchCount ?? 5,
+                1,
+                10
+            )),
+            jamBatchRestSeconds: clamp(
+                source.jamBatchRestSeconds ?? fallback.jamBatchRestSeconds ?? 60,
+                30,
+                180
+            )
+        };
+    }
+
+    function calculateLightningStrength(speedKmh, settings) {
+        const cfg = normalizeLightningSettings(settings, settings);
+        const speed = Number(speedKmh);
+        if (!Number.isFinite(speed) || speed < cfg.startSpeed || speed >= 60) return 0;
+
+        if (speed <= cfg.fullSpeed) {
+            const range = Math.max(1, cfg.fullSpeed - cfg.startSpeed);
+            const ratio = clamp((speed - cfg.startSpeed) / range, 0, 1);
+            return Math.round(cfg.startStrength + (cfg.maxStrength - cfg.startStrength) * ratio);
+        }
+
+        if (speed <= 55) return Math.round(cfg.maxStrength);
+
+        // 55 km/h 后不再奖励继续提速，而是逐步回落到起始强度；到 60 km/h 由状态机硬停止。
+        const protectionRatio = clamp((speed - 55) / 5, 0, 1);
+        return Math.round(cfg.maxStrength - (cfg.maxStrength - cfg.startStrength) * protectionRatio);
+    }
+
+    function createLightningState(now = Date.now()) {
+        const startedAt = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+        return {
+            mode: "waiting_speed",
+            modeSince: startedAt,
+            sessionStartedAt: startedAt,
+            startCandidateSince: null,
+            lowSince: null,
+            overspeedRecoverySince: null,
+            overspeedLatched: false,
+            lastSpeedKmh: null
+        };
+    }
+
+    function advanceLightningState(currentState, rawSettings, sample, now = Date.now()) {
+        const cfg = normalizeLightningSettings(rawSettings, rawSettings);
+        const currentTime = Number(now);
+        const state = {
+            ...createLightningState(currentTime),
+            ...(currentState || {})
+        };
+        const previousMode = state.mode;
+        const speed = Number(sample?.speedKmh);
+        const sampleAt = Number(sample?.timestamp);
+        const sampleValid = sample?.valid === true && Number.isFinite(speed) && speed >= 0 && speed <= 250 &&
+            isTimestampFresh(sampleAt, 3000, currentTime);
+        let nextMode = previousMode;
+        let shouldStop = false;
+
+        if (currentTime - state.sessionStartedAt >= cfg.sessionMinutes * 60_000) {
+            nextMode = "session_complete";
+            shouldStop = previousMode !== "session_complete";
+        } else if (!sampleValid) {
+            nextMode = "gps_blocked";
+            shouldStop = previousMode !== "gps_blocked";
+            state.startCandidateSince = null;
+            state.lowSince = null;
+            state.overspeedRecoverySince = null;
+        } else if (speed >= 60) {
+            nextMode = "overspeed";
+            shouldStop = previousMode !== "overspeed";
+            state.overspeedLatched = true;
+            state.startCandidateSince = null;
+            state.lowSince = null;
+            state.overspeedRecoverySince = null;
+        } else if (state.overspeedLatched) {
+            nextMode = "overspeed";
+            if (state.overspeedRecoverySince === null) {
+                state.overspeedRecoverySince = currentTime;
+            }
+            const recoveryMs = cfg.overspeedRecoverySeconds * 1000;
+            if (currentTime - state.overspeedRecoverySince >= recoveryMs) {
+                state.overspeedLatched = false;
+                state.overspeedRecoverySince = null;
+                state.lowSince = speed < cfg.startSpeed ? currentTime : null;
+                state.startCandidateSince = speed >= cfg.startSpeed ? currentTime - 2000 : null;
+                nextMode = speed >= cfg.startSpeed ? "driving" : "low_pending";
+            }
+        } else {
+            // 启动线本身也是停止线：只要低于用户设定值就先停，不能用迟滞区继续带电。
+            // 恢复时再额外要求高出 1 km/h 并稳定 2 秒，避免 GPS 在边界附近抖动反复切换。
+            const enterLowSpeed = cfg.startSpeed;
+            const resumeSpeed = Math.min(59.9, cfg.startSpeed + 1);
+            const isLowMode = ["low_pending", "low_paused", "jam"].includes(previousMode);
+            const isWaitingMode = ["waiting_speed", "gps_blocked", "session_complete"].includes(previousMode);
+
+            if (previousMode === "driving" && speed < enterLowSpeed) {
+                state.lowSince = currentTime;
+                state.startCandidateSince = null;
+                nextMode = "low_pending";
+                shouldStop = true;
+            } else if (previousMode === "driving") {
+                nextMode = "driving";
+            } else if (isLowMode) {
+                if (speed >= resumeSpeed) {
+                    if (state.startCandidateSince === null) state.startCandidateSince = currentTime;
+                    if (previousMode === "jam") {
+                        // 一旦载具恢复移动，堵车输出立刻停；稳定确认期间保持无输出，不能等两秒后才停。
+                        nextMode = "low_pending";
+                        shouldStop = true;
+                    }
+                    if (currentTime - state.startCandidateSince >= 2000) {
+                        nextMode = "driving";
+                        state.lowSince = null;
+                        state.startCandidateSince = null;
+                    }
+                } else {
+                    state.startCandidateSince = null;
+                    if (state.lowSince === null) state.lowSince = currentTime;
+                    const lowElapsed = currentTime - state.lowSince;
+                    if (cfg.jamEnabled && lowElapsed >= cfg.jamEntrySeconds * 1000) {
+                        nextMode = "jam";
+                    } else if (lowElapsed >= 5000) {
+                        nextMode = "low_paused";
+                    } else {
+                        nextMode = "low_pending";
+                    }
+                }
+            } else if (isWaitingMode) {
+                if (speed >= cfg.startSpeed) {
+                    if (state.startCandidateSince === null) state.startCandidateSince = currentTime;
+                    if (currentTime - state.startCandidateSince >= 2000) {
+                        nextMode = "driving";
+                        state.startCandidateSince = null;
+                    } else {
+                        nextMode = "waiting_speed";
+                    }
+                } else {
+                    state.startCandidateSince = null;
+                    nextMode = "waiting_speed";
+                }
+            }
+        }
+
+        if (nextMode !== previousMode) state.modeSince = currentTime;
+        state.mode = nextMode;
+        state.lastSpeedKmh = sampleValid ? speed : null;
+
+        return {
+            state,
+            shouldStop,
+            strength: nextMode === "driving" ? calculateLightningStrength(speed, cfg) : 0,
+            sampleValid
+        };
+    }
+
     function validateDice(dices, label) {
         const valid = Array.isArray(dices) && dices.length === 3 &&
             dices.every((value) => Number.isInteger(value) && value >= 1 && value <= 6);
@@ -267,6 +497,12 @@
         }
         if (id.endsWith("shock-seconds") || id.endsWith("single-seconds") || id.endsWith("gap-seconds")) {
             return `${safeValue.toFixed(1)}s`;
+        }
+        if (id.startsWith("lightning-") && id.endsWith("seconds")) {
+            return `${safeValue.toFixed(1)}s`;
+        }
+        if (id === "lightning-start-speed" || id === "lightning-full-speed") {
+            return `${safeValue} km/h`;
         }
         if (["angle-target-offset", "angle-tolerance", "angle-ramp-degrees"].includes(id)) {
             return `${safeValue}°`;
@@ -422,8 +658,12 @@
         getTripleFace,
         hasSafeOutputLimits,
         isTimestampFresh,
+        advanceLightningState,
         applyStandaloneShockDurationFloor,
+        calculateLightningStrength,
+        createLightningState,
         migrateLegacyOutputSettings,
+        normalizeLightningSettings,
         resolveStoredGlobalOutputSettings,
         restoreSettings,
         shuffleSlotReels

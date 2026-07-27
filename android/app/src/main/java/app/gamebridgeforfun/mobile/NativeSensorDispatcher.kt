@@ -34,6 +34,12 @@ class NativeSensorDispatcher(
         linearAccelerationSensor ?: accelerometerSensor
     }
 
+    val hasOrientationSensor: Boolean
+        get() = rotationSensor != null || accelerometerSensor != null
+
+    val hasMotionSensor: Boolean
+        get() = motionSensor != null
+
     private val rotationMatrix = FloatArray(9)
     private val adjustedRotationMatrix = FloatArray(9)
     private val orientation = FloatArray(3)
