@@ -8,9 +8,6 @@ const logic = require("../static/game-logic.js");
 
 const DEFAULTS = {
     shake: {
-        outputMode: "a",
-        bStrengthMode: "percent",
-        bStrengthPercent: 50,
         strengthMin: 20,
         mode: "radius"
     },
@@ -23,6 +20,12 @@ const DEFAULTS = {
     }
 };
 
+const DEFAULT_GLOBAL_OUTPUT = {
+    outputMode: "a",
+    bStrengthMode: "percent",
+    bStrengthPercent: 50
+};
+
 function sequenceRandom(values) {
     let index = 0;
     return () => values[index++] ?? 0.5;
@@ -32,8 +35,7 @@ test("本地设置只恢复已知且类型正确的字段", () => {
     const restored = logic.restoreSettings(DEFAULTS, {
         shake: {
             strengthMin: 35,
-            outputMode: "ab",
-            bStrengthPercent: Number.POSITIVE_INFINITY,
+            mode: "gap",
             unknown: "ignored"
         },
         dice: {
@@ -45,13 +47,100 @@ test("本地设置只恢复已知且类型正确的字段", () => {
     });
 
     assert.equal(restored.shake.strengthMin, 35);
-    assert.equal(restored.shake.outputMode, "ab");
-    assert.equal(restored.shake.bStrengthPercent, 50);
+    assert.equal(restored.shake.mode, "gap");
     assert.equal(restored.dice.manualRoll, false);
     assert.equal(restored.dice.opponentDifficulty, "normal");
     assert.equal(restored.dice.gapSeconds, 0.5);
     assert.equal(Object.hasOwn(restored.shake, "unknown"), false);
     assert.equal(Object.hasOwn(restored, "injectedGame"), false);
+});
+
+test("已确认且合法的全局输出设置可以恢复", () => {
+    const restored = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
+        outputMode: "ab",
+        bStrengthMode: "same",
+        bStrengthPercent: 80,
+        confirmed: true
+    });
+
+    assert.deepEqual(restored, {
+        settings: {
+            outputMode: "ab",
+            bStrengthMode: "same",
+            bStrengthPercent: 80
+        },
+        requiresConfirmation: false
+    });
+});
+
+test("损坏或未确认的全局输出设置必须暂停正式输出", () => {
+    const unconfirmed = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
+        outputMode: "b",
+        bStrengthMode: "percent",
+        bStrengthPercent: 40,
+        confirmed: false
+    });
+    const damaged = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
+        outputMode: "unknown",
+        bStrengthMode: "same",
+        bStrengthPercent: Number.POSITIVE_INFINITY,
+        confirmed: true
+    });
+
+    assert.equal(unconfirmed.requiresConfirmation, true);
+    assert.equal(unconfirmed.settings.outputMode, "b");
+    assert.equal(damaged.requiresConfirmation, true);
+    assert.deepEqual(damaged.settings, DEFAULT_GLOBAL_OUTPUT);
+});
+
+test("旧版四个游戏通道一致时自动迁移为一份全局设置", () => {
+    const legacyOutput = {
+        outputMode: "ab",
+        bStrengthMode: "percent",
+        bStrengthPercent: 60
+    };
+    const migrated = logic.migrateLegacyOutputSettings(
+        DEFAULT_GLOBAL_OUTPUT,
+        {
+            shake: { ...legacyOutput, strengthMin: 20 },
+            angle: { ...legacyOutput, strengthMin: 15 },
+            dice: { ...legacyOutput, strength: 20 },
+            slot: { ...legacyOutput, strengthMax: 85 }
+        },
+        ["shake", "angle", "dice", "slot"]
+    );
+
+    assert.deepEqual(migrated, {
+        settings: legacyOutput,
+        requiresConfirmation: false
+    });
+});
+
+test("旧版游戏通道互相冲突时回到安全默认并要求确认", () => {
+    const migrated = logic.migrateLegacyOutputSettings(
+        DEFAULT_GLOBAL_OUTPUT,
+        {
+            shake: { outputMode: "a", bStrengthMode: "percent", bStrengthPercent: 50 },
+            angle: { outputMode: "a", bStrengthMode: "percent", bStrengthPercent: 50 },
+            dice: { outputMode: "b", bStrengthMode: "percent", bStrengthPercent: 50 },
+            slot: { outputMode: "a", bStrengthMode: "percent", bStrengthPercent: 50 }
+        },
+        ["shake", "angle", "dice", "slot"]
+    );
+
+    assert.deepEqual(migrated.settings, DEFAULT_GLOBAL_OUTPUT);
+    assert.equal(migrated.requiresConfirmation, true);
+});
+
+test("没有旧版通道字段的新用户直接采用安全默认", () => {
+    const migrated = logic.migrateLegacyOutputSettings(
+        DEFAULT_GLOBAL_OUTPUT,
+        { shake: { strengthMin: 20 }, dice: { strength: 20 } },
+        ["shake", "angle", "dice", "slot"]
+    );
+
+    assert.deepEqual(migrated.settings, DEFAULT_GLOBAL_OUTPUT);
+    assert.equal(migrated.requiresConfirmation, false);
 });
 
 test("空值、数组或损坏根配置会完整回退默认值", () => {

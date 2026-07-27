@@ -163,6 +163,58 @@
             margin-bottom: 15px;
         }
 
+        .global-output-disclosure {
+            margin-bottom: 15px;
+        }
+
+        .global-output-disclosure > summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .global-output-disclosure > summary small {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .global-output-message {
+            min-height: 21px;
+            margin-top: 10px;
+        }
+
+        .settings-global-output {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 13px 15px;
+            margin-bottom: 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-medium);
+            background: rgba(3, 7, 15, 0.48);
+        }
+
+        .settings-global-output span,
+        .settings-global-output strong {
+            display: block;
+        }
+
+        .settings-global-output span {
+            color: var(--text-muted);
+            font-size: 0.82rem;
+        }
+
+        .settings-global-output strong {
+            margin-top: 3px;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+        }
+
         .test-disclosure-help {
             margin-bottom: 12px;
         }
@@ -815,6 +867,78 @@
                 <p id="mobile-test-result" class="sub-text readiness-result" role="status" aria-live="polite">尚未自检；正式开始前建议先确认连接。</p>
             </section>
 
+            <details id="global-output-settings" class="disclosure-panel global-output-disclosure">
+                <summary>
+                    <span>全局输出设置</span>
+                    <small id="global-output-summary">游戏默认 · 只用 A</small>
+                </summary>
+                <div class="disclosure-content">
+                    <div id="global-output-confirmation-warning" class="inline-warning" role="alert" hidden>
+                        检测到旧版各游戏的通道设置互相冲突。为防止输出到错误通道，正式输出已暂停；请核对下方设置和实际接线后手动确认。
+                    </div>
+                    <div class="settings-stack settings-stack-flush">
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">输出感觉</label>
+                            <select id="global-waveform" onchange="saveWaveformSetting()">
+                                <option value="game_default">游戏默认（推荐）</option>
+                                <option value="random">随机（按本次时长）</option>
+                                <optgroup label="经典波形">
+                                    <option value="extrusion">挤压</option>
+                                    <option value="bubble">气泡</option>
+                                    <option value="rhythm">律动</option>
+                                    <option value="air_waves">电波</option>
+                                    <option value="dance">舞步</option>
+                                    <option value="climb">攀登</option>
+                                    <option value="shade">树荫</option>
+                                    <option value="pulse">脉冲</option>
+                                    <option value="breathing">呼吸</option>
+                                    <option value="tide">潮汐</option>
+                                    <option value="pulsating">连击</option>
+                                    <option value="quick_rub">快速按捏</option>
+                                    <option value="gradual_rub">按捏渐强</option>
+                                    <option value="heartbeat">心跳节奏</option>
+                                    <option value="compress">压缩</option>
+                                    <option value="rhythmic">节奏步伐</option>
+                                </optgroup>
+                            </select>
+                            <p class="field-help">所有玩法共用。“游戏默认”短时间立即有感；“随机”会按本次时长避开不合适的慢启动波形。</p>
+                        </div>
+
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
+                            <select id="global-output-mode" onchange="updateBChannelSettingsVisibility(); saveGlobalOutputSettings()">
+                                <option value="a">只用 A</option>
+                                <option value="b">只用 B</option>
+                                <option value="ab">A+B 同时</option>
+                            </select>
+                            <p class="field-help">所有玩法共用。选择 B 或 A+B 前，请确认实际接线和可接受强度。</p>
+                        </div>
+
+                        <div id="global-b-settings">
+                            <div style="margin-bottom: 15px;">
+                                <label class="slider-label" style="margin-bottom: 5px;">B 通道强度</label>
+                                <select id="global-b-strength-mode" onchange="updateBChannelSettingsVisibility(); saveGlobalOutputSettings()">
+                                    <option value="percent">按比例降低</option>
+                                    <option value="same">跟 A 一样</option>
+                                </select>
+                                <p class="field-help">按比例降低更稳；跟 A 一样时，两路使用相同请求强度。</p>
+                            </div>
+
+                            <div id="global-b-percent-settings" class="slider-container">
+                                <div class="slider-label">
+                                    <span>B 强度比例</span>
+                                    <span id="val-global-b-strength-percent">50%</span>
+                                </div>
+                                <input type="range" id="global-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('global-b-strength-percent')">
+                                <p class="field-help">例如 A 请求强度 40、比例 50%，B 请求强度就是 20；设备限幅仍会再次降低实际输出。</p>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="global-output-confirm-button" type="button" class="full-width" onclick="confirmGlobalOutputSettings()" hidden>确认全局输出</button>
+                    <p id="global-output-message" class="sub-text global-output-message" role="status" aria-live="polite">波形和通道会应用到所有玩法。</p>
+                </div>
+            </details>
+
             <details class="disclosure-panel test-disclosure">
                 <summary>低强度通道试电</summary>
                 <div class="disclosure-content">
@@ -888,72 +1012,13 @@
                 <h2 id="settings-title" tabindex="-1" data-screen-heading>游戏设置</h2>
                 <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
 
-                <details id="common-output-settings" class="settings-group common-settings" data-default-open="true" open>
-                    <summary>
-                        <span>输出安全</span>
-                        <small id="common-output-summary">游戏默认 · 只用 A</small>
-                    </summary>
-                    <div class="settings-group-content">
-                    <div class="settings-stack settings-stack-flush">
-                        <div>
-                            <label class="slider-label" style="margin-bottom: 5px;">输出感觉</label>
-                            <select id="common-waveform" onchange="saveWaveformSetting()">
-                                <option value="game_default">游戏默认（推荐）</option>
-                                <option value="random">随机（按本次时长）</option>
-                                <optgroup label="经典波形">
-                                    <option value="extrusion">挤压</option>
-                                    <option value="bubble">气泡</option>
-                                    <option value="rhythm">律动</option>
-                                    <option value="air_waves">电波</option>
-                                    <option value="dance">舞步</option>
-                                    <option value="climb">攀登</option>
-                                    <option value="shade">树荫</option>
-                                    <option value="pulse">脉冲</option>
-                                    <option value="breathing">呼吸</option>
-                                    <option value="tide">潮汐</option>
-                                    <option value="pulsating">连击</option>
-                                    <option value="quick_rub">快速按捏</option>
-                                    <option value="gradual_rub">按捏渐强</option>
-                                    <option value="heartbeat">心跳节奏</option>
-                                    <option value="compress">压缩</option>
-                                    <option value="rhythmic">节奏步伐</option>
-                                </optgroup>
-                            </select>
-                            <p class="field-help">“游戏默认”短时间也会立即有感；“随机”每次只选一种，并自动避开不适合短时长的波形。</p>
-                        </div>
-
-                        <div>
-                            <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
-                            <select id="common-output-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
-                                <option value="a">只用 A</option>
-                                <option value="b">只用 B</option>
-                                <option value="ab">A+B 同时</option>
-                            </select>
-                            <p class="field-help">默认只用 A。选择 B 或 A+B 前，请确认 B 通道确实接好了，并且强度是你能接受的。</p>
-                        </div>
-
-                        <div id="common-b-settings">
-                            <div style="margin-bottom: 15px;">
-                                <label class="slider-label" style="margin-bottom: 5px;">B 通道强度</label>
-                                <select id="common-b-strength-mode" onchange="updateBChannelSettingsVisibility(); saveSelectedSettings(true)">
-                                    <option value="percent">按比例降低</option>
-                                    <option value="same">跟 A 一样</option>
-                                </select>
-                                <p class="field-help">选“按比例降低”更稳；选“跟 A 一样”时，A 多少强度，B 就多少强度。</p>
-                            </div>
-
-                            <div id="common-b-percent-settings" class="slider-container">
-                                <div class="slider-label">
-                                    <span>B 强度比例</span>
-                                    <span id="val-common-b-strength-percent">50%</span>
-                                </div>
-                                <input type="range" id="common-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('common-b-strength-percent')">
-                                <p class="field-help">只有选择“按比例降低”时使用。比如 A 是 40、比例 50%，B 就是 20。</p>
-                            </div>
-                        </div>
+                <div class="settings-global-output" role="group" aria-label="当前全局输出">
+                    <div>
+                        <span>当前全局输出</span>
+                        <strong id="settings-global-output-summary">游戏默认 · 只用 A</strong>
                     </div>
-                    </div>
-                </details>
+                    <button type="button" onclick="showGlobalOutputSettings()">修改全局设置</button>
+                </div>
 
                 <div id="settings-shake" class="setting-panel">
                     <details class="settings-group" data-game="shake" data-default-open="true" open>

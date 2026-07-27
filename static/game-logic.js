@@ -72,6 +72,86 @@
         return restored;
     }
 
+    function normalizeOutputSettings(defaultSettings, candidate) {
+        // 全局输出配置会直接决定实际接通哪一路，损坏缓存不能靠“猜”来恢复。
+        const normalized = { ...defaultSettings };
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+            return { settings: normalized, valid: false };
+        }
+
+        const outputMode = candidate.outputMode;
+        const bStrengthMode = candidate.bStrengthMode;
+        const bStrengthPercent = candidate.bStrengthPercent;
+        const valid = ALLOWED_SETTING_VALUES.outputMode.has(outputMode) &&
+            ALLOWED_SETTING_VALUES.bStrengthMode.has(bStrengthMode) &&
+            typeof bStrengthPercent === "number" && Number.isFinite(bStrengthPercent) &&
+            bStrengthPercent >= 10 && bStrengthPercent <= 100;
+
+        if (!valid) {
+            return { settings: normalized, valid: false };
+        }
+
+        normalized.outputMode = outputMode;
+        normalized.bStrengthMode = bStrengthMode;
+        normalized.bStrengthPercent = bStrengthPercent;
+        return { settings: normalized, valid: true };
+    }
+
+    function resolveStoredGlobalOutputSettings(defaultSettings, savedSettings) {
+        const normalized = normalizeOutputSettings(defaultSettings, savedSettings);
+        return {
+            settings: normalized.settings,
+            // 明确保存过 confirmed=true 且三个输出字段都合法，才允许正式输出。
+            requiresConfirmation: !normalized.valid || savedSettings?.confirmed !== true
+        };
+    }
+
+    function migrateLegacyOutputSettings(defaultSettings, savedGameSettings, gameNames) {
+        const names = Array.isArray(gameNames) ? gameNames : [];
+        const savedRootValid = savedGameSettings && typeof savedGameSettings === "object" &&
+            !Array.isArray(savedGameSettings);
+        if (!savedRootValid || names.length === 0) {
+            return {
+                settings: { ...defaultSettings },
+                requiresConfirmation: !savedRootValid
+            };
+        }
+
+        const outputKeys = ["outputMode", "bStrengthMode", "bStrengthPercent"];
+        let foundLegacyOutput = false;
+        let allCandidatesValid = true;
+        const candidates = names.map((gameName) => {
+            const savedGame = savedGameSettings[gameName];
+            const hasLegacyOutput = savedGame && typeof savedGame === "object" && !Array.isArray(savedGame) &&
+                outputKeys.some((key) => Object.prototype.hasOwnProperty.call(savedGame, key));
+
+            if (!hasLegacyOutput) {
+                return { ...defaultSettings };
+            }
+
+            foundLegacyOutput = true;
+            const normalized = normalizeOutputSettings(defaultSettings, savedGame);
+            allCandidatesValid = allCandidatesValid && normalized.valid;
+            return normalized.settings;
+        });
+
+        if (!foundLegacyOutput) {
+            return { settings: { ...defaultSettings }, requiresConfirmation: false };
+        }
+
+        const first = candidates[0];
+        const allEqual = candidates.every((candidate) =>
+            outputKeys.every((key) => candidate[key] === first[key])
+        );
+
+        if (allCandidatesValid && allEqual) {
+            return { settings: { ...first }, requiresConfirmation: false };
+        }
+
+        // 旧版四个游戏若接线选择互相冲突，宁可暂停输出，也不能擅自选择可能接错人的通道。
+        return { settings: { ...defaultSettings }, requiresConfirmation: true };
+    }
+
     function applyStandaloneShockDurationFloor(settings) {
         // 单次结算型惩罚低于 1 秒时真机体感不稳定；旧版缓存也必须在读取时自动迁移。
         // 骰子间隔、角子机休息以及持续型玩法的内部控制帧不是单次惩罚，不在这里修改。
@@ -343,6 +423,8 @@
         hasSafeOutputLimits,
         isTimestampFresh,
         applyStandaloneShockDurationFloor,
+        migrateLegacyOutputSettings,
+        resolveStoredGlobalOutputSettings,
         restoreSettings,
         shuffleSlotReels
     };

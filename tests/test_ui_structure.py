@@ -66,13 +66,18 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn('id="screen-settings" class="screen" hidden', self.game_text)
         self.assertIn('id="screen-play" class="screen" hidden', self.game_text)
 
-    def test_waveform_choice_is_one_global_control_and_test_uses_safe_default(self):
-        """新增感觉不能散落到四个游戏；试电也必须显式走立即有感的默认波形。"""
+    def test_output_choice_is_one_global_control_and_test_uses_safe_default(self):
+        """波形与通道只能在选择页配置一次；安全试电继续使用明确的独立通道。"""
 
         waveform_selects = [
             attrs
             for tag, attrs in self.game.elements
-            if tag == "select" and attrs.get("id") == "common-waveform"
+            if tag == "select" and attrs.get("id") == "global-waveform"
+        ]
+        output_mode_selects = [
+            attrs
+            for tag, attrs in self.game.elements
+            if tag == "select" and attrs.get("id") == "global-output-mode"
         ]
         waveform_values = {
             attrs.get("value")
@@ -81,6 +86,14 @@ class InterfaceStructureTests(unittest.TestCase):
         }
 
         self.assertEqual(len(waveform_selects), 1)
+        self.assertEqual(len(output_mode_selects), 1)
+        self.assertLess(
+            self.game_text.index('id="global-output-settings"'),
+            self.game_text.index('id="screen-settings"')
+        )
+        self.assertNotIn('id="common-output-settings"', self.game_text)
+        self.assertIn('id="settings-global-output-summary"', self.game_text)
+        self.assertIn('onclick="showGlobalOutputSettings()"', self.game_text)
         self.assertIn("game_default", waveform_values)
         self.assertIn("random", waveform_values)
         self.assertIn("breathing", waveform_values)
@@ -102,6 +115,37 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertEqual(len(console_strength), 1)
         self.assertEqual(console_strength[0].get("value"), "15")
         self.assertEqual(console_strength[0].get("max"), "30")
+
+    def test_all_games_send_one_confirmed_global_output_config(self):
+        """四个游戏不得再保存各自通道；冲突旧配置未确认前必须阻止正式输出。"""
+
+        defaults_start = self.game_script_text.index("const DEFAULT_SETTINGS = {")
+        defaults_end = self.game_script_text.index("const {", defaults_start)
+        defaults_body = self.game_script_text[defaults_start:defaults_end]
+        self.assertNotIn("outputMode", defaults_body)
+        self.assertNotIn("bStrengthMode", defaults_body)
+        self.assertNotIn("bStrengthPercent", defaults_body)
+
+        payload_start = self.game_script_text.index("function getOutputPayload() {")
+        payload_end = self.game_script_text.index("function sendConfiguredShock", payload_start)
+        payload_body = self.game_script_text[payload_start:payload_end]
+        self.assertIn("globalOutputSettings.outputMode", payload_body)
+        self.assertNotIn("gameSettings[activeGame]", payload_body)
+
+        readiness_start = self.game_script_text.index("function isConfiguredOutputReady() {")
+        readiness_end = self.game_script_text.index("function isOutputModeReady", readiness_start)
+        self.assertIn(
+            "if (globalOutputRequiresConfirmation) return false;",
+            self.game_script_text[readiness_start:readiness_end]
+        )
+        start_game = self.game_script_text.index("async function startConfiguredGame() {")
+        setup_game = self.game_script_text.index("function setupPlayScreen", start_game)
+        self.assertIn(
+            "if (globalOutputRequiresConfirmation) {",
+            self.game_script_text[start_game:setup_game]
+        )
+        self.assertIn("正式输出已暂停", self.game_text)
+        self.assertIn("确认全局输出", self.game_text)
 
     def test_standalone_game_shocks_start_at_one_second(self):
         """用户能感知为一次惩罚的输出不得再允许 0.x 秒，内部持续帧和安全试电除外。"""

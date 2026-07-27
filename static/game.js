@@ -32,6 +32,7 @@ let activeGame = null;
 // 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
+const GLOBAL_OUTPUT_STORAGE_KEY = "game_bridge_for_fun_global_output_v1";
 const DEFAULT_WAVEFORM = "game_default";
 // 手机试电不再暴露额外强度控件；15 来自郊狼 2.0 真机可感知结果，时长仍保持 0.3 秒。
 const MOBILE_TEST_STRENGTH = 15;
@@ -62,7 +63,6 @@ const DEFAULT_OUTPUT_SETTINGS = {
 };
 const DEFAULT_SETTINGS = {
     shake: {
-        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 20,
         strengthMax: 60,
         mode: "radius",
@@ -73,7 +73,6 @@ const DEFAULT_SETTINGS = {
         restMs: 250
     },
     angle: {
-        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 15,
         strengthMax: 70,
         targetOffset: 0,
@@ -83,7 +82,6 @@ const DEFAULT_SETTINGS = {
         restMs: 250
     },
     dice: {
-        ...DEFAULT_OUTPUT_SETTINGS,
         strength: 20,
         singleSeconds: 2.0,
         gapSeconds: 0.5,
@@ -94,7 +92,6 @@ const DEFAULT_SETTINGS = {
         manualRoll: true
     },
     slot: {
-        ...DEFAULT_OUTPUT_SETTINGS,
         strengthMin: 20,
         strengthMax: 85,
         shockSeconds: 2.0,
@@ -127,6 +124,8 @@ const {
     hasSafeOutputLimits,
     isTimestampFresh,
     applyStandaloneShockDurationFloor,
+    migrateLegacyOutputSettings,
+    resolveStoredGlobalOutputSettings,
     restoreSettings
 } = window.GameBridgeForFunLogic;
 
@@ -178,6 +177,9 @@ const GAME_META = {
 };
 
 let gameSettings = loadSettings();
+const loadedGlobalOutput = loadGlobalOutputSettings();
+let globalOutputSettings = loadedGlobalOutput.settings;
+let globalOutputRequiresConfirmation = loadedGlobalOutput.requiresConfirmation;
 let selectedWaveform = loadWaveformSetting();
 
 // --- 2. 传感器、画布与游戏运行状态 ---
@@ -302,6 +304,47 @@ function persistSettings() {
     }
 }
 
+function loadGlobalOutputSettings() {
+    try {
+        const stored = localStorage.getItem(GLOBAL_OUTPUT_STORAGE_KEY);
+        if (stored) {
+            return resolveStoredGlobalOutputSettings(DEFAULT_OUTPUT_SETTINGS, JSON.parse(stored));
+        }
+
+        // 旧版把通道设置分别存进各个游戏。首次升级时只在所有旧设置完全一致时自动继承，
+        // 任何冲突都会进入待确认状态，防止静默切到错误通道。
+        const legacyRaw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const legacySettings = legacyRaw ? JSON.parse(legacyRaw) : {};
+        const migrated = migrateLegacyOutputSettings(
+            DEFAULT_OUTPUT_SETTINGS,
+            legacySettings,
+            Object.keys(DEFAULT_SETTINGS)
+        );
+        localStorage.setItem(GLOBAL_OUTPUT_STORAGE_KEY, JSON.stringify({
+            ...migrated.settings,
+            confirmed: !migrated.requiresConfirmation
+        }));
+        return migrated;
+    } catch (error) {
+        console.warn("读取全局输出设置失败，正式输出已暂停:", error);
+        return {
+            settings: { ...DEFAULT_OUTPUT_SETTINGS },
+            requiresConfirmation: true
+        };
+    }
+}
+
+function persistGlobalOutputSettings() {
+    try {
+        localStorage.setItem(GLOBAL_OUTPUT_STORAGE_KEY, JSON.stringify({
+            ...globalOutputSettings,
+            confirmed: !globalOutputRequiresConfirmation
+        }));
+    } catch (error) {
+        console.warn("保存全局输出设置失败:", error);
+    }
+}
+
 function normalizeWaveformKey(value) {
     // 本地缓存和页面表单都不可信，只允许后端同样认识的固定选项。
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(WAVEFORM_LABELS, value)
@@ -327,14 +370,12 @@ function persistWaveformSetting() {
 }
 
 function saveWaveformSetting() {
-    const selector = $("common-waveform");
+    const selector = $("global-waveform");
     selectedWaveform = normalizeWaveformKey(selector?.value);
     if (selector) selector.value = selectedWaveform;
     persistWaveformSetting();
-
-    const cfg = gameSettings[selectedGame] || DEFAULT_OUTPUT_SETTINGS;
-    setText("common-output-summary", formatCommonOutputSummary(cfg));
-    setText("settings-message", `输出感觉已设为“${formatWaveformLabel(selectedWaveform)}”，所有玩法共用`);
+    refreshGlobalOutputPresentation();
+    setText("global-output-message", `输出感觉已设为“${formatWaveformLabel(selectedWaveform)}”，所有玩法共用。`);
 }
 
 // --- 3. WebSocket 网络连接与心跳延迟监控 ---
@@ -487,11 +528,11 @@ function formatHardwareReading(value, appConnected) {
 }
 
 function getConfiguredOutputMode() {
-    const cfg = gameSettings[activeGame] || gameSettings[selectedGame] || DEFAULT_OUTPUT_SETTINGS;
-    return cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
+    return globalOutputSettings.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
 }
 
 function isConfiguredOutputReady() {
+    if (globalOutputRequiresConfirmation) return false;
     if (!latestTechState || !latestDeviceConnected) return false;
 
     const mode = getConfiguredOutputMode();
@@ -506,6 +547,7 @@ function isOutputModeReady(mode) {
 function getOutputBlockReason() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return "后台未连接";
     if (!latestDeviceConnected) return latestTechState?.device_status_message || "郊狼硬件未就绪";
+    if (globalOutputRequiresConfirmation) return "全局输出设置尚未确认";
     if (!isConfiguredOutputReady()) return "所选通道限幅未读取或已设为 0";
     return "";
 }
@@ -566,6 +608,11 @@ function refreshGlobalSafetyStatus() {
         return;
     }
 
+    if (globalOutputRequiresConfirmation) {
+        updateGlobalSafetyStatus("请先确认全局输出通道", false);
+        return;
+    }
+
     const mode = getConfiguredOutputMode();
     const modeLabel = mode === "ab" ? "A+B" : mode.toUpperCase();
     if (!isOutputModeReady(mode)) {
@@ -603,7 +650,9 @@ function runMobileSelfCheck() {
     ];
     const outputReady = isConfiguredOutputReady();
     if (!outputReady) {
-        parts.push("所选通道尚未满足输出条件");
+        parts.push(globalOutputRequiresConfirmation
+            ? "全局输出通道尚未确认"
+            : "所选通道尚未满足输出条件");
     }
     setMobileTestResult(
         `自检结果：${parts.join("；")}`,
@@ -1054,7 +1103,7 @@ function openGameSettings(gameName) {
 }
 
 function resetSettingsDisclosureState(gameName) {
-    // 每次进入设置只展开当前玩法的基础分组，高级规则和通道细节保持折叠。
+    // 每次进入设置只展开当前玩法的基础分组，高级规则保持折叠。
     document.querySelectorAll("#screen-settings details.settings-group").forEach((group) => {
         const groupGame = group.dataset.game || "common";
         const shouldOpen = groupGame === gameName && group.dataset.defaultOpen === "true";
@@ -1122,26 +1171,48 @@ function populateSettingsForm(gameName) {
             ? cfg.pressureAfterPunish
             : DEFAULT_SETTINGS.slot.pressureAfterPunish;
     }
-
-    populateOutputSettings(cfg);
 }
 
-function populateOutputSettings(cfg) {
-    if (!$("common-output-mode")) return;
+function populateGlobalOutputForm() {
+    if (!$("global-output-mode")) return;
 
-    $("common-output-mode").value = cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
-    $("common-waveform").value = selectedWaveform;
-    $("common-b-strength-mode").value = cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
-    setRangeValue("common-b-strength-percent", cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
+    $("global-output-mode").value = globalOutputSettings.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
+    $("global-waveform").value = selectedWaveform;
+    $("global-b-strength-mode").value = globalOutputSettings.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
+    setRangeValue("global-b-strength-percent", globalOutputSettings.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
     updateBChannelSettingsVisibility();
-    setText("common-output-summary", formatCommonOutputSummary(cfg));
+    refreshGlobalOutputPresentation();
+}
+
+function refreshGlobalOutputPresentation() {
+    const summary = formatGlobalOutputSummary();
+    setText("global-output-summary", summary);
+    setText("settings-global-output-summary", summary);
+
+    const warning = $("global-output-confirmation-warning");
+    const confirmButton = $("global-output-confirm-button");
+    if (warning) warning.hidden = !globalOutputRequiresConfirmation;
+    if (confirmButton) confirmButton.hidden = !globalOutputRequiresConfirmation;
+
+    const group = $("global-output-settings");
+    if (group && globalOutputRequiresConfirmation) {
+        group.open = true;
+    }
+}
+
+function showGlobalOutputSettings() {
+    showSelectScreen();
+    const group = $("global-output-settings");
+    if (!group) return;
+    group.open = true;
+    window.requestAnimationFrame(() => group.querySelector("summary")?.focus({ preventScroll: true }));
 }
 
 function updateBChannelSettingsVisibility() {
-    const mode = $("common-output-mode") ? $("common-output-mode").value : "a";
-    const strengthMode = $("common-b-strength-mode") ? $("common-b-strength-mode").value : "percent";
-    const bGroup = $("common-b-settings");
-    const percentGroup = $("common-b-percent-settings");
+    const mode = $("global-output-mode") ? $("global-output-mode").value : "a";
+    const strengthMode = $("global-b-strength-mode") ? $("global-b-strength-mode").value : "percent";
+    const bGroup = $("global-b-settings");
+    const percentGroup = $("global-b-percent-settings");
     if (bGroup) {
         bGroup.style.display = mode === "a" ? "none" : "block";
     }
@@ -1165,7 +1236,9 @@ function updateSettingValue(id, shouldSave = true) {
         control.setAttribute("aria-valuetext", formatSettingLabel(id, rawValue));
     }
 
-    if (shouldSave) {
+    if (shouldSave && id === "global-b-strength-percent") {
+        saveGlobalOutputSettings(true);
+    } else if (shouldSave) {
         saveSelectedSettings(true);
     }
 }
@@ -1188,19 +1261,42 @@ function resetSelectedSettings() {
     setText("settings-message", "已恢复当前玩法的默认设置");
 }
 
-function collectOutputSettings() {
-    const outputMode = ["a", "b", "ab"].includes($("common-output-mode").value)
-        ? $("common-output-mode").value
+function collectGlobalOutputSettings() {
+    const outputMode = ["a", "b", "ab"].includes($("global-output-mode").value)
+        ? $("global-output-mode").value
         : DEFAULT_OUTPUT_SETTINGS.outputMode;
-    const bStrengthMode = ["same", "percent"].includes($("common-b-strength-mode").value)
-        ? $("common-b-strength-mode").value
+    const bStrengthMode = ["same", "percent"].includes($("global-b-strength-mode").value)
+        ? $("global-b-strength-mode").value
         : DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
 
     return {
         outputMode,
         bStrengthMode,
-        bStrengthPercent: clamp(readNumber("common-b-strength-percent", 50), 10, 100)
+        bStrengthPercent: clamp(readNumber("global-b-strength-percent", 50), 10, 100)
     };
+}
+
+function saveGlobalOutputSettings(silent = false) {
+    globalOutputSettings = collectGlobalOutputSettings();
+    persistGlobalOutputSettings();
+    refreshGlobalOutputPresentation();
+    refreshGlobalSafetyStatus();
+
+    if (!silent) {
+        setText("global-output-message", globalOutputRequiresConfirmation
+            ? "设置已保存。请核对接线后点击“确认全局输出”。"
+            : "全局输出设置已保存，所有玩法立即共用。"
+        );
+    }
+}
+
+function confirmGlobalOutputSettings() {
+    globalOutputSettings = collectGlobalOutputSettings();
+    globalOutputRequiresConfirmation = false;
+    persistGlobalOutputSettings();
+    refreshGlobalOutputPresentation();
+    refreshGlobalSafetyStatus();
+    setText("global-output-message", "全局输出通道已确认，所有玩法立即共用。");
 }
 
 function saveSelectedSettings(silent = false) {
@@ -1209,7 +1305,6 @@ function saveSelectedSettings(silent = false) {
     const cfg = collectSettingsFromForm(selectedGame);
     gameSettings[selectedGame] = cfg;
     persistSettings();
-    setText("common-output-summary", formatCommonOutputSummary(cfg));
     refreshGlobalSafetyStatus();
 
     if (!silent) {
@@ -1222,7 +1317,6 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("shake-strength-min", 20), 0, 200);
         const maxStrength = clamp(readNumber("shake-strength-max", 60), 0, 200);
         return {
-            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             mode: $("shake-mode").value,
@@ -1238,7 +1332,6 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("angle-strength-min", 15), 0, 200);
         const maxStrength = clamp(readNumber("angle-strength-max", 70), 0, 200);
         return {
-            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             targetOffset: clamp(readNumber("angle-target-offset", 0), -45, 45),
@@ -1251,7 +1344,6 @@ function collectSettingsFromForm(gameName) {
 
     if (gameName === "dice") {
         return {
-            ...collectOutputSettings(),
             strength: clamp(readNumber("dice-strength", 20), 0, 200),
             singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 1.0, 5.0),
             gapSeconds: clamp(readNumber("dice-gap-seconds", 0.5), 0.2, 3.0),
@@ -1267,7 +1359,6 @@ function collectSettingsFromForm(gameName) {
         const minStrength = clamp(readNumber("slot-strength-min", 20), 0, 200);
         const maxStrength = clamp(readNumber("slot-strength-max", 85), 0, 200);
         return {
-            ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
             shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 1.0, 8.0),
@@ -1333,6 +1424,10 @@ async function calibrateCurrentPose(gameName) {
 
 async function startConfiguredGame() {
     if (!selectedGame) return;
+    if (globalOutputRequiresConfirmation) {
+        setText("settings-message", "全局输出通道尚未确认；请先点击“修改全局设置”并核对实际接线。");
+        return;
+    }
     if (sensorActionInProgress) {
         setText("settings-message", "感应器请求正在处理中，请稍等。");
         return;
@@ -1406,7 +1501,7 @@ function setupPlayScreen(gameName) {
     setText("summary-strength-max", GAME_META[gameName].secondaryValue(cfg));
     setText("summary-tolerance", GAME_META[gameName].toleranceLabel(cfg));
     setText("summary-trigger", GAME_META[gameName].triggerLabel(cfg));
-    setText("summary-output", formatOutputLabel(cfg));
+    setText("summary-output", formatOutputLabel(globalOutputSettings));
     setText("summary-waveform", formatWaveformLabel(selectedWaveform));
 
     $("game-viewport").style.display = gameName === "dice" || gameName === "slot" ? "none" : "block";
@@ -1532,11 +1627,10 @@ function sendPulse(strength, duration = 100, restMs = 250) {
 }
 
 function getOutputPayload() {
-    const cfg = gameSettings[activeGame] || DEFAULT_OUTPUT_SETTINGS;
     return {
-        outputMode: cfg.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode,
-        bStrengthMode: cfg.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode,
-        bStrengthPercent: cfg.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
+        outputMode: globalOutputSettings.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode,
+        bStrengthMode: globalOutputSettings.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode,
+        bStrengthPercent: globalOutputSettings.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
         waveform: selectedWaveform
     };
 }
@@ -1575,8 +1669,8 @@ function formatWaveformLabel(value) {
     return WAVEFORM_LABELS[key];
 }
 
-function formatCommonOutputSummary(cfg) {
-    return `${formatWaveformLabel(selectedWaveform)} · ${formatOutputLabel(cfg)}`;
+function formatGlobalOutputSummary() {
+    return `${formatWaveformLabel(selectedWaveform)} · ${formatOutputLabel(globalOutputSettings)}`;
 }
 
 function vibrateBriefly(duration) {
@@ -2490,12 +2584,17 @@ function enhanceControlAccessibility() {
     // 拖动期间只更新当前数值，松手后再统一显示经过边界归一化的结果，避免每一帧重建整张设置表单。
     document.querySelectorAll("input[type='range']").forEach((control) => {
         control.addEventListener("change", () => {
-            if (selectedGame) populateSettingsForm(selectedGame);
+            if (control.id === "global-b-strength-percent") {
+                populateGlobalOutputForm();
+            } else if (selectedGame) {
+                populateSettingsForm(selectedGame);
+            }
         });
     });
 }
 
 window.onload = () => {
+    populateGlobalOutputForm();
     populateSettingsForm("shake");
     populateSettingsForm("angle");
     populateSettingsForm("dice");
