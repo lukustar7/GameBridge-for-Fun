@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 小游戏操纵端</title>
-    <link rel="stylesheet" href="style.css?v=20260721-ui-navigation">
+    <link rel="stylesheet" href="style.css?v=20260727-ui-tabs">
     <style>
         body {
             /* 选择页和设置页内容较长，需要允许纵向滚动；真正的游玩区再单独锁触摸。 */
@@ -159,6 +159,49 @@
             margin-top: 10px;
         }
 
+        .mobile-section-tabs,
+        .settings-category-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
+            padding: 6px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-medium);
+            background: rgba(7, 10, 18, 0.88);
+        }
+
+        .mobile-section-tabs button,
+        .settings-category-tabs button {
+            min-width: 0;
+            min-height: 44px;
+            padding: 8px 9px;
+            border-color: transparent;
+            color: var(--text-muted);
+            background: transparent;
+            font-size: 0.84rem;
+        }
+
+        .mobile-section-tabs button[aria-selected="true"],
+        .settings-category-tabs button[aria-selected="true"] {
+            border-color: rgba(103, 232, 249, 0.38);
+            color: var(--text);
+            background: rgba(59, 130, 246, 0.18);
+            box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.10);
+        }
+
+        .selection-tab-panel {
+            min-width: 0;
+        }
+
+        .selection-setup-intro {
+            padding: 14px;
+            margin-bottom: 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-medium);
+            background: rgba(12, 19, 34, 0.80);
+        }
+
         .test-disclosure {
             margin-bottom: 15px;
         }
@@ -262,6 +305,12 @@
             background: rgba(3, 7, 15, 0.48);
         }
 
+        .settings-category-tabs {
+            grid-template-columns: repeat(var(--settings-tab-count, 2), minmax(0, 1fr));
+            margin-bottom: 14px;
+            scroll-margin-top: 82px;
+        }
+
         .settings-global-output span,
         .settings-global-output strong {
             display: block;
@@ -321,7 +370,7 @@
         }
 
         #screen-settings {
-            padding-bottom: 78px;
+            padding-bottom: 0;
         }
 
         .settings-group {
@@ -398,17 +447,14 @@
             margin-bottom: 0;
         }
 
-        .settings-sticky-actions {
-            position: fixed;
-            left: 50%;
-            bottom: max(8px, env(safe-area-inset-bottom));
-            z-index: 25;
+        .settings-actions {
+            position: static;
             display: grid;
             grid-template-columns: auto auto minmax(120px, 1fr);
             gap: 8px;
-            width: min(calc(100% - 28px), 1072px);
+            width: 100%;
             padding: 9px;
-            transform: translateX(-50%);
+            margin-bottom: 14px;
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-medium);
             background: rgba(7, 10, 18, 0.94);
@@ -416,11 +462,11 @@
             backdrop-filter: blur(18px);
         }
 
-        .settings-sticky-actions.two-actions {
+        .settings-actions.two-actions {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .settings-sticky-actions.two-actions .primary-button {
+        .settings-actions.two-actions .primary-button {
             grid-column: auto;
         }
 
@@ -956,11 +1002,11 @@
                 right: 30px;
             }
 
-            .settings-sticky-actions {
+            .settings-actions {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
-            .settings-sticky-actions.two-actions .primary-button {
+            .settings-actions.two-actions .primary-button {
                 grid-column: auto;
             }
 
@@ -1035,7 +1081,7 @@
         <div id="screen-select" class="screen active">
             <section class="notice-panel" style="margin-bottom: 16px;">
                 <h2 id="selection-title" class="selection-title" tabindex="-1" data-screen-heading>选择玩法</h2>
-                <p class="sub-text">先确认两项连接状态，再进入玩法设置。</p>
+                <p id="selection-context-text" class="sub-text">先选玩法；连接、权限和输出方式统一放在“开始前准备”。</p>
                 <div class="mobile-status-grid">
                     <div class="mobile-status-card">
                         <span>郊狼设备</span>
@@ -1046,9 +1092,20 @@
                         <strong id="tech-game-status">连接中</strong>
                     </div>
                 </div>
-                <button type="button" class="full-width" onclick="runMobileSelfCheck()">连接自检</button>
-                <p id="mobile-test-result" class="sub-text readiness-result" role="status" aria-live="polite">尚未自检；正式开始前建议先确认连接。</p>
             </section>
+
+            <!-- 选择页按任务拆分，默认直接展示玩法，避免准备工具把游戏入口挤出首屏。 -->
+            <nav id="selection-tabs" class="mobile-section-tabs" role="tablist" aria-label="玩法首页页面">
+                <button id="selection-tab-play" type="button" role="tab" data-tab-value="play" aria-controls="selection-panel-play" aria-selected="true" tabindex="0" onclick="switchSelectionTab('play')">选择玩法</button>
+                <button id="selection-tab-setup" type="button" role="tab" data-tab-value="setup" aria-controls="selection-panel-setup" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('setup')">开始前准备</button>
+                <button id="selection-tab-info" type="button" role="tab" data-tab-value="info" aria-controls="selection-panel-info" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('info')">说明与排障</button>
+            </nav>
+
+            <section id="selection-panel-setup" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-setup" hidden>
+            <div class="selection-setup-intro">
+                <button type="button" class="primary-button full-width" onclick="runMobileSelfCheck()">运行连接自检</button>
+                <p id="mobile-test-result" class="sub-text readiness-result" role="status" aria-live="polite">尚未自检；正式开始前建议先确认连接。</p>
+            </div>
 
             <details id="capability-center" class="disclosure-panel">
                 <summary>
@@ -1182,8 +1239,10 @@
                     </div>
                 </div>
             </details>
+            </section>
 
-            <!-- 游戏入口放在说明之前，避免用户每次都要滚过大段文档才能开始。 -->
+            <!-- 默认页只展示玩法入口，用户打开手机后不再先滚过权限和试电工具。 -->
+            <section id="selection-panel-play" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-play">
             <div class="game-select-container game-card-grid">
                 <button type="button" class="game-card" onclick="openGameSettings('shake')">
                     <span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span>
@@ -1206,7 +1265,9 @@
                     <span class="sub-text" style="display: block; margin-top: 5px;">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span>
                 </button>
             </div>
+            </section>
 
+            <section id="selection-panel-info" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-info" hidden>
             <div class="game-select-container">
                 <details class="disclosure-panel">
                     <summary>连接详情与排障数据</summary>
@@ -1240,11 +1301,12 @@
                     </div>
                 </details>
             </div>
+            </section>
         </div>
 
         <!-- 独立设置页：每个游戏一套参数，保存后进入游玩页。 -->
         <div id="screen-settings" class="screen" hidden>
-            <button class="back-btn" onclick="showSelectScreen()">返回列表</button>
+            <button class="back-btn" onclick="showSelectScreen()">返回玩法</button>
             <div class="panel">
                 <h2 id="settings-title" tabindex="-1" data-screen-heading>游戏设置</h2>
                 <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
@@ -1255,6 +1317,15 @@
                         <strong id="settings-global-output-summary">游戏默认 · 只用 A</strong>
                     </div>
                     <button type="button" onclick="showGlobalOutputSettings()">修改全局设置</button>
+                </div>
+
+                <nav id="settings-tabs" class="settings-category-tabs" role="tablist" aria-label="游戏设置分类"></nav>
+
+                <!-- 常用操作放在分类上方：沿用已保存参数时可直接开始，也不会覆盖下面的滑块。 -->
+                <div class="settings-actions" role="region" aria-label="设置操作">
+                    <button type="button" onclick="resetSelectedSettings()">恢复默认</button>
+                    <button id="settings-calibrate-button" type="button" onclick="calibrateSelectedGame()">校准姿态</button>
+                    <button type="button" class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
                 </div>
 
                 <div id="settings-shake" class="setting-panel">
@@ -1914,18 +1985,12 @@
 
                 <div id="settings-message" class="inline-note" role="status" aria-live="polite">所有改动会自动保存在当前设备。</div>
             </div>
-
-            <div class="settings-sticky-actions" role="region" aria-label="设置操作">
-                <button type="button" onclick="resetSelectedSettings()">恢复默认</button>
-                <button id="settings-calibrate-button" type="button" onclick="calibrateSelectedGame()">校准姿态</button>
-                <button type="button" class="primary-button" onclick="startConfiguredGame()">开始游戏</button>
-            </div>
         </div>
 
         <!-- 游玩页只展示当前玩法和必要控制，避免设置变更和惩罚判定混在一起。 -->
         <div id="screen-play" class="screen" hidden>
             <div class="play-navigation">
-                <button onclick="exitGame()">返回列表</button>
+                <button onclick="exitGame()">结束游戏并返回</button>
             </div>
 
             <div id="wake-lock-warning" class="inline-warning" role="status" aria-live="assertive" hidden></div>
@@ -2092,6 +2157,6 @@
     </dialog>
 
     <script src="game-logic.js?v=20260727-lightning"></script>
-    <script src="game.js?v=20260727-lightning"></script>
+    <script src="game.js?v=20260727-ui-tabs"></script>
 </body>
 </html>

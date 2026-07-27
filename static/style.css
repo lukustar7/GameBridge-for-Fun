@@ -163,7 +163,7 @@ h3 {
 
 .tabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 7px;
     padding: 7px;
     margin: 0;
@@ -172,6 +172,11 @@ h3 {
     background: rgba(7, 10, 18, 0.86);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(18px);
+}
+
+.console-test-panel {
+    max-width: 900px;
+    margin: 0 auto;
 }
 
 .console-sticky-bar {

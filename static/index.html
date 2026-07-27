@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 控制台</title>
-    <link rel="stylesheet" href="style.css?v=20260721-ui-navigation">
+    <link rel="stylesheet" href="style.css?v=20260727-ui-tabs">
     <script src="qrcode.min.js?v=20260706-valid"></script>
 </head>
 <body>
@@ -25,6 +25,7 @@
         <div class="console-sticky-bar">
             <nav class="tabs" role="tablist" aria-label="控制台页面">
                 <button id="tab-button-monitor" type="button" role="tab" class="tab active" data-tab="monitor" aria-controls="tab-monitor" aria-selected="true" tabindex="0" onclick="switchTab('monitor')">状态监控</button>
+                <button id="tab-button-test" type="button" role="tab" class="tab" data-tab="test" aria-controls="tab-test" aria-selected="false" tabindex="-1" onclick="switchTab('test')">安全测试</button>
                 <button id="tab-button-cert" type="button" role="tab" class="tab" data-tab="cert" aria-controls="tab-cert" aria-selected="false" tabindex="-1" onclick="switchTab('cert')">手机证书</button>
                 <button id="tab-button-settings" type="button" role="tab" class="tab" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">技术信息</button>
             </nav>
@@ -100,9 +101,12 @@
                     <p id="secure-game-hint" class="sub-text">手抖挑战和保持角度建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
             </div>
+        </div>
 
-            <div class="panel section-gap">
-                <h2>4. 连接测试</h2>
+        <!-- 独立安全测试页避免重要操作被三张二维码挤到首屏之外。 -->
+        <div id="tab-test" class="tab-content" role="tabpanel" aria-labelledby="tab-button-test" hidden>
+            <div class="panel console-test-panel">
+                <h2>连接与安全测试</h2>
                 <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用默认强度 15、时长 0.3 秒试电。测试强度最高 30、时长最长 1 秒。</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
                     <div>
@@ -218,9 +222,9 @@
         <!-- 参数设置面版 -->
         <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-button-settings" hidden>
             <div class="grid">
-                <!-- 技术参数配置 -->
+                <!-- 网络与证书、设备与输出分别成卡片，避免一张 24 行长表占满整页。 -->
                 <div class="panel">
-                    <h2>技术参数</h2>
+                    <h2>网络与证书</h2>
                     <table class="stats-table">
                         <tr>
                             <td>程序版本</td>
@@ -266,6 +270,12 @@
                             <td>App 桥接协议</td>
                             <td id="stat-bridge-protocol">V4</td>
                         </tr>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h2>设备与输出</h2>
+                    <table class="stats-table">
                         <tr>
                             <td>郊狼硬件型号</td>
                             <td id="stat-device-model">未连接</td>

@@ -57,14 +57,33 @@ class InterfaceStructureTests(unittest.TestCase):
                 self.assertEqual(duplicates, [])
 
     def test_game_has_persistent_emergency_stop_and_short_settings_flow(self):
-        """选择、设置和游玩三页都共享紧急停止入口，设置页保留固定操作栏。"""
+        """选择、设置和游玩三页都共享紧急停止入口，设置操作不能覆盖正文。"""
 
         self.assertIn('id="global-safety-bar"', self.game_text)
         self.assertIn('onclick="stopMobileOutput()"', self.game_text)
-        self.assertIn('class="settings-sticky-actions"', self.game_text)
+        self.assertIn('class="settings-actions"', self.game_text)
         self.assertIn('onclick="resetSelectedSettings()"', self.game_text)
         self.assertIn('id="screen-settings" class="screen" hidden', self.game_text)
         self.assertIn('id="screen-play" class="screen" hidden', self.game_text)
+
+        action_style_start = self.game_text.index(".settings-actions {")
+        action_style_end = self.game_text.index("}", action_style_start)
+        action_style = self.game_text[action_style_start:action_style_end]
+        self.assertIn("position: static", action_style)
+        self.assertNotIn("position: fixed", action_style)
+
+    def test_mobile_selection_and_settings_are_split_into_short_tasks(self):
+        """玩法入口必须是默认页；准备、排障与游戏参数使用可键盘操作的短页签。"""
+
+        self.assertEqual(self.game_text.count('data-tab-value="play"'), 1)
+        self.assertEqual(self.game_text.count('data-tab-value="setup"'), 1)
+        self.assertEqual(self.game_text.count('data-tab-value="info"'), 1)
+        self.assertIn('id="selection-panel-play"', self.game_text)
+        self.assertIn('id="selection-panel-setup"', self.game_text)
+        self.assertIn('id="selection-panel-info"', self.game_text)
+        self.assertIn('id="selection-panel-setup" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-setup" hidden', self.game_text)
+        self.assertIn("const SETTINGS_CATEGORY_LAYOUT = Object.freeze({", self.game_script_text)
+        self.assertIn("bindRovingTabKeyboard", self.game_script_text)
 
     def test_output_choice_is_one_global_control_and_test_uses_safe_default(self):
         """波形与通道只能在选择页配置一次；安全试电继续使用明确的独立通道。"""
@@ -277,8 +296,9 @@ class InterfaceStructureTests(unittest.TestCase):
         """桌面控制台的页签应支持读屏语义，停止按钮不能藏在某个页签内。"""
 
         self.assertIn('role="tablist"', self.console_text)
-        self.assertEqual(self.console_text.count('role="tab"'), 3)
-        self.assertEqual(self.console_text.count('role="tabpanel"'), 3)
+        self.assertEqual(self.console_text.count('role="tab"'), 4)
+        self.assertEqual(self.console_text.count('role="tabpanel"'), 4)
+        self.assertIn('id="tab-test"', self.console_text)
         emergency_buttons = [
             attrs
             for tag, attrs in self.console.elements

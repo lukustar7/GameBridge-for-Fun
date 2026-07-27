@@ -28,6 +28,7 @@ let latestTechState = null;
 // selectedGame 是设置页当前选中的游戏；activeGame 是已经真正开始运行的游戏。
 let selectedGame = null;
 let activeGame = null;
+let activeSelectionTab = "play";
 
 // 统一保存五套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
@@ -208,6 +209,47 @@ const GAME_META = {
         triggerLabel: (cfg) => `${cfg.continuousSeconds}s 输出 | ${cfg.drivingRestSeconds}s 休息`
     }
 };
+
+// 参数页最多显示三个任务分类。每个数字对应当前游戏内 settings-group 的顺序，
+// 这样既不复制任何控件，也不会让全局波形和通道重新混回单个游戏里。
+const SETTINGS_CATEGORY_LAYOUT = Object.freeze({
+    shake: [
+        { label: "基础", groupIndexes: [0] },
+        { label: "节奏", groupIndexes: [1] }
+    ],
+    angle: [
+        { label: "基础", groupIndexes: [0] },
+        { label: "节奏", groupIndexes: [1] }
+    ],
+    dice: [
+        { label: "基础", groupIndexes: [0] },
+        { label: "规则", groupIndexes: [1] }
+    ],
+    slot: [
+        { label: "输出", groupIndexes: [0, 1] },
+        { label: "节奏", groupIndexes: [2] },
+        { label: "规则", groupIndexes: [3, 4] }
+    ],
+    lightning: [
+        { label: "基础", groupIndexes: [0] },
+        { label: "行驶", groupIndexes: [1] },
+        { label: "堵车", groupIndexes: [2] }
+    ]
+});
+const SELECTION_TAB_META = Object.freeze({
+    play: {
+        title: "选择玩法",
+        description: "先选玩法；连接、权限和输出方式统一放在“开始前准备”。"
+    },
+    setup: {
+        title: "开始前准备",
+        description: "在这里统一完成连接自检、权限检查、波形和输出通道设置。"
+    },
+    info: {
+        title: "说明与排障",
+        description: "查看连接数据和安全规则；这些信息不会挤占日常选择玩法的页面。"
+    }
+});
 
 let gameSettings = loadSettings();
 const loadedGlobalOutput = loadGlobalOutputSettings();
@@ -1047,7 +1089,7 @@ function setCapabilityState(name, status, detail) {
 }
 
 function showCapabilityCenter(message = "") {
-    showSelectScreen();
+    showSelectScreen("setup");
     const center = $("capability-center");
     if (!center) return;
     center.open = true;
@@ -1470,13 +1512,55 @@ function showScreen(screenId) {
     }
 }
 
-function showSelectScreen() {
+function switchSelectionTab(tabName) {
+    const validTabs = ["play", "setup", "info"];
+    activeSelectionTab = validTabs.includes(tabName) ? tabName : "play";
+    const meta = SELECTION_TAB_META[activeSelectionTab];
+    setText("selection-title", meta.title);
+    setText("selection-context-text", meta.description);
+
+    validTabs.forEach((name) => {
+        const tab = $(`selection-tab-${name}`);
+        const panel = $(`selection-panel-${name}`);
+        const active = name === activeSelectionTab;
+        if (tab) {
+            tab.setAttribute("aria-selected", String(active));
+            tab.tabIndex = active ? 0 : -1;
+        }
+        if (panel) panel.hidden = !active;
+    });
+}
+
+function bindRovingTabKeyboard(container, activateTab) {
+    if (!container || container.dataset.keyboardBound === "true") return;
+    container.dataset.keyboardBound = "true";
+    container.addEventListener("keydown", (event) => {
+        const tabs = Array.from(container.querySelectorAll("[role='tab']"));
+        const currentIndex = tabs.indexOf(event.target);
+        if (currentIndex < 0) return;
+
+        let targetIndex = null;
+        if (event.key === "ArrowRight") targetIndex = (currentIndex + 1) % tabs.length;
+        if (event.key === "ArrowLeft") targetIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") targetIndex = 0;
+        if (event.key === "End") targetIndex = tabs.length - 1;
+        if (targetIndex === null) return;
+
+        event.preventDefault();
+        const target = tabs[targetIndex];
+        activateTab(target.dataset.tabValue);
+        target.focus();
+    });
+}
+
+function showSelectScreen(tabName = "play") {
     if (activeGame === "lightning") stopLocationTracking();
     selectedGame = null;
     lightningSafetyAcceptedForAttempt = false;
     closeLightningSafetyDialog();
     stopRuntimeLoops();
     showScreen("screen-select");
+    switchSelectionTab(tabName);
 }
 
 function openGameSettings(gameName) {
@@ -1487,6 +1571,8 @@ function openGameSettings(gameName) {
 
     document.querySelectorAll(".setting-panel").forEach((node) => {
         node.classList.remove("active");
+        node.removeAttribute("role");
+        node.removeAttribute("aria-labelledby");
     });
     $(`settings-${gameName}`).classList.add("active");
 
@@ -1494,7 +1580,7 @@ function openGameSettings(gameName) {
     setText("settings-subtitle", GAME_META[gameName].subtitle);
     setText("settings-message", "");
     populateSettingsForm(gameName);
-    resetSettingsDisclosureState(gameName);
+    buildSettingsCategoryTabs(gameName);
     updateSettingsActionVisibility(gameName);
     showScreen("screen-settings");
 }
@@ -1533,8 +1619,64 @@ function resetSettingsDisclosureState(gameName) {
     document.querySelectorAll("#screen-settings details.settings-group").forEach((group) => {
         const groupGame = group.dataset.game || "common";
         const shouldOpen = groupGame === gameName && group.dataset.defaultOpen === "true";
+        group.hidden = false;
         group.open = shouldOpen;
     });
+}
+
+function switchSettingsCategory(categoryValue) {
+    if (!selectedGame) return;
+    const layout = SETTINGS_CATEGORY_LAYOUT[selectedGame] || [];
+    const requestedIndex = Number.parseInt(categoryValue, 10);
+    const categoryIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < layout.length
+        ? requestedIndex
+        : 0;
+    const category = layout[categoryIndex];
+    const panel = $(`settings-${selectedGame}`);
+    const groups = Array.from(panel?.querySelectorAll("details.settings-group") || []);
+
+    groups.forEach((group, groupIndex) => {
+        const visible = category.groupIndexes.includes(groupIndex);
+        group.hidden = !visible;
+        group.open = visible && groupIndex === category.groupIndexes[0];
+    });
+
+    const tabs = Array.from($("settings-tabs")?.querySelectorAll("[role='tab']") || []);
+    tabs.forEach((tab, tabIndex) => {
+        const active = tabIndex === categoryIndex;
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+    });
+    if (panel && tabs[categoryIndex]) panel.setAttribute("aria-labelledby", tabs[categoryIndex].id);
+}
+
+function buildSettingsCategoryTabs(gameName) {
+    const tabList = $("settings-tabs");
+    const panel = $(`settings-${gameName}`);
+    const layout = SETTINGS_CATEGORY_LAYOUT[gameName] || [];
+    if (!tabList || !panel || layout.length === 0) return;
+
+    resetSettingsDisclosureState(gameName);
+    tabList.replaceChildren();
+    tabList.style.setProperty("--settings-tab-count", String(layout.length));
+    panel.setAttribute("role", "tabpanel");
+
+    layout.forEach((category, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.id = `settings-tab-${gameName}-${index}`;
+        button.dataset.tabValue = String(index);
+        button.setAttribute("role", "tab");
+        button.setAttribute("aria-controls", panel.id);
+        button.setAttribute("aria-selected", String(index === 0));
+        button.tabIndex = index === 0 ? 0 : -1;
+        button.innerText = category.label;
+        button.addEventListener("click", () => switchSettingsCategory(index));
+        tabList.appendChild(button);
+    });
+
+    bindRovingTabKeyboard(tabList, switchSettingsCategory);
+    switchSettingsCategory(0);
 }
 
 function updateSettingsActionVisibility(gameName) {
@@ -1542,7 +1684,7 @@ function updateSettingsActionVisibility(gameName) {
     if (!calibrateButton) return;
     const shouldShowCalibration = gameName === "shake" || gameName === "angle";
     calibrateButton.hidden = !shouldShowCalibration;
-    $("screen-settings")?.querySelector(".settings-sticky-actions")?.classList.toggle(
+    $("screen-settings")?.querySelector(".settings-actions")?.classList.toggle(
         "two-actions",
         !shouldShowCalibration
     );
@@ -1655,7 +1797,7 @@ function refreshGlobalOutputPresentation() {
 }
 
 function showGlobalOutputSettings() {
-    showSelectScreen();
+    showSelectScreen("setup");
     const group = $("global-output-settings");
     if (!group) return;
     group.open = true;
@@ -2066,9 +2208,7 @@ function stopRuntimeLoops() {
 
 function exitGame() {
     stopCurrentGame();
-    activeGame = null;
-    selectedGame = null;
-    showScreen("screen-select");
+    showSelectScreen();
 }
 
 function stopCurrentGame() {
@@ -3320,6 +3460,8 @@ window.onload = () => {
     populateSettingsForm("slot");
     populateSettingsForm("lightning");
     enhanceControlAccessibility();
+    bindRovingTabKeyboard($("selection-tabs"), switchSelectionTab);
+    switchSelectionTab(activeSelectionTab);
     inspectPassiveCapabilities();
     updateCapabilityPresentation();
     bindEmergencyStopEvents();
