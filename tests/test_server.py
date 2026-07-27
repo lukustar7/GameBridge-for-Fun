@@ -741,8 +741,8 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
                 "outputMode": "a",
                 "waveform": "random",
             }),
-            # 角子机：骰子输出完成后再走一次 A+B 结算型惩罚。
-            (0.15, {
+            # 角子机：骰子请求会被后端提升到最低 1 秒，完成后再走一次 A+B 结算型惩罚。
+            (1.05, {
                 "type": "game_shock_trigger",
                 "strength": 85,
                 "duration": 100,
@@ -768,6 +768,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event[3] for event in pulse_events[1:3]], ["breathing", "breathing"])
         self.assertEqual([event[3] for event in pulse_events[-2:]], ["pulse", "pulse"])
         self.assertTrue(all(event[3] != "random" for event in pulse_events))
+        self.assertEqual([event[4] for event in pulse_events[3:]], [1000, 1000, 1000])
         self.assertEqual(
             [(event[1], event[2]) for event in temporary_events],
             [

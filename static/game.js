@@ -99,7 +99,7 @@ const DEFAULT_SETTINGS = {
         strengthMax: 85,
         shockSeconds: 2.0,
         lightPunishEnabled: false,
-        lightShockSeconds: 0.4,
+        lightShockSeconds: 1.0,
         restMs: 800,
         spinMs: 700,
         autoSpin: false,
@@ -126,6 +126,7 @@ const {
     formatSettingLabel,
     hasSafeOutputLimits,
     isTimestampFresh,
+    applyStandaloneShockDurationFloor,
     restoreSettings
 } = window.GameBridgeForFunLogic;
 
@@ -286,7 +287,7 @@ function loadSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : {};
-        return restoreSettings(DEFAULT_SETTINGS, parsed);
+        return applyStandaloneShockDurationFloor(restoreSettings(DEFAULT_SETTINGS, parsed));
     } catch (error) {
         console.warn("读取本地游戏设置失败，已回退默认值:", error);
         return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -1252,7 +1253,7 @@ function collectSettingsFromForm(gameName) {
         return {
             ...collectOutputSettings(),
             strength: clamp(readNumber("dice-strength", 20), 0, 200),
-            singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 0.5, 5.0),
+            singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 1.0, 5.0),
             gapSeconds: clamp(readNumber("dice-gap-seconds", 0.5), 0.2, 3.0),
             leopardMultiplier: clamp(readNumber("dice-leopard-multiplier", 3), 1, 6),
             maxPunishCount: clamp(readNumber("dice-max-punish-count", 30), 1, 60),
@@ -1269,9 +1270,9 @@ function collectSettingsFromForm(gameName) {
             ...collectOutputSettings(),
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
-            shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 0.5, 8.0),
+            shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 1.0, 8.0),
             lightPunishEnabled: $("slot-light-punish-enabled").checked,
-            lightShockSeconds: clamp(readNumber("slot-light-shock-seconds", 0.4), 0.1, 2.0),
+            lightShockSeconds: clamp(readNumber("slot-light-shock-seconds", 1.0), 1.0, 2.0),
             restMs: clamp(readNumber("slot-rest-ms", 800), 300, 3000),
             spinMs: clamp(readNumber("slot-spin-ms", 700), 450, 1400),
             autoSpin: $("slot-auto-spin").checked,

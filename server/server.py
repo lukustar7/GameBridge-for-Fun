@@ -108,6 +108,8 @@ HTTPS_ENABLED = False
 
 # 游戏端惩罚的硬边界。前端也会限流，但后端必须自己兜底，不能相信局域网客户端。
 MIN_SHOCK_DURATION_MS = 100
+# 骰子、角子机等“按一次算一次”的结算型输出至少 1 秒；持续玩法内部短帧和安全试电不套用此下限。
+MIN_STANDALONE_SHOCK_DURATION_MS = 1000
 MAX_SHOCK_DURATION_MS = 60000
 MIN_PULSE_INTERVAL_SECONDS = 0.22
 MAX_WEB_MESSAGE_BYTES = 4096
@@ -1626,7 +1628,7 @@ async def web_ws_handler(websocket, path):
                     strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
                     duration = clamp_int(
                         data.get("duration", 1000),
-                        MIN_SHOCK_DURATION_MS,
+                        MIN_STANDALONE_SHOCK_DURATION_MS,
                         MAX_SHOCK_DURATION_MS,
                         fallback=1000
                     )

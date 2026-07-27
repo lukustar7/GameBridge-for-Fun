@@ -103,6 +103,31 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertEqual(console_strength[0].get("value"), "15")
         self.assertEqual(console_strength[0].get("max"), "30")
 
+    def test_standalone_game_shocks_start_at_one_second(self):
+        """用户能感知为一次惩罚的输出不得再允许 0.x 秒，内部持续帧和安全试电除外。"""
+
+        expected_inputs = {
+            "dice-single-seconds": ("1.0", "2.0"),
+            "slot-shock-seconds": ("1.0", "2.0"),
+            "slot-light-shock-seconds": ("1.0", "1.0"),
+        }
+        inputs = {
+            attrs.get("id"): attrs
+            for tag, attrs in self.game.elements
+            if tag == "input" and attrs.get("id") in expected_inputs
+        }
+
+        self.assertEqual(set(inputs), set(expected_inputs))
+        for element_id, (minimum, default_value) in expected_inputs.items():
+            with self.subTest(element_id=element_id):
+                self.assertEqual(inputs[element_id].get("min"), minimum)
+                self.assertEqual(inputs[element_id].get("value"), default_value)
+
+        server_text = (ROOT / "server" / "server.py").read_text(encoding="utf-8")
+        self.assertIn("MIN_STANDALONE_SHOCK_DURATION_MS = 1000", server_text)
+        self.assertIn("duration: 300", self.game_script_text)
+        self.assertIn("sendPulse(strength, 120", self.game_script_text)
+
     def test_mobile_emergency_stop_cancels_local_queues_before_another_game_can_start(self):
         """手机急停不能只清当前硬件帧，还必须退出本局并取消骰子、角子机等预约任务。"""
 

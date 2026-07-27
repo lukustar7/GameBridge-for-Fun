@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- 骰子每下、角子机满槽惩罚和角子机轻电共 3 类单次结算输出统一为最低 `1 秒`；旧版 `0.x 秒` 本地设置会自动迁移，后端同时强制下限，避免单次输出短到难以感知。持续型玩法的可中断控制帧与 `0.3 秒` 安全试电保持不变，以保留快速停机能力。
+
 ## [1.0.0-beta.1] - 2026-07-23
 
 ### Added

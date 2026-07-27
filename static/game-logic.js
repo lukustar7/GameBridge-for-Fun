@@ -72,6 +72,25 @@
         return restored;
     }
 
+    function applyStandaloneShockDurationFloor(settings) {
+        // 单次结算型惩罚低于 1 秒时真机体感不稳定；旧版缓存也必须在读取时自动迁移。
+        // 骰子间隔、角子机休息以及持续型玩法的内部控制帧不是单次惩罚，不在这里修改。
+        const normalized = cloneSettings(settings);
+        const durationFields = [
+            ["dice", "singleSeconds"],
+            ["slot", "shockSeconds"],
+            ["slot", "lightShockSeconds"]
+        ];
+
+        durationFields.forEach(([gameName, fieldName]) => {
+            const game = normalized[gameName];
+            if (!game) return;
+            const duration = Number(game[fieldName]);
+            game[fieldName] = Number.isFinite(duration) ? Math.max(1, duration) : 1;
+        });
+        return normalized;
+    }
+
     function validateDice(dices, label) {
         const valid = Array.isArray(dices) && dices.length === 3 &&
             dices.every((value) => Number.isInteger(value) && value >= 1 && value <= 6);
@@ -323,6 +342,7 @@
         getTripleFace,
         hasSafeOutputLimits,
         isTimestampFresh,
+        applyStandaloneShockDurationFloor,
         restoreSettings,
         shuffleSlotReels
     };

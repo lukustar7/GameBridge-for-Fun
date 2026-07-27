@@ -72,6 +72,21 @@ test("设置恢复不会反向修改默认配置或输入对象", () => {
     assert.equal(saved.shake.strengthMin, 45);
 });
 
+test("旧版单次惩罚时长自动提升到一秒且不修改休息间隔", () => {
+    const restored = logic.applyStandaloneShockDurationFloor({
+        dice: { singleSeconds: 0.5, gapSeconds: 0.2 },
+        slot: { shockSeconds: 0.5, lightShockSeconds: 0.1, restMs: 300 },
+        shake: { restMs: 250 }
+    });
+
+    assert.equal(restored.dice.singleSeconds, 1);
+    assert.equal(restored.slot.shockSeconds, 1);
+    assert.equal(restored.slot.lightShockSeconds, 1);
+    assert.equal(restored.dice.gapSeconds, 0.2);
+    assert.equal(restored.slot.restMs, 300);
+    assert.equal(restored.shake.restMs, 250);
+});
+
 test("普通骰子输局按双方总分差计算次数", () => {
     const outcome = logic.evaluateDiceRound([1, 2, 3], [4, 5, 6], 3);
 
