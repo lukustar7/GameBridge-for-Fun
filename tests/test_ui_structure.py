@@ -167,7 +167,7 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn("确认全局输出", self.game_text)
 
     def test_standalone_game_shocks_start_at_one_second(self):
-        """用户能感知为一次惩罚的输出不得再允许 0.x 秒，内部持续帧和安全试电除外。"""
+        """用户能感知为一次惩罚的输出和安全试电不得再短于 1 秒。"""
 
         expected_inputs = {
             "dice-single-seconds": ("1.0", "2.0"),
@@ -189,8 +189,63 @@ class InterfaceStructureTests(unittest.TestCase):
 
         server_text = (ROOT / "server" / "server.py").read_text(encoding="utf-8")
         self.assertIn("MIN_STANDALONE_SHOCK_DURATION_MS = 1000", server_text)
-        self.assertIn("duration: 300", self.game_script_text)
+        self.assertIn("const MOBILE_TEST_DURATION_MS = 1000", self.game_script_text)
+        self.assertIn("duration: MOBILE_TEST_DURATION_MS", self.game_script_text)
+        self.assertIn('id="console-test-duration" min="0.1" max="1.0" step="0.1" value="1.0"', self.console_text)
         self.assertIn("sendPulse(strength, 120", self.game_script_text)
+
+    def test_requested_mobile_layout_and_rule_ranges_are_locked(self):
+        """移动端页签顺序、图标、控件归类和用户确认过的长时范围不能回退。"""
+
+        setup_position = self.game_text.index('id="selection-tab-setup"')
+        play_position = self.game_text.index('id="selection-tab-play"')
+        info_position = self.game_text.index('id="selection-tab-info"')
+        self.assertLess(setup_position, play_position)
+        self.assertLess(play_position, info_position)
+        self.assertIn('let activeSelectionTab = "play";', self.game_script_text)
+        self.assertEqual(self.game_text.count('class="game-card-icon"'), 5)
+        self.assertNotIn('id="shake-rest-ms"', self.game_text)
+        self.assertNotIn('id="angle-rest-ms"', self.game_text)
+
+        expected_ranges = {
+            "dice-single-seconds": ("1.0", "30.0"),
+            "dice-max-punish-count": ("1", "36"),
+            "slot-shock-seconds": ("1.0", "30.0"),
+            "lightning-continuous-seconds": ("3", "30"),
+            "lightning-driving-rest-seconds": ("3", "30"),
+            "lightning-overspeed-recovery-seconds": ("0", "10"),
+            "lightning-session-minutes": ("1", "30"),
+            "lightning-jam-shock-seconds": ("1", "20"),
+        }
+        inputs = {
+            attrs.get("id"): attrs
+            for tag, attrs in self.game.elements
+            if tag == "input" and attrs.get("id") in expected_ranges
+        }
+        self.assertEqual(set(inputs), set(expected_ranges))
+        for element_id, (minimum, maximum) in expected_ranges.items():
+            with self.subTest(element_id=element_id):
+                self.assertEqual(inputs[element_id].get("min"), minimum)
+                self.assertEqual(inputs[element_id].get("max"), maximum)
+
+        self.assertIn('id="lightning-jam-enabled"', self.game_text)
+        self.assertIn('id="lightning-jam-options"', self.game_text)
+        self.assertIn('grid-auto-rows: 1fr', self.game_text)
+        self.assertIn('margin-top: auto', self.game_text)
+        self.assertIn('.global-output-disclosure > summary::after', self.game_text)
+        self.assertIn('.safety-dialog {', self.game_text)
+        self.assertIn('position: fixed', self.game_text)
+        self.assertIn('inset: 0', self.game_text)
+
+    def test_runtime_exposes_clear_output_wait_and_pause_phases(self):
+        """长时输出和所有可感知等待必须显示阶段，不能让玩家误以为页面卡死。"""
+
+        for label in ("输出中", "休息中", "间隔中", "等待判定", "已暂停", "已停止"):
+            with self.subTest(label=label):
+                self.assertIn(label, self.game_script_text)
+        self.assertIn('setGamePhase("interval", "等待下一下")', self.game_script_text)
+        self.assertIn('setGamePhase("rest", "角子机强制休息")', self.game_script_text)
+        self.assertIn('phaseDetail = "行驶强制休息"', self.game_script_text)
 
     def test_mobile_emergency_stop_cancels_local_queues_before_another_game_can_start(self):
         """手机急停不能只清当前硬件帧，还必须退出本局并取消骰子、角子机等预约任务。"""

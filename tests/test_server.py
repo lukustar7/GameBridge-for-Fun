@@ -662,7 +662,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
-    """把四种游戏的真实 WebSocket 消息送进后端，用假设备核对整条安全链路。"""
+    """把五种游戏的真实 WebSocket 消息送进后端，用假设备核对整条安全链路。"""
 
     async def asyncSetUp(self):
         self.original_state = server.state.copy()
@@ -680,6 +680,8 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.original_game_connections = set(server.game_connections)
         self.original_last_pulses = dict(server.game_connection_last_pulse_at)
         self.original_lightning_next = dict(server.game_connection_lightning_next_at)
+        self.original_dice_rounds = dict(server.game_connection_dice_round)
+        self.original_lightning_sessions = dict(server.game_connection_lightning_session)
 
         # 使用不对称上限能验证 A/B 分路限幅：即使网页恶意请求 999，也只能到 40/30。
         server.state["app_connected"] = True
@@ -700,6 +702,8 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         server.game_connections.clear()
         server.game_connection_last_pulse_at.clear()
         server.game_connection_lightning_next_at.clear()
+        server.game_connection_dice_round.clear()
+        server.game_connection_lightning_session.clear()
         self.fake_client = FakeDeviceAppClient()
         server.device_app_client = self.fake_client
 
@@ -725,6 +729,10 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         server.game_connection_last_pulse_at.update(self.original_last_pulses)
         server.game_connection_lightning_next_at.clear()
         server.game_connection_lightning_next_at.update(self.original_lightning_next)
+        server.game_connection_dice_round.clear()
+        server.game_connection_dice_round.update(self.original_dice_rounds)
+        server.game_connection_lightning_session.clear()
+        server.game_connection_lightning_session.update(self.original_lightning_sessions)
 
     async def test_four_games_share_limits_reject_overlap_and_confirm_emergency_stop(self):
         """模拟手持、角度、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
@@ -751,24 +759,43 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
             (0.03, {"type": "stop_shock"}),
             # 骰子：同一瞬间重复提交只能接受第一条，不能把惩罚排成隐藏队列。
             (0, {
+                "type": "dice_round_start",
+                "roundId": "dice-four-games-test",
+                "plannedCount": 2,
+                "singleDuration": 1000,
+            }),
+            (0, {
                 "type": "game_shock_trigger",
+                "requestId": 1,
+                "game": "dice",
+                "phase": "dice_hit",
+                "roundId": "dice-four-games-test",
+                "sequence": 1,
                 "strength": 25,
-                "duration": 100,
+                "duration": 1000,
                 "outputMode": "a",
                 "waveform": "random",
             }),
             (0, {
                 "type": "game_shock_trigger",
+                "requestId": 2,
+                "game": "dice",
+                "phase": "dice_hit",
+                "roundId": "dice-four-games-test",
+                "sequence": 2,
                 "strength": 25,
-                "duration": 100,
+                "duration": 1000,
                 "outputMode": "a",
                 "waveform": "random",
             }),
-            # 角子机：骰子请求会被后端提升到最低 1 秒，完成后再走一次 A+B 结算型惩罚。
+            # 角子机：骰子任务结束后再走一次 A+B 结算型惩罚。
             (1.05, {
                 "type": "game_shock_trigger",
+                "requestId": 3,
+                "game": "slot",
+                "phase": "slot_full",
                 "strength": 85,
-                "duration": 100,
+                "duration": 1000,
                 "outputMode": "ab",
                 "bStrengthMode": "same",
                 "waveform": "pulse",
@@ -819,6 +846,9 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         websocket = ScriptedGameWebSocket([
             (0, {
                 "type": "game_shock_trigger",
+                "requestId": 1,
+                "game": "slot",
+                "phase": "slot_full",
                 "strength": 35,
                 "duration": 5000,
                 "outputMode": "ab",
@@ -840,10 +870,25 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lightning_game_has_authoritative_strength_duration_and_rest_limits(self):
         """第五个游戏即使被伪造超大参数，也只能执行受限的一轮并拒绝冷却期重叠。"""
+        session_id = "lightning-authoritative-test"
         websocket = ScriptedGameWebSocket([
+            (0, {
+                "type": "lightning_session_start",
+                "sessionId": session_id,
+                "sessionMinutes": 30,
+                "startSpeed": 10,
+            }),
+            (0, {
+                "type": "lightning_safety_sample",
+                "sessionId": session_id,
+                "mode": "driving",
+                "speedKmh": 30,
+                "sampleAgeMs": 0,
+            }),
             (0, {
                 "type": "lightning_shock_trigger",
                 "requestId": 1,
+                "sessionId": session_id,
                 "phase": "driving",
                 "strength": 50,
                 "duration": 3000,
@@ -855,6 +900,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
             (0, {
                 "type": "lightning_shock_trigger",
                 "requestId": 2,
+                "sessionId": session_id,
                 "phase": "driving",
                 "strength": 50,
                 "duration": 3000,
@@ -866,6 +912,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
             (0, {
                 "type": "lightning_shock_trigger",
                 "requestId": 3,
+                "sessionId": session_id,
                 "phase": "driving",
                 "strength": 999,
                 "duration": 999999,
@@ -875,8 +922,16 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
                 "outputMode": "a",
             }),
             (0.03, {
+                "type": "lightning_safety_sample",
+                "sessionId": session_id,
+                "mode": "jam",
+                "speedKmh": 3,
+                "sampleAgeMs": 0,
+            }),
+            (0, {
                 "type": "lightning_shock_trigger",
                 "requestId": 4,
+                "sessionId": session_id,
                 "phase": "jam",
                 "strength": 50,
                 "duration": 1000,
@@ -898,6 +953,108 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("60 km/h", feedback[0]["message"])
         self.assertIn("过期", feedback[1]["message"])
         self.assertIn("安全休息", feedback[3]["message"])
+
+    async def test_lightning_invalid_live_sample_stops_active_long_output(self):
+        """长输出开始后达到 60 km/h，后台必须依据持续样本立即清空两路。"""
+        session_id = "lightning-live-stop-test"
+        websocket = ScriptedGameWebSocket([
+            (0, {
+                "type": "lightning_session_start",
+                "sessionId": session_id,
+                "sessionMinutes": 30,
+                "startSpeed": 10,
+            }),
+            (0, {
+                "type": "lightning_safety_sample",
+                "sessionId": session_id,
+                "mode": "driving",
+                "speedKmh": 35,
+                "sampleAgeMs": 0,
+            }),
+            (0, {
+                "type": "lightning_shock_trigger",
+                "requestId": 1,
+                "sessionId": session_id,
+                "phase": "driving",
+                "strength": 35,
+                "duration": 30000,
+                "restMs": 3000,
+                "speedKmh": 35,
+                "sampleAgeMs": 0,
+                "outputMode": "ab",
+                "bStrengthMode": "same",
+            }),
+            (0.03, {
+                "type": "lightning_safety_sample",
+                "sessionId": session_id,
+                "mode": "driving",
+                "speedKmh": 60,
+                "sampleAgeMs": 0,
+            }),
+        ])
+
+        await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        clear_channels = [event[1] for event in self.fake_client.events if event[0] == "clear_pulses"]
+        self.assertIn(server.Channel.A, clear_channels)
+        self.assertIn(server.Channel.B, clear_channels)
+        safety_feedback = [
+            message for message in websocket.sent_messages
+            if message.get("type") == "lightning_feedback" and message.get("requestId") == 0
+        ]
+        self.assertTrue(safety_feedback)
+        self.assertFalse(safety_feedback[-1]["ok"])
+
+    async def test_dice_backend_enforces_three_hundred_second_output_budget(self):
+        """篡改网页连续请求 30 秒骰子惩罚时，后台最多接受 10 下。"""
+        round_id = "dice-output-budget-test"
+        script = [(0, {
+            "type": "dice_round_start",
+            "roundId": round_id,
+            "plannedCount": 36,
+            "singleDuration": 30000,
+        })]
+        script.extend((0, {
+            "type": "game_shock_trigger",
+            "requestId": sequence,
+            "game": "dice",
+            "phase": "dice_hit",
+            "roundId": round_id,
+            "sequence": sequence,
+            "strength": 25,
+            "duration": 30000,
+            "outputMode": "a",
+        }) for sequence in range(1, 12))
+        websocket = ScriptedGameWebSocket(script)
+
+        # 本测试只核对协议预算，不等待十个真实 30 秒调度任务。
+        with patch.object(server, "schedule_game_shock", return_value=True):
+            await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        feedback = [message for message in websocket.sent_messages if message.get("type") == "game_shock_feedback"]
+        self.assertEqual([message["ok"] for message in feedback], [True] * 10 + [False])
+        self.assertIn("300 秒", feedback[-1]["message"])
+
+    async def test_untagged_settlement_output_is_rejected(self):
+        """省略玩法和阶段不能落入通用长时输出，以免绕过各游戏边界。"""
+        websocket = ScriptedGameWebSocket([
+            (0, {
+                "type": "game_shock_trigger",
+                "requestId": 7,
+                "strength": 40,
+                "duration": 60000,
+                "outputMode": "a",
+            }),
+        ])
+
+        await server.web_ws_handler(websocket, f"/game?token={server.GAME_ACCESS_TOKEN}")
+
+        temporary_events = [event for event in self.fake_client.events if event[0] == "set_temporary_strength"]
+        feedback = [message for message in websocket.sent_messages if message.get("type") == "game_shock_feedback"]
+        self.assertEqual(temporary_events, [])
+        self.assertEqual(len(feedback), 1)
+        self.assertFalse(feedback[0]["ok"])
+        self.assertIn("未知", feedback[0]["message"])
 
     async def test_invalid_game_token_never_reaches_fake_hardware(self):
         """没有正确配对令牌的网页应在入口关闭，不能触发任何假硬件命令。"""

@@ -31,14 +31,55 @@
         .game-card {
             width: 100%;
             min-height: 0;
-            display: block;
-            padding: 18px;
+            display: grid;
+            grid-template-columns: 52px minmax(0, 1fr);
+            align-items: center;
+            gap: 14px;
+            padding: 16px;
             border: 1px solid var(--border);
             border-radius: var(--radius-medium);
             color: var(--text);
             background: linear-gradient(145deg, rgba(18, 28, 49, 0.94), rgba(10, 16, 29, 0.92));
             cursor: pointer;
             text-align: left;
+        }
+
+        .game-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .game-card-icon {
+            display: grid;
+            width: 52px;
+            height: 52px;
+            place-items: center;
+            border: 1px solid rgba(96, 165, 250, 0.28);
+            border-radius: 15px;
+            color: var(--accent);
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .game-card-icon svg {
+            width: 30px;
+            height: 30px;
+            fill: none;
+            stroke: currentColor;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-width: 1.8;
+        }
+
+        .game-card-copy {
+            min-width: 0;
+        }
+
+        .game-card-copy .sub-text {
+            display: -webkit-box;
+            overflow: hidden;
+            margin: 6px 0 0;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
         }
 
         .game-card:hover,
@@ -219,6 +260,26 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
+            list-style: none;
+        }
+
+        .global-output-disclosure > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .global-output-disclosure > summary::after {
+            content: "";
+            flex: 0 0 auto;
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid var(--accent);
+            border-bottom: 2px solid var(--accent);
+            transform: rotate(45deg);
+            transition: transform 150ms ease;
+        }
+
+        .global-output-disclosure[open] > summary::after {
+            transform: rotate(225deg);
         }
 
         .global-output-disclosure > summary small {
@@ -238,6 +299,7 @@
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 10px;
             margin-bottom: 12px;
+            grid-auto-rows: 1fr;
         }
 
         .capability-card {
@@ -278,6 +340,7 @@
         }
 
         .capability-card p {
+            flex: 1;
             min-height: 42px;
             margin: 0;
             color: var(--text-muted);
@@ -288,6 +351,7 @@
         .capability-card button {
             width: 100%;
             min-height: 40px;
+            margin-top: auto;
         }
 
         .capability-actions {
@@ -885,8 +949,11 @@
         }
 
         .safety-dialog {
+            position: fixed;
+            inset: 0;
             width: min(calc(100% - 28px), 620px);
             max-height: min(88vh, 760px);
+            margin: auto;
             overflow: auto;
             padding: 0;
             border: 1px solid var(--border-strong);
@@ -894,6 +961,35 @@
             color: var(--text);
             background: #0b1220;
             box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+        }
+
+        #game-status {
+            width: fit-content;
+            max-width: 100%;
+            padding: 7px 11px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--text-secondary);
+            background: rgba(15, 23, 42, 0.76);
+        }
+
+        #game-status[data-phase="output"] {
+            border-color: rgba(251, 146, 60, 0.55);
+            color: #fed7aa;
+            background: rgba(124, 45, 18, 0.32);
+        }
+
+        #game-status[data-phase="rest"],
+        #game-status[data-phase="interval"] {
+            border-color: rgba(96, 165, 250, 0.45);
+            color: #bfdbfe;
+        }
+
+        #game-status[data-phase="paused"],
+        #game-status[data-phase="blocked"] {
+            border-color: rgba(248, 113, 113, 0.52);
+            color: #fecaca;
+            background: rgba(127, 29, 29, 0.26);
         }
 
         .safety-dialog::backdrop {
@@ -940,6 +1036,12 @@
             gap: 9px;
         }
 
+        @media (max-width: 700px) {
+            .game-card-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         @media (max-width: 420px) {
             .mobile-app-header {
                 padding: 14px 16px;
@@ -963,29 +1065,9 @@
                 font-size: 0.78rem;
             }
 
-            .game-card {
-                padding: 14px 15px;
-            }
-
             .game-select-container {
                 gap: 10px;
                 margin-bottom: 16px;
-            }
-
-            .game-card-grid {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .game-card-grid .game-card {
-                height: 132px;
-            }
-
-            .game-card-grid .sub-text {
-                display: -webkit-box !important;
-                overflow: hidden;
-                -webkit-box-orient: vertical;
-                -webkit-line-clamp: 3;
             }
 
             .settings-group > summary {
@@ -1085,7 +1167,7 @@
         <div id="screen-select" class="screen active">
             <section class="notice-panel" style="margin-bottom: 16px;">
                 <h2 id="selection-title" class="selection-title" tabindex="-1" data-screen-heading>选择玩法</h2>
-                <p id="selection-context-text" class="sub-text">先选玩法；连接、权限和输出方式统一放在“开始前准备”。</p>
+                <p id="selection-context-text" class="sub-text">先选玩法；连接、权限和输出方式统一放在“全局设置”。</p>
                 <div class="mobile-status-grid">
                     <div class="mobile-status-card">
                         <span>郊狼设备</span>
@@ -1100,8 +1182,8 @@
 
             <!-- 选择页按任务拆分，默认直接展示玩法，避免准备工具把游戏入口挤出首屏。 -->
             <nav id="selection-tabs" class="mobile-section-tabs" role="tablist" aria-label="玩法首页页面">
+                <button id="selection-tab-setup" type="button" role="tab" data-tab-value="setup" aria-controls="selection-panel-setup" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('setup')">全局设置</button>
                 <button id="selection-tab-play" type="button" role="tab" data-tab-value="play" aria-controls="selection-panel-play" aria-selected="true" tabindex="0" onclick="switchSelectionTab('play')">选择玩法</button>
-                <button id="selection-tab-setup" type="button" role="tab" data-tab-value="setup" aria-controls="selection-panel-setup" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('setup')">开始前准备</button>
                 <button id="selection-tab-info" type="button" role="tab" data-tab-value="info" aria-controls="selection-panel-info" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('info')">说明与排障</button>
             </nav>
 
@@ -1235,7 +1317,7 @@
             <details class="disclosure-panel test-disclosure">
                 <summary>低强度通道试电</summary>
                 <div class="disclosure-content">
-                    <p class="sub-text test-disclosure-help">固定使用强度 15、时长 0.3 秒和立即有感的游戏默认波形；请先确认接线和通道限幅。</p>
+                    <p class="sub-text test-disclosure-help">固定使用强度 15、时长 1 秒和立即有感的游戏默认波形；请先确认接线和通道限幅。</p>
                     <div class="test-action-grid">
                         <button type="button" onclick="sendMobileTestShock('a')">试 A</button>
                         <button type="button" onclick="sendMobileTestShock('b')">试 B</button>
@@ -1249,24 +1331,24 @@
             <section id="selection-panel-play" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-play">
             <div class="game-select-container game-card-grid">
                 <button type="button" class="game-card" onclick="openGameSettings('shake')">
-                    <span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span>
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span><span class="sub-text">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span></span>
                 </button>
                 <button type="button" class="game-card" onclick="openGameSettings('angle')">
-                    <span class="game-card-heading"><span class="game-card-title">保持角度</span><span class="game-card-index">02</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">以当前握持姿态为基准，持续偏离目标角度才触发惩罚</span>
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 17h16M6 17a6 6 0 0 1 12 0M12 11v6"></path><circle cx="12" cy="17" r="1.5"></circle></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">保持角度</span><span class="game-card-index">02</span></span><span class="sub-text">以当前握持姿态为基准，持续偏离目标角度才触发惩罚</span></span>
                 </button>
                 <button type="button" class="game-card" onclick="openGameSettings('dice')">
-                    <span class="game-card-heading"><span class="game-card-title">摇骰子对决</span><span class="game-card-index">03</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">你和对手比总点数，输几点就输出几下，豹子按倍率结算</span>
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><circle cx="8" cy="8" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="16" cy="16" r="1"></circle></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">摇骰子对决</span><span class="game-card-index">03</span></span><span class="sub-text">你和对手比总点数，输几点就输出几下，豹子按倍率结算</span></span>
                 </button>
                 <button type="button" class="game-card" onclick="openGameSettings('slot')">
-                    <span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">04</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span>
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M9 5v14M15 5v14M6 12h.01M12 12h.01M18 12h.01"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">04</span></span><span class="sub-text">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span></span>
                 </button>
                 <button type="button" class="game-card" onclick="openGameSettings('lightning')">
-                    <span class="game-card-heading"><span class="game-card-title">雷电极速</span><span class="game-card-index">05</span></span>
-                    <span class="sub-text" style="display: block; margin-top: 5px;">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span>
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m13 2-7 11h6l-1 9 7-12h-6z"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">雷电极速</span><span class="game-card-index">05</span></span><span class="sub-text">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span></span>
                 </button>
             </div>
             </section>
@@ -1342,7 +1424,7 @@
                     <div class="settings-stack">
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">游戏模式</label>
-                            <select id="shake-mode" onchange="saveSelectedSettings(true)">
+                            <select id="shake-mode" onchange="updateShakeModeVisibility(); saveSelectedSettings(true)">
                                 <option value="radius">安全半径模式</option>
                                 <option value="gap">夹缝生存模式</option>
                             </select>
@@ -1376,19 +1458,7 @@
                             <p class="field-help">安全半径模式下越大越容易；夹缝模式下它代表外圈边界。</p>
                         </div>
 
-                    </div>
-                    </div>
-                    </details>
-
-                    <details class="settings-group" data-game="shake">
-                        <summary>
-                            <span>高级节奏</span>
-                            <small>夹缝、灵敏度与触发间隔</small>
-                        </summary>
-                        <div class="settings-group-content">
-                    <div class="settings-stack">
-
-                        <div class="slider-container">
+                        <div id="shake-gap-inner-setting" class="slider-container" hidden>
                             <div class="slider-label">
                                 <span>夹缝内圈半径</span>
                                 <span id="val-shake-gap-inner">12%</span>
@@ -1396,6 +1466,18 @@
                             <input type="range" id="shake-gap-inner" min="6" max="28" value="12" oninput="updateSettingValue('shake-gap-inner')">
                             <p class="field-help">仅夹缝生存模式使用，弹珠太靠中心也会被判定为离开目标区域。</p>
                         </div>
+
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="settings-group" data-game="shake">
+                        <summary>
+                            <span>高级节奏</span>
+                            <small>灵敏度与触发延迟</small>
+                        </summary>
+                        <div class="settings-group-content">
+                    <div class="settings-stack">
 
                         <div class="slider-container">
                             <div class="slider-label">
@@ -1415,14 +1497,6 @@
                             <p class="field-help">离开安全区后先等多久。给手抖和手机误差留一点反应时间。</p>
                         </div>
 
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>电完休息</span>
-                                <span id="val-shake-rest-ms">250ms</span>
-                            </div>
-                            <input type="range" id="shake-rest-ms" min="200" max="2000" step="50" value="250" oninput="updateSettingValue('shake-rest-ms')">
-                            <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到安全区会立即停止。</p>
-                        </div>
                     </div>
                     </div>
                     </details>
@@ -1479,7 +1553,7 @@
                     <details class="settings-group" data-game="angle">
                         <summary>
                             <span>高级节奏</span>
-                            <small>触发延迟、强度爬升与休息</small>
+                            <small>触发延迟与强度爬升</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
@@ -1502,14 +1576,6 @@
                             <p class="field-help">超过允许误差后，再偏多少度会从开始强度升到最高强度。</p>
                         </div>
 
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>电完休息</span>
-                                <span id="val-angle-rest-ms">250ms</span>
-                            </div>
-                            <input type="range" id="angle-rest-ms" min="200" max="2000" step="50" value="250" oninput="updateSettingValue('angle-rest-ms')">
-                            <p class="field-help">已经触发后，每次短促输出结束至少休息多久；回到允许范围会立即停止。</p>
-                        </div>
                     </div>
                     </div>
                     </details>
@@ -1537,8 +1603,8 @@
                                 <span>每下多久</span>
                                 <span id="val-dice-single-seconds">2.0s</span>
                             </div>
-                            <input type="range" id="dice-single-seconds" min="1.0" max="5.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
-                            <p class="field-help">每一下最低 1 秒。输几下就按这个时间排队执行几下。</p>
+                            <input type="range" id="dice-single-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
+                            <p class="field-help">每一下 1–30 秒。单局累计真实输出最多 300 秒，休息间隔不计入。</p>
                         </div>
 
                     </div>
@@ -1576,8 +1642,8 @@
                                 <span>单局最多电几下</span>
                                 <span id="val-dice-max-punish-count">30</span>
                             </div>
-                            <input type="range" id="dice-max-punish-count" min="1" max="60" value="30" oninput="updateSettingValue('dice-max-punish-count')">
-                            <p class="field-help">安全上限。即使豹子算出来更多，也会截到这里，避免一局拖太久。</p>
+                            <input type="range" id="dice-max-punish-count" min="1" max="36" value="30" oninput="updateSettingValue('dice-max-punish-count')">
+                            <p class="field-help">当前规则最高是 6 点豹子 × 6 倍＝36 下；还会同时遵守 300 秒累计输出上限。</p>
                         </div>
 
                         <div class="slider-container">
@@ -1615,19 +1681,10 @@
                     <details class="settings-group" data-game="slot" data-default-open="true" open>
                         <summary>
                             <span>基础输出</span>
-                            <small>轻电强度、满槽惩罚强度与时长</small>
+                            <small>满槽强度、时长与结算方式</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>没中奖轻电强度</span>
-                                <span id="val-slot-strength-min">20</span>
-                            </div>
-                            <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
-                            <p class="field-help">只有打开“没中奖轻电”后才会用。每次三个图案全不同时，按这个强度轻电一下。</p>
-                        </div>
-
                         <div class="slider-container">
                             <div class="slider-label">
                                 <span>满槽惩罚强度</span>
@@ -1642,8 +1699,17 @@
                                 <span>满槽惩罚多久</span>
                                 <span id="val-slot-shock-seconds">2.0s</span>
                             </div>
-                            <input type="range" id="slot-shock-seconds" min="1.0" max="8.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
-                            <p class="field-help">满槽惩罚单次最低 1 秒；输出结束后还会按“电完休息”等一段时间。</p>
+                            <input type="range" id="slot-shock-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
+                            <p class="field-help">满槽惩罚单次 1–30 秒；输出和随后的休息会分别显示当前状态。</p>
+                        </div>
+
+                        <div>
+                            <label class="slider-label" style="margin-bottom: 5px;">满槽惩罚后压力</label>
+                            <select id="slot-pressure-after-punish" onchange="saveSelectedSettings(true)">
+                                <option value="clear">清空压力</option>
+                                <option value="keep">保留 100%</option>
+                            </select>
+                            <p class="field-help">清空就是结束后从 0% 重新攒；保留会继续停在满槽，并遵守后续开奖结果和自动连转规则。</p>
                         </div>
 
                     </div>
@@ -1652,20 +1718,11 @@
 
                     <details class="settings-group" data-game="slot">
                         <summary>
-                            <span>轻电与结算</span>
-                            <small>轻电开关、时长与惩罚后压力</small>
+                            <span>轻电规则</span>
+                            <small>轻电开关、强度与时长</small>
                         </summary>
                         <div class="settings-group-content">
                     <div class="settings-stack">
-
-                        <div>
-                            <label class="slider-label" style="margin-bottom: 5px;">满槽惩罚后压力</label>
-                            <select id="slot-pressure-after-punish" onchange="saveSelectedSettings(true)">
-                                <option value="clear">清空压力</option>
-                                <option value="keep">保留 100%</option>
-                            </select>
-                            <p class="field-help">清空就是电完从 0% 重新攒；保留就是继续停在满槽，下一轮如果没有中奖降压，会再次触发。</p>
-                        </div>
 
                         <div>
                             <label class="switch-row">
@@ -1673,6 +1730,15 @@
                                 <input type="checkbox" id="slot-light-punish-enabled" onchange="saveSelectedSettings(true)">
                             </label>
                             <p class="field-help">开启后，三个图案全不同时会轻轻电一下，同时压力条照常上涨。</p>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>没中奖轻电强度</span>
+                                <span id="val-slot-strength-min">20</span>
+                            </div>
+                            <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
+                            <p class="field-help">只有打开“没中奖轻电”后才会使用；实际输出仍受 App 的通道限幅。</p>
                         </div>
 
                         <div class="slider-container">
@@ -1850,13 +1916,6 @@
                                     <p class="field-help">从启动速度到这里线性增加强度；必须至少比启动速度高 10 km/h。</p>
                                 </div>
 
-                                <div>
-                                    <label class="switch-row">
-                                        <span>堵车模式“都是你的错”</span>
-                                        <input type="checkbox" id="lightning-jam-enabled" onchange="updateLightningJamVisibility(); saveSelectedSettings(true)">
-                                    </label>
-                                    <p class="field-help">关闭时长时间低速只会暂停；开启后按下面的间歇规则随机输出。</p>
-                                </div>
                             </div>
                         </div>
                     </details>
@@ -1882,8 +1941,8 @@
                                         <span>每轮连续输出</span>
                                         <span id="val-lightning-continuous-seconds">8.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-continuous-seconds" min="3" max="8" step="1" value="8" oninput="updateSettingValue('lightning-continuous-seconds')">
-                                    <p class="field-help">每轮 3–8 秒；低速、超速、定位异常或急停会提前中断当前一轮。</p>
+                                    <input type="range" id="lightning-continuous-seconds" min="3" max="30" step="1" value="8" oninput="updateSettingValue('lightning-continuous-seconds')">
+                                    <p class="field-help">每轮 3–30 秒；期间持续检查速度、定位和页面连接，异常会提前中断。</p>
                                 </div>
 
                                 <div class="slider-container">
@@ -1891,8 +1950,8 @@
                                         <span>每轮强制休息</span>
                                         <span id="val-lightning-driving-rest-seconds">3.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-driving-rest-seconds" min="3" max="10" step="1" value="3" oninput="updateSettingValue('lightning-driving-rest-seconds')">
-                                    <p class="field-help">一轮结束后至少等待 3–10 秒，不能关闭。</p>
+                                    <input type="range" id="lightning-driving-rest-seconds" min="3" max="30" step="1" value="3" oninput="updateSettingValue('lightning-driving-rest-seconds')">
+                                    <p class="field-help">一轮结束后等待 3–30 秒；堵车切回行驶时也会完整遵守。</p>
                                 </div>
 
                                 <div class="slider-container">
@@ -1900,17 +1959,16 @@
                                         <span>超速恢复等待</span>
                                         <span id="val-lightning-overspeed-recovery-seconds">10.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-overspeed-recovery-seconds" min="5" max="10" step="1" value="10" oninput="updateSettingValue('lightning-overspeed-recovery-seconds')">
-                                    <p class="field-help">达到 60 km/h 会立即停止；重新低于 60 后连续保持这段时间才解除暂停。</p>
+                                    <input type="range" id="lightning-overspeed-recovery-seconds" min="0" max="10" step="1" value="10" oninput="updateSettingValue('lightning-overspeed-recovery-seconds')">
+                                    <p class="field-help">达到 60 km/h 会立即停止；设为 0 时，下一份低于 60 的有效速度即可恢复。</p>
                                 </div>
 
-                                <div>
-                                    <label class="slider-label" style="margin-bottom: 5px;">单局时长</label>
-                                    <select id="lightning-session-minutes" onchange="saveSelectedSettings(true)">
-                                        <option value="5">5 分钟</option>
-                                        <option value="10">10 分钟</option>
-                                        <option value="15">15 分钟</option>
-                                    </select>
+                                <div class="slider-container">
+                                    <div class="slider-label">
+                                        <span>单局时长</span>
+                                        <span id="val-lightning-session-minutes">10 分钟</span>
+                                    </div>
+                                    <input type="range" id="lightning-session-minutes" min="1" max="30" step="1" value="10" oninput="updateSettingValue('lightning-session-minutes')">
                                     <p class="field-help">到时立即停止输出，重新开始前必须再次确认移动安全。</p>
                                 </div>
                             </div>
@@ -1919,11 +1977,20 @@
 
                     <details id="lightning-jam-settings" class="settings-group" data-game="lightning">
                         <summary>
-                            <span>堵车高级设置</span>
+                            <span>堵车模式</span>
                             <small>强度、触发间隔与整轮休息</small>
                         </summary>
                         <div class="settings-group-content">
                             <div class="settings-stack">
+                                <div>
+                                    <label class="switch-row">
+                                        <span>启用“都是你的错”</span>
+                                        <input type="checkbox" id="lightning-jam-enabled" onchange="updateLightningJamVisibility(); saveSelectedSettings(true)">
+                                    </label>
+                                    <p class="field-help">默认关闭。关闭时长时间低速只会暂停；开启后按本页规则随机输出。</p>
+                                </div>
+
+                                <div id="lightning-jam-options" class="settings-stack settings-stack-flush">
                                 <div class="slider-container">
                                     <div class="slider-label">
                                         <span>堵车输出强度</span>
@@ -1946,7 +2013,7 @@
                                         <span>堵车单次输出</span>
                                         <span id="val-lightning-jam-shock-seconds">1.5s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-shock-seconds" min="1" max="3" step="0.5" value="1.5" oninput="updateSettingValue('lightning-jam-shock-seconds')">
+                                    <input type="range" id="lightning-jam-shock-seconds" min="1" max="20" step="0.5" value="1.5" oninput="updateSettingValue('lightning-jam-shock-seconds')">
                                 </div>
 
                                 <div class="slider-container">
@@ -1981,6 +2048,7 @@
                                     </div>
                                     <input type="range" id="lightning-jam-batch-rest-seconds" min="30" max="180" step="5" value="60" oninput="updateSettingValue('lightning-jam-batch-rest-seconds')">
                                     <p class="field-help">达到每轮次数后强制进入 30–180 秒的长休息。</p>
+                                </div>
                                 </div>
                             </div>
                         </div>
@@ -2160,7 +2228,7 @@
         </div>
     </dialog>
 
-    <script src="game-logic.js?v=20260727-lightning"></script>
-    <script src="game.js?v=20260727-ui-tabs"></script>
+    <script src="game-logic.js?v=20260728-rules"></script>
+    <script src="game.js?v=20260728-rules"></script>
 </body>
 </html>

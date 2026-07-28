@@ -446,9 +446,9 @@ function selectDevice() {
 
 function updateConsoleTestLabels() {
     const strength = Number(document.getElementById("console-test-strength")?.value || 5);
-    const duration = Number(document.getElementById("console-test-duration")?.value || 0.3);
+    const duration = Number(document.getElementById("console-test-duration")?.value || 1);
     setText("val-console-test-strength", Number.isFinite(strength) ? Math.round(strength) : "5");
-    setText("val-console-test-duration", Number.isFinite(duration) ? `${duration.toFixed(1)}s` : "0.3s");
+    setText("val-console-test-duration", Number.isFinite(duration) ? `${duration.toFixed(1)}s` : "1.0s");
 }
 
 function setConsoleTestResult(message, ok = true) {
@@ -508,7 +508,7 @@ function sendConsoleTestShock() {
     const strength = Math.round(Number(
         document.getElementById("console-test-strength")?.value || DEFAULT_TEST_STRENGTH
     ));
-    const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 0.3);
+    const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 1);
     ws.send(JSON.stringify({
         type: "test_shock",
         outputMode,

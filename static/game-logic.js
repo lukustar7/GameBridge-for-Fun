@@ -209,21 +209,23 @@
             continuousSeconds: clamp(
                 source.continuousSeconds ?? fallback.continuousSeconds ?? 8,
                 3,
-                8
+                30
             ),
             drivingRestSeconds: clamp(
                 source.drivingRestSeconds ?? fallback.drivingRestSeconds ?? 3,
                 3,
-                10
+                30
             ),
             overspeedRecoverySeconds: clamp(
                 source.overspeedRecoverySeconds ?? fallback.overspeedRecoverySeconds ?? 10,
-                5,
+                0,
                 10
             ),
-            sessionMinutes: [5, 10, 15].includes(Number(source.sessionMinutes))
-                ? Number(source.sessionMinutes)
-                : ([5, 10, 15].includes(Number(fallback.sessionMinutes)) ? Number(fallback.sessionMinutes) : 10),
+            sessionMinutes: clamp(
+                source.sessionMinutes ?? fallback.sessionMinutes ?? 10,
+                1,
+                30
+            ),
             jamEnabled: typeof source.jamEnabled === "boolean"
                 ? source.jamEnabled
                 : Boolean(fallback.jamEnabled),
@@ -240,7 +242,7 @@
             jamShockSeconds: clamp(
                 source.jamShockSeconds ?? fallback.jamShockSeconds ?? 1.5,
                 1,
-                3
+                20
             ),
             jamGapMinSeconds,
             jamGapMaxSeconds,
@@ -471,6 +473,27 @@
         return safeCount * singleSeconds + Math.max(0, safeCount - 1) * gapSeconds;
     }
 
+    function calculateDiceExecutionPlan(rawCount, cfg, outputBudgetSeconds = 300) {
+        // 骰子规则理论上最多产生 6 点豹子 × 6 倍 = 36 下。这里仍同时尊重玩家
+        // 自己设置的次数上限与单局累计输出预算，防止长时设置意外突破 300 秒。
+        const singleSeconds = clamp(cfg?.singleSeconds ?? 1, 1, 30);
+        const maximumCount = Math.round(clamp(cfg?.maxPunishCount ?? 30, 1, 36));
+        const ruleCount = Math.max(0, Math.round(Number(rawCount) || 0));
+        const budgetSeconds = Math.max(0, Number(outputBudgetSeconds) || 0);
+        const budgetCount = Math.floor(budgetSeconds / singleSeconds);
+        const executionCount = Math.min(ruleCount, maximumCount, budgetCount);
+
+        return {
+            ruleCount,
+            maximumCount,
+            budgetCount,
+            executionCount,
+            singleSeconds,
+            outputSeconds: executionCount * singleSeconds,
+            truncated: executionCount < ruleCount
+        };
+    }
+
     function isTimestampFresh(lastTimestamp, maximumAgeMs, now = Date.now()) {
         const timestamp = Number(lastTimestamp);
         const ageLimit = Number(maximumAgeMs);
@@ -500,6 +523,9 @@
         }
         if (id.startsWith("lightning-") && id.endsWith("seconds")) {
             return `${safeValue.toFixed(1)}s`;
+        }
+        if (id === "lightning-session-minutes") {
+            return `${safeValue} 分钟`;
         }
         if (id === "lightning-start-speed" || id === "lightning-full-speed") {
             return `${safeValue} km/h`;
@@ -649,6 +675,7 @@
         advanceSlotState,
         buildSlotResult,
         capPunishmentCount,
+        calculateDiceExecutionPlan,
         clamp,
         classifySlotResult,
         estimateDiceQueueSeconds,

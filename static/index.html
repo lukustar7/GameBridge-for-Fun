@@ -107,7 +107,7 @@
         <div id="tab-test" class="tab-content" role="tabpanel" aria-labelledby="tab-button-test" hidden>
             <div class="panel console-test-panel">
                 <h2>连接与安全测试</h2>
-                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用默认强度 15、时长 0.3 秒试电。测试强度最高 30、时长最长 1 秒。</p>
+                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用默认强度 15、时长 1 秒试电。测试强度最高 30、时长最长 1 秒。</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
                     <div>
                         <label class="slider-label" style="margin-bottom: 5px;">测试通道</label>
@@ -127,9 +127,9 @@
                     <div class="slider-container" style="margin: 0;">
                         <div class="slider-label">
                             <span>测试时长</span>
-                            <span id="val-console-test-duration">0.3s</span>
+                            <span id="val-console-test-duration">1.0s</span>
                         </div>
-                        <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="0.3" oninput="updateConsoleTestLabels()">
+                        <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="1.0" oninput="updateConsoleTestLabels()">
                     </div>
                 </div>
                 <div class="button-row" style="margin-bottom: 12px;">
@@ -347,6 +347,6 @@
         </div>
     </div>
 
-    <script src="console.js?v=20260723-beta1"></script>
+    <script src="console.js?v=20260728-test-duration"></script>
 </body>
 </html>

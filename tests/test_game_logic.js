@@ -223,6 +223,26 @@ test("骰子惩罚次数和队列时间处理零值、上限与间隔", () => {
     assert.equal(logic.capPunishmentCount(2.6, 30), 3);
     assert.equal(logic.estimateDiceQueueSeconds(3, { singleSeconds: 2, gapSeconds: 0.5 }), 7);
     assert.equal(logic.estimateDiceQueueSeconds(0, { singleSeconds: 2, gapSeconds: 0.5 }), 0);
+
+    const longPlan = logic.calculateDiceExecutionPlan(36, {
+        singleSeconds: 30,
+        maxPunishCount: 36
+    });
+    assert.deepEqual(longPlan, {
+        ruleCount: 36,
+        maximumCount: 36,
+        budgetCount: 10,
+        executionCount: 10,
+        singleSeconds: 30,
+        outputSeconds: 300,
+        truncated: true
+    });
+    const completePlan = logic.calculateDiceExecutionPlan(36, {
+        singleSeconds: 5,
+        maxPunishCount: 36
+    });
+    assert.equal(completePlan.executionCount, 36);
+    assert.equal(completePlan.outputSeconds, 180);
 });
 
 test("传感器时间戳超过硬期限后立即视为失效", () => {
@@ -257,10 +277,10 @@ test("雷电极速设置会被限制在允许调整的安全范围", () => {
         startStrength: 40,
         maxStrength: 40,
         fullSpeed: 55,
-        continuousSeconds: 8,
+        continuousSeconds: 30,
         drivingRestSeconds: 3,
-        overspeedRecoverySeconds: 5,
-        sessionMinutes: 10,
+        overspeedRecoverySeconds: 1,
+        sessionMinutes: 30,
         jamEnabled: true,
         jamStrength: 40,
         jamEntrySeconds: 20,
@@ -351,6 +371,22 @@ test("雷电极速达到 60 立即停止并按用户设置等待恢复", () => {
         timestamp: 10000
     }, 10000);
     assert.equal(result.state.mode, "driving");
+});
+
+test("雷电极速允许用户选择零秒超速恢复", () => {
+    const cfg = { startSpeed: 10, overspeedRecoverySeconds: 0, sessionMinutes: 10 };
+    let state = {
+        ...logic.createLightningState(1000),
+        mode: "driving",
+        overspeedLatched: true
+    };
+    const result = logic.advanceLightningState(state, cfg, {
+        valid: true,
+        speedKmh: 40,
+        timestamp: 2000
+    }, 2000);
+    assert.equal(result.state.mode, "driving");
+    assert.equal(result.state.overspeedLatched, false);
 });
 
 test("雷电极速超速恢复期间丢失定位会重新计算完整等待时间", () => {

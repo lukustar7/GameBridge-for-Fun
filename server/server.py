@@ -120,14 +120,22 @@ TEST_DEFAULT_STRENGTH = 15
 TEST_MAX_STRENGTH = 30
 TEST_MAX_DURATION_MS = 1000
 TEST_COOLDOWN_SECONDS = 1.5
+DICE_MAX_OUTPUT_BUDGET_MS = 300000
+DICE_MAX_PUNISH_COUNT = 36
+DICE_MAX_SINGLE_DURATION_MS = 30000
+SLOT_MAX_FULL_DURATION_MS = 30000
+SLOT_MAX_LIGHT_DURATION_MS = 2000
 LIGHTNING_MAX_STRENGTH = 100
 LIGHTNING_DRIVING_MIN_DURATION_MS = 3000
-LIGHTNING_DRIVING_MAX_DURATION_MS = 8000
+LIGHTNING_DRIVING_MAX_DURATION_MS = 30000
 LIGHTNING_DRIVING_MIN_REST_MS = 3000
-LIGHTNING_DRIVING_MAX_REST_MS = 10000
+LIGHTNING_DRIVING_MAX_REST_MS = 30000
 LIGHTNING_JAM_MIN_DURATION_MS = 1000
-LIGHTNING_JAM_MAX_DURATION_MS = 3000
+LIGHTNING_JAM_MAX_DURATION_MS = 20000
 LIGHTNING_JAM_MIN_REST_MS = 10000
+LIGHTNING_SESSION_MIN_MINUTES = 1
+LIGHTNING_SESSION_MAX_MINUTES = 30
+LIGHTNING_SAFETY_SAMPLE_TIMEOUT_SECONDS = 2.5
 HARDWARE_COMMAND_TIMEOUT_SECONDS = 1.0
 # V4 非零强度必须带自动到期时间。额外余量覆盖最后一帧、网络抖动和停止指令往返，
 # 即使电脑进程意外退出，App 端也会在有限时间内自行把临时强度恢复为 0。
@@ -193,6 +201,10 @@ shock_lock = asyncio.Lock()
 game_connection_last_pulse_at = {}
 # 雷电极速使用长任务，后端仍独立记录最早可再次输出时间，不能只相信前端计时器。
 game_connection_lightning_next_at = {}
+# 骰子队列与雷电会话由后台独立记账。网页负责玩法表现，后台只相信经过校验的局号、
+# 累计时长和持续安全样本，避免长任务因为前端计时器异常而越过用户选择的边界。
+game_connection_dice_round = {}
+game_connection_lightning_session = {}
 shock_generation = 0
 last_test_shock_at = 0
 active_output_task = None
@@ -1128,6 +1140,14 @@ def parse_finite_float(value):
     return number if math.isfinite(number) else None
 
 
+def parse_runtime_id(value, prefix):
+    """只接受短局号；局号用于关联消息，不能借超长文本撑大后台状态。"""
+    if not isinstance(value, str) or len(value) > 80:
+        return None
+    pattern = rf"^{re.escape(prefix)}-[A-Za-z0-9-]+$"
+    return value if re.fullmatch(pattern, value) else None
+
+
 def parse_output_config(data):
     """解析游戏端传来的输出通道配置，默认只使用 A 通道"""
     output_mode = data.get("outputMode", data.get("output_mode", "a"))
@@ -1260,25 +1280,26 @@ async def run_output_watchdog(generation, owner, timeout_seconds):
 def arm_output_watchdog(owner, mode="page"):
     """设置输出责任方；长时任务看页面心跳，持续玩法只看新的脉冲请求"""
     global output_watchdog_task, output_watchdog_owner, output_watchdog_mode, output_watchdog_generation
-    if mode not in {"page", "continuous"}:
+    if mode not in {"page", "continuous", "lightning"}:
         raise ValueError("未知输出看门狗模式")
     disarm_output_watchdog()
     output_watchdog_generation += 1
     generation = output_watchdog_generation
     output_watchdog_owner = owner
     output_watchdog_mode = mode
-    timeout_seconds = (
-        CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS
-        if mode == "continuous"
-        else OUTPUT_HEARTBEAT_TIMEOUT_SECONDS
-    )
+    if mode == "continuous":
+        timeout_seconds = CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS
+    elif mode == "lightning":
+        timeout_seconds = LIGHTNING_SAFETY_SAMPLE_TIMEOUT_SECONDS
+    else:
+        timeout_seconds = OUTPUT_HEARTBEAT_TIMEOUT_SECONDS
     output_watchdog_task = asyncio.create_task(
         run_output_watchdog(generation, owner, timeout_seconds)
     )
 
 
-def refresh_output_watchdog(owner):
-    """普通页面消息只给长时结算续期；持续短脉冲必须由新 game_pulse 明确续期"""
+def refresh_output_watchdog(owner, message_type=None):
+    """普通任务看页面消息；雷电长任务只接受持续安全样本，普通 ping 不能替代速度。"""
     if (
         owner is output_watchdog_owner
         and output_watchdog_mode == "page"
@@ -1286,6 +1307,14 @@ def refresh_output_watchdog(owner):
         and not output_watchdog_task.done()
     ):
         arm_output_watchdog(owner, mode="page")
+    elif (
+        owner is output_watchdog_owner
+        and output_watchdog_mode == "lightning"
+        and message_type == "lightning_safety_sample"
+        and output_watchdog_task
+        and not output_watchdog_task.done()
+    ):
+        arm_output_watchdog(owner, mode="lightning")
 
 
 def on_output_task_done(task):
@@ -1444,6 +1473,19 @@ async def send_lightning_feedback(websocket, request_id, ok, message):
     try:
         await websocket.send(json.dumps({
             "type": "lightning_feedback",
+            "requestId": request_id,
+            "ok": ok,
+            "message": message,
+        }))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
+async def send_game_shock_feedback(websocket, request_id, ok, message):
+    """确认骰子或角子机的单次任务是否真正进入调度，避免页面显示假输出。"""
+    try:
+        await websocket.send(json.dumps({
+            "type": "game_shock_feedback",
             "requestId": request_id,
             "ok": ok,
             "message": message,
@@ -1617,7 +1659,8 @@ async def web_ws_handler(websocket, path):
 
                 # 输出看门狗只认发起输出的这一条游戏连接。正常页面每秒至少发送一次 ping，
                 # 页面冻结或网络半断开时不会再续报，后端会在硬期限内自动归零。
-                refresh_output_watchdog(websocket)
+                if data.get("type") != "lightning_safety_sample":
+                    refresh_output_watchdog(websocket, data.get("type"))
                 
                 # 网页自定义应用层 Ping 延迟包，原样回复
                 if data.get("type") == "ping":
@@ -1637,6 +1680,106 @@ async def web_ws_handler(websocket, path):
 
                 elif data.get("type") == "test_shock":
                     await handle_test_shock_request(websocket, data)
+
+                elif data.get("type") == "dice_round_start":
+                    round_id = parse_runtime_id(data.get("roundId"), "dice")
+                    planned_count = clamp_int(
+                        data.get("plannedCount"),
+                        1,
+                        DICE_MAX_PUNISH_COUNT,
+                        fallback=0,
+                    )
+                    single_duration = clamp_int(
+                        data.get("singleDuration"),
+                        MIN_STANDALONE_SHOCK_DURATION_MS,
+                        DICE_MAX_SINGLE_DURATION_MS,
+                        fallback=0,
+                    )
+                    if round_id and planned_count > 0 and single_duration > 0:
+                        game_connection_dice_round[websocket] = {
+                            "round_id": round_id,
+                            "planned_count": planned_count,
+                            "single_duration": single_duration,
+                            "used_ms": 0,
+                            "last_sequence": 0,
+                        }
+
+                elif data.get("type") == "lightning_session_start":
+                    session_id = parse_runtime_id(data.get("sessionId"), "lightning")
+                    if not session_id:
+                        continue
+                    if output_watchdog_owner is websocket:
+                        # 同一页面重开一局不能让旧局的长输出带进新会话。先硬停旧任务，
+                        # 再要求新会话重新提交合规速度样本。
+                        await stop_all_output()
+                    game_connection_lightning_next_at.pop(websocket, None)
+                    session_minutes = clamp_int(
+                        data.get("sessionMinutes"),
+                        LIGHTNING_SESSION_MIN_MINUTES,
+                        LIGHTNING_SESSION_MAX_MINUTES,
+                        fallback=10,
+                    )
+                    start_speed = parse_finite_float(data.get("startSpeed"))
+                    if start_speed is None:
+                        start_speed = 10.0
+                    start_speed = max(5.0, min(20.0, start_speed))
+                    now = asyncio.get_running_loop().time()
+                    game_connection_lightning_session[websocket] = {
+                        "session_id": session_id,
+                        "deadline": now + session_minutes * 60,
+                        "start_speed": start_speed,
+                        "last_sample_at": 0.0,
+                        "last_speed": None,
+                        "mode": "waiting_speed",
+                        "safe": False,
+                    }
+
+                elif data.get("type") == "lightning_session_end":
+                    session = game_connection_lightning_session.get(websocket)
+                    session_id = parse_runtime_id(data.get("sessionId"), "lightning")
+                    if session and session_id == session.get("session_id"):
+                        game_connection_lightning_session.pop(websocket, None)
+                        game_connection_lightning_next_at.pop(websocket, None)
+                        await stop_all_output()
+
+                elif data.get("type") == "lightning_safety_sample":
+                    session = game_connection_lightning_session.get(websocket)
+                    session_id = parse_runtime_id(data.get("sessionId"), "lightning")
+                    if not session or session_id != session.get("session_id"):
+                        if output_watchdog_owner is websocket:
+                            await stop_all_output()
+                        continue
+
+                    now = asyncio.get_running_loop().time()
+                    speed_kmh = parse_finite_float(data.get("speedKmh"))
+                    sample_age_ms = parse_finite_float(data.get("sampleAgeMs"))
+                    mode = data.get("mode")
+                    age_valid = sample_age_ms is not None and 0 <= sample_age_ms <= 3000
+                    speed_valid = speed_kmh is not None and 0 <= speed_kmh < 60
+                    mode_valid = mode in {"driving", "jam"}
+                    if mode == "driving" and speed_valid:
+                        mode_valid = speed_kmh >= session["start_speed"]
+                    elif mode == "jam" and speed_valid:
+                        mode_valid = speed_kmh < min(60.0, session["start_speed"] + 1.0)
+                    session_valid = now < session["deadline"]
+                    safe = age_valid and speed_valid and mode_valid and session_valid
+                    session.update({
+                        "last_sample_at": now,
+                        "last_speed": speed_kmh,
+                        "mode": mode,
+                        "safe": safe,
+                    })
+
+                    if safe:
+                        refresh_output_watchdog(websocket, "lightning_safety_sample")
+                    elif output_watchdog_owner is websocket:
+                        await stop_all_output()
+                        await send_lightning_feedback(
+                            websocket,
+                            0,
+                            False,
+                            "速度、定位、模式或单局时限已不满足，当前输出已停止",
+                        )
                 
                 # 游戏 1 / 游戏 2 的持续线性惩罚数据上报 (每 100ms 触发一次)
                 elif data.get("type") == "game_pulse":
@@ -1673,6 +1816,21 @@ async def web_ws_handler(websocket, path):
                         await send_lightning_feedback(websocket, request_id, False, "未知的雷电极速输出阶段")
                         continue
 
+                    now = asyncio.get_running_loop().time()
+                    session = game_connection_lightning_session.get(websocket)
+                    session_id = parse_runtime_id(data.get("sessionId"), "lightning")
+                    session_ready = (
+                        session
+                        and session_id == session.get("session_id")
+                        and now < session.get("deadline", 0)
+                        and session.get("safe") is True
+                        and now - session.get("last_sample_at", 0) <= LIGHTNING_SAFETY_SAMPLE_TIMEOUT_SECONDS
+                        and session.get("mode") == phase
+                    )
+                    if not session_ready:
+                        await send_lightning_feedback(websocket, request_id, False, "雷电会话或持续安全样本尚未就绪")
+                        continue
+
                     # 页面不发送经纬度。后端只核对速度与样本年龄，阻止前端计时器卡死、
                     # 定位停更或刚达到 60 km/h 时仍把上一轮输出请求送进硬件调度。
                     speed_kmh = parse_finite_float(data.get("speedKmh"))
@@ -1684,7 +1842,6 @@ async def web_ws_handler(websocket, path):
                         await send_lightning_feedback(websocket, request_id, False, "定位样本已过期，保持停止")
                         continue
 
-                    now = asyncio.get_running_loop().time()
                     next_allowed_at = game_connection_lightning_next_at.get(websocket, 0)
                     if now < next_allowed_at:
                         remaining = next_allowed_at - now
@@ -1750,33 +1907,93 @@ async def web_ws_handler(websocket, path):
                         continue
 
                     game_connection_lightning_next_at[websocket] = now + (duration + rest_ms) / 1000
-                    arm_output_watchdog(websocket)
+                    arm_output_watchdog(websocket, mode="lightning")
                     await send_lightning_feedback(websocket, request_id, True, "雷电极速输出已进入安全调度")
                         
                 # 结算型惩罚上报：骰子、角子机满槽和角子机轻惩罚都走这里。
                 elif data.get("type") == "game_shock_trigger":
+                    request_id = clamp_int(data.get("requestId"), 0, 2_147_483_647, fallback=0)
+                    game_name = data.get("game")
+                    phase = data.get("phase")
                     strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
+                    if game_name == "dice":
+                        if phase != "dice_hit":
+                            await send_game_shock_feedback(websocket, request_id, False, "骰子输出阶段无效")
+                            continue
+                        maximum_duration = DICE_MAX_SINGLE_DURATION_MS
+                    elif game_name == "slot" and phase == "slot_full":
+                        maximum_duration = SLOT_MAX_FULL_DURATION_MS
+                    elif game_name == "slot" and phase == "slot_light":
+                        maximum_duration = SLOT_MAX_LIGHT_DURATION_MS
+                    else:
+                        # 结算输出必须带明确玩法与阶段。拒绝旧缓存或伪造客户端省略字段后
+                        # 落入更宽松的通用上限，避免绕过骰子累计预算和角子机时长边界。
+                        await send_game_shock_feedback(websocket, request_id, False, "未知的结算输出玩法或阶段")
+                        continue
+
                     duration = clamp_int(
                         data.get("duration", 1000),
                         MIN_STANDALONE_SHOCK_DURATION_MS,
-                        MAX_SHOCK_DURATION_MS,
-                        fallback=1000
+                        maximum_duration,
+                        fallback=1000,
                     )
-                    if strength > 0:
-                        output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
-                        waveform_key = parse_waveform_config(data)
-                        # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
-                        scheduled = schedule_game_shock(
-                            strength,
-                            duration,
-                            output_mode,
-                            b_strength_mode,
-                            b_strength_percent,
-                            clear_after=True,
-                            waveform_key=waveform_key,
+
+                    dice_round = None
+                    if game_name == "dice":
+                        round_id = parse_runtime_id(data.get("roundId"), "dice")
+                        sequence = clamp_int(
+                            data.get("sequence"),
+                            1,
+                            DICE_MAX_PUNISH_COUNT,
+                            fallback=0,
                         )
-                        if scheduled:
-                            arm_output_watchdog(websocket)
+                        dice_round = game_connection_dice_round.get(websocket)
+                        valid_dice_step = (
+                            dice_round
+                            and round_id == dice_round.get("round_id")
+                            and sequence == dice_round.get("last_sequence", 0) + 1
+                            and sequence <= dice_round.get("planned_count", 0)
+                            and duration == dice_round.get("single_duration")
+                            and dice_round.get("used_ms", 0) + duration <= DICE_MAX_OUTPUT_BUDGET_MS
+                        )
+                        if not valid_dice_step:
+                            await send_game_shock_feedback(
+                                websocket,
+                                request_id,
+                                False,
+                                "骰子局号、顺序或 300 秒累计输出预算不满足",
+                            )
+                            continue
+
+                    if strength <= 0:
+                        await send_game_shock_feedback(websocket, request_id, False, "请求强度为 0，未输出")
+                        continue
+
+                    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                    waveform_key = parse_waveform_config(data)
+                    # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
+                    scheduled = schedule_game_shock(
+                        strength,
+                        duration,
+                        output_mode,
+                        b_strength_mode,
+                        b_strength_percent,
+                        clear_after=True,
+                        waveform_key=waveform_key,
+                    )
+                    if scheduled:
+                        if dice_round is not None:
+                            dice_round["used_ms"] += duration
+                            dice_round["last_sequence"] += 1
+                        arm_output_watchdog(websocket)
+                        await send_game_shock_feedback(websocket, request_id, True, "输出已进入安全调度")
+                    else:
+                        await send_game_shock_feedback(
+                            websocket,
+                            request_id,
+                            False,
+                            "输出忙，或所选通道限幅尚未读取/已设为 0",
+                        )
 
                 elif data.get("type") == "stop_shock":
                     stopped = await stop_all_output()
@@ -1789,6 +2006,8 @@ async def web_ws_handler(websocket, path):
             game_connections.discard(websocket)
             game_connection_last_pulse_at.pop(websocket, None)
             game_connection_lightning_next_at.pop(websocket, None)
+            game_connection_dice_round.pop(websocket, None)
+            game_connection_lightning_session.pop(websocket, None)
             state["game_client_connected"] = len(game_connections) > 0
             if not state["game_client_connected"]:
                 state["game_latency"] = -1

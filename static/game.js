@@ -7,6 +7,7 @@ let latencyTimer = null;
 let reconnectTimer = null;
 let suppressReconnect = false;
 let sensorActionInProgress = false;
+let mobileTestStatusTimer = null;
 
 const urlParams = new URLSearchParams(window.location.search);
 
@@ -35,8 +36,11 @@ const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
 const GLOBAL_OUTPUT_STORAGE_KEY = "game_bridge_for_fun_global_output_v1";
 const DEFAULT_WAVEFORM = "game_default";
-// 手机试电不再暴露额外强度控件；15 来自郊狼 2.0 真机可感知结果，时长仍保持 0.3 秒。
+// 手机试电不再暴露额外强度控件；15 来自郊狼 2.0 真机可感知结果，1 秒由后台硬上限兜底。
 const MOBILE_TEST_STRENGTH = 15;
+const MOBILE_TEST_DURATION_MS = 1000;
+const DICE_OUTPUT_BUDGET_SECONDS = 300;
+const SENSOR_CONTROL_FRAME_REST_MS = 250;
 const WAVEFORM_LABELS = Object.freeze({
     game_default: "游戏默认",
     random: "随机（按时长）",
@@ -70,8 +74,7 @@ const DEFAULT_SETTINGS = {
         safeRadius: 26,
         gapInner: 12,
         sensitivity: 55,
-        forgiveMs: 600,
-        restMs: 250
+        forgiveMs: 600
     },
     angle: {
         strengthMin: 15,
@@ -79,8 +82,7 @@ const DEFAULT_SETTINGS = {
         targetOffset: 0,
         tolerance: 8,
         triggerMs: 800,
-        rampDegrees: 28,
-        restMs: 250
+        rampDegrees: 28
     },
     dice: {
         strength: 20,
@@ -135,7 +137,7 @@ const {
     advanceSlotState,
     advanceLightningState,
     buildSlotResult,
-    capPunishmentCount,
+    calculateDiceExecutionPlan,
     clamp,
     classifySlotResult,
     estimateDiceQueueSeconds,
@@ -162,7 +164,7 @@ const GAME_META = {
         primaryValue: (cfg) => cfg.strengthMin,
         secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => cfg.mode === "gap" ? `夹缝 ${cfg.gapInner}% / ${cfg.safeRadius}%` : `半径 ${cfg.safeRadius}%`,
-        triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发 | 休息 ${cfg.restMs}ms`
+        triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发 | 回到安全区立即停止`
     },
     angle: {
         title: "保持角度",
@@ -173,7 +175,7 @@ const GAME_META = {
         primaryValue: (cfg) => cfg.strengthMin,
         secondaryValue: (cfg) => cfg.strengthMax,
         toleranceLabel: (cfg) => `目标 ${cfg.targetOffset}° ± ${cfg.tolerance}°`,
-        triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发 | 休息 ${cfg.restMs}ms`
+        triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发 | 回到目标范围立即停止`
     },
     dice: {
         title: "摇骰子对决",
@@ -226,7 +228,7 @@ const SETTINGS_CATEGORY_LAYOUT = Object.freeze({
         { label: "规则", groupIndexes: [1] }
     ],
     slot: [
-        { label: "输出", groupIndexes: [0, 1] },
+        { label: "基础", groupIndexes: [0, 1] },
         { label: "节奏", groupIndexes: [2] },
         { label: "规则", groupIndexes: [3, 4] }
     ],
@@ -239,10 +241,10 @@ const SETTINGS_CATEGORY_LAYOUT = Object.freeze({
 const SELECTION_TAB_META = Object.freeze({
     play: {
         title: "选择玩法",
-        description: "先选玩法；连接、权限和输出方式统一放在“开始前准备”。"
+        description: "先选玩法；连接、权限和输出方式统一放在“全局设置”。"
     },
     setup: {
-        title: "开始前准备",
+        title: "全局设置",
         description: "在这里统一完成连接自检、权限检查、波形和输出通道设置。"
     },
     info: {
@@ -300,10 +302,14 @@ let lightningNextOutputAt = 0;
 let lightningJamBatchCount = 0;
 let lightningJamBatchRestUntil = 0;
 let lightningLastMode = "";
+let lightningResumeFromJam = false;
 let lightningRequestSequence = 0;
 let lightningOutputPending = false;
 let lightningCurrentOutputUntil = 0;
 let lightningSafetyAcceptedForAttempt = false;
+let lightningSessionId = "";
+let lightningLastSafetySampleAt = 0;
+const pendingLightningRequests = new Map();
 
 let canvas = null;
 let ctx = null;
@@ -354,11 +360,17 @@ let slotAutoTimer = null;
 let slotCooldownTimer = null;
 let slotCooldownUntil = 0;
 let slotLightCooldownUntil = 0;
+let slotOutputUntil = 0;
+let slotRestUntil = 0;
 
 // 连续惩罚队列用于骰子这种“输几点就电几下”的玩法，停止输出时必须能立即清掉。
 let dicePunishTimer = null;
 let dicePunishRemaining = 0;
 let dicePunishGeneration = 0;
+let diceRoundId = "";
+let dicePunishSequence = 0;
+let standaloneRequestSequence = 0;
+const pendingStandaloneRequests = new Map();
 
 // 真实骰子是 3x3 点阵。这里用 1-9 表示九宫格位置，避免在多处手写点位导致显示错位。
 const DICE_PIP_MAP = {
@@ -384,6 +396,35 @@ function setText(id, value) {
     if (node && node.innerText !== String(value)) {
         node.innerText = String(value);
     }
+}
+
+function createRuntimeId(prefix) {
+    // 运行局号只用于把同一局的多条消息关联起来，不包含设备、位置或用户信息。
+    const randomPart = typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `${prefix}-${randomPart}`;
+}
+
+function setGamePhase(phase, detail = "") {
+    // 主状态栏始终先说清楚当前处于哪一阶段。游戏细节可以继续变化，但不能让
+    // 长间隔看起来像页面卡死，也不能把仍在输出的时段误写成“休息中”。
+    const labels = {
+        ready: "等待操作",
+        checking: "等待判定",
+        drawing: "开奖中",
+        output: "输出中",
+        rest: "休息中",
+        interval: "间隔中",
+        paused: "已暂停",
+        blocked: "无法输出",
+        stopped: "已停止"
+    };
+    const safePhase = Object.prototype.hasOwnProperty.call(labels, phase) ? phase : "ready";
+    const text = detail ? `${labels[safePhase]} · ${detail}` : labels[safePhase];
+    setText("game-status", text);
+    const node = $("game-status");
+    if (node) node.dataset.phase = safePhase;
 }
 
 function setConnectionClass(id, connected) {
@@ -550,22 +591,64 @@ function connectWebSocket() {
         } else if (data.type === "state_update") {
             updateTechStatus(data);
         } else if (data.type === "test_feedback") {
-            setMobileTestResult(data.message || "测试请求已处理", data.ok);
+            clearTimeout(mobileTestStatusTimer);
+            mobileTestStatusTimer = null;
+            if (data.ok) {
+                setMobileTestResult(`试电中：${data.message || "后台已确认"}`, true);
+                mobileTestStatusTimer = setTimeout(() => {
+                    mobileTestStatusTimer = null;
+                    setMobileTestResult("试电结束，可以继续检查或开始游戏。", true);
+                }, MOBILE_TEST_DURATION_MS);
+            } else {
+                setMobileTestResult(data.message || "测试请求未执行", false);
+            }
         } else if (data.type === "stop_feedback") {
             const message = data.message || "停止请求已处理";
             setMobileTestResult(message, data.ok);
-            setText("game-status", message);
+            if (activeGame) setGamePhase(data.ok ? "stopped" : "blocked", message);
             if (activeGame === "lightning" && !data.ok) {
                 lightningNextOutputAt = Number.POSITIVE_INFINITY;
                 setText("lightning-next-action", "停止未确认，请在设备 App 中手动停止");
             }
         } else if (data.type === "lightning_feedback") {
-            if (!data.ok && activeGame === "lightning") {
+            const requestId = Number(data.requestId);
+            const requestSessionId = pendingLightningRequests.get(requestId);
+            if (requestId !== 0) pendingLightningRequests.delete(requestId);
+            const belongsToCurrentSession = requestId === 0 || requestSessionId === lightningSessionId;
+            if (!data.ok && activeGame === "lightning" && belongsToCurrentSession) {
                 lightningOutputPending = false;
                 lightningCurrentOutputUntil = 0;
                 lightningNextOutputAt = Math.max(lightningNextOutputAt, Date.now() + 1000);
-                setText("game-status", data.message || "雷电极速输出被安全规则拒绝");
+                setGamePhase("blocked", data.message || "雷电极速输出被安全规则拒绝");
             }
+        } else if (data.type === "game_shock_feedback" && !data.ok) {
+            const message = data.message || "后台拒绝了本次输出";
+            const requestId = Number(data.requestId);
+            const pendingRequest = pendingStandaloneRequests.get(requestId);
+            pendingStandaloneRequests.delete(requestId);
+            if (!pendingRequest || pendingRequest.game !== activeGame) return;
+            if (activeGame === "dice") {
+                clearTimeout(dicePunishTimer);
+                dicePunishTimer = null;
+                dicePunishRemaining = 0;
+                dicePunishGeneration++;
+                setGamePhase("blocked", message);
+                setText("dice-instruction", `${message}；本局队列已停止。`);
+                const rollButton = $("btn-roll");
+                if (rollButton) rollButton.disabled = !gameSettings.dice.manualRoll;
+            } else if (activeGame === "slot") {
+                clearTimeout(slotCooldownTimer);
+                slotCooldownTimer = null;
+                slotCooldownUntil = 0;
+                slotOutputUntil = 0;
+                slotRestUntil = 0;
+                setGamePhase("blocked", message);
+                setText("slot-result", `${message}，本轮未实际输出。`);
+                finishSlotRound();
+            }
+        } else if (data.type === "game_shock_feedback") {
+            // 成功回执只用于释放请求关联；界面已经按本地节奏显示输出阶段。
+            pendingStandaloneRequests.delete(Number(data.requestId));
         } else if (data.type === "button_feedback") {
             vibrateBriefly(20);
         }
@@ -803,13 +886,15 @@ function sendMobileTestShock(outputMode) {
         bStrengthPercent: 100,
         waveform: DEFAULT_WAVEFORM,
         strength: MOBILE_TEST_STRENGTH,
-        duration: 300
+        duration: MOBILE_TEST_DURATION_MS
     });
-    setMobileTestResult("已发送测试请求，等待后台确认。");
+    setMobileTestResult("试电中；后台确认后会在 1 秒内自动结束。");
 }
 
 function stopMobileOutput() {
     const serviceAvailable = ws && ws.readyState === WebSocket.OPEN;
+    clearTimeout(mobileTestStatusTimer);
+    mobileTestStatusTimer = null;
 
     // 顶部按钮是人工急停，不只是“清掉当前一帧”：必须同时杀掉骰子队列、角子机延时和感应循环。
     // exitGame 会先调用 stopCurrentGame 发出唯一一次 A/B 停止，再退回玩法列表，防止旧定时器稍后重新输出。
@@ -880,7 +965,10 @@ async function releaseScreenWakeLock() {
 
 function emergencyStop(reason) {
     // 即使只在做“安全试电”，页面离开前台也必须触发同一套停机和断线兜底。
-    if (activeGame === "lightning") stopLocationTracking();
+    if (activeGame === "lightning") {
+        stopLocationTracking();
+        endLightningSession(reason);
+    }
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
@@ -895,7 +983,7 @@ function emergencyStop(reason) {
     });
     closeGameSocketForEmergency();
     releaseScreenWakeLock();
-    setText("game-status", "已紧急停止");
+    setGamePhase("stopped", "已紧急停止");
 }
 
 function bindEmergencyStopEvents() {
@@ -1701,7 +1789,7 @@ function populateSettingsForm(gameName) {
         setRangeValue("shake-gap-inner", cfg.gapInner);
         setRangeValue("shake-sensitivity", cfg.sensitivity);
         setRangeValue("shake-forgive-ms", cfg.forgiveMs);
-        setRangeValue("shake-rest-ms", cfg.restMs);
+        updateShakeModeVisibility();
     } else if (gameName === "angle") {
         setRangeValue("angle-strength-min", cfg.strengthMin);
         setRangeValue("angle-strength-max", cfg.strengthMax);
@@ -1709,7 +1797,6 @@ function populateSettingsForm(gameName) {
         setRangeValue("angle-tolerance", cfg.tolerance);
         setRangeValue("angle-trigger-ms", cfg.triggerMs);
         setRangeValue("angle-ramp-degrees", cfg.rampDegrees);
-        setRangeValue("angle-rest-ms", cfg.restMs);
     } else if (gameName === "dice") {
         setRangeValue("dice-strength", cfg.strength);
         setRangeValue("dice-single-seconds", cfg.singleSeconds);
@@ -1748,7 +1835,7 @@ function populateSettingsForm(gameName) {
         setRangeValue("lightning-continuous-seconds", normalized.continuousSeconds);
         setRangeValue("lightning-driving-rest-seconds", normalized.drivingRestSeconds);
         setRangeValue("lightning-overspeed-recovery-seconds", normalized.overspeedRecoverySeconds);
-        $("lightning-session-minutes").value = String(normalized.sessionMinutes);
+        setRangeValue("lightning-session-minutes", normalized.sessionMinutes);
         $("lightning-jam-enabled").checked = normalized.jamEnabled;
         setRangeValue("lightning-jam-strength", normalized.jamStrength);
         setRangeValue("lightning-jam-entry-seconds", normalized.jamEntrySeconds);
@@ -1761,12 +1848,17 @@ function populateSettingsForm(gameName) {
     }
 }
 
+function updateShakeModeVisibility() {
+    const gapSetting = $("shake-gap-inner-setting");
+    if (gapSetting) gapSetting.hidden = $("shake-mode")?.value !== "gap";
+}
+
 function updateLightningJamVisibility() {
-    const group = $("lightning-jam-settings");
+    const options = $("lightning-jam-options");
     const enabled = Boolean($("lightning-jam-enabled")?.checked);
-    if (!group) return;
-    group.hidden = !enabled;
-    if (!enabled) group.open = false;
+    if (options) options.hidden = !enabled;
+    const summary = $("lightning-jam-settings")?.querySelector("summary small");
+    if (summary) summary.innerText = enabled ? "强度、触发间隔与整轮休息" : "默认关闭";
 }
 
 function populateGlobalOutputForm() {
@@ -1919,8 +2011,7 @@ function collectSettingsFromForm(gameName) {
             safeRadius: clamp(readNumber("shake-safe-radius", 26), 12, 45),
             gapInner: clamp(readNumber("shake-gap-inner", 12), 6, 28),
             sensitivity: clamp(readNumber("shake-sensitivity", 55), 20, 100),
-            forgiveMs: clamp(readNumber("shake-forgive-ms", 600), 0, 2000),
-            restMs: clamp(readNumber("shake-rest-ms", 250), 200, 2000)
+            forgiveMs: clamp(readNumber("shake-forgive-ms", 600), 0, 2000)
         };
     }
 
@@ -1933,18 +2024,17 @@ function collectSettingsFromForm(gameName) {
             targetOffset: clamp(readNumber("angle-target-offset", 0), -45, 45),
             tolerance: clamp(readNumber("angle-tolerance", 8), 2, 30),
             triggerMs: clamp(readNumber("angle-trigger-ms", 800), 100, 2500),
-            rampDegrees: clamp(readNumber("angle-ramp-degrees", 28), 5, 60),
-            restMs: clamp(readNumber("angle-rest-ms", 250), 200, 2000)
+            rampDegrees: clamp(readNumber("angle-ramp-degrees", 28), 5, 60)
         };
     }
 
     if (gameName === "dice") {
         return {
             strength: clamp(readNumber("dice-strength", 20), 0, 200),
-            singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 1.0, 5.0),
+            singleSeconds: clamp(readNumber("dice-single-seconds", 2.0), 1.0, 30.0),
             gapSeconds: clamp(readNumber("dice-gap-seconds", 0.5), 0.2, 3.0),
             leopardMultiplier: clamp(readNumber("dice-leopard-multiplier", 3), 1, 6),
-            maxPunishCount: clamp(readNumber("dice-max-punish-count", 30), 1, 60),
+            maxPunishCount: clamp(readNumber("dice-max-punish-count", 30), 1, 36),
             shakeSensitivity: clamp(readNumber("dice-shake-sensitivity", 15), 8, 35),
             opponentDifficulty: $("dice-opponent-difficulty").value,
             manualRoll: $("dice-manual-roll").checked
@@ -1957,7 +2047,7 @@ function collectSettingsFromForm(gameName) {
         return {
             strengthMin: Math.min(minStrength, maxStrength),
             strengthMax: Math.max(minStrength, maxStrength),
-            shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 1.0, 8.0),
+            shockSeconds: clamp(readNumber("slot-shock-seconds", 2.0), 1.0, 30.0),
             lightPunishEnabled: $("slot-light-punish-enabled").checked,
             lightShockSeconds: clamp(readNumber("slot-light-shock-seconds", 1.0), 1.0, 2.0),
             restMs: clamp(readNumber("slot-rest-ms", 800), 300, 3000),
@@ -2153,19 +2243,19 @@ function setupPlayScreen(gameName) {
     stopRuntimeLoops();
 
     if (gameName === "shake") {
-        setText("game-status", "保持弹珠停留在安全区内");
+        setGamePhase("ready", "保持弹珠停留在安全区内");
         initShakeGame();
     } else if (gameName === "angle") {
-        setText("game-status", "保持当前姿态附近的目标角度");
+        setGamePhase("ready", "保持当前姿态附近的目标角度");
         initAngleGame();
     } else if (gameName === "dice") {
-        setText("game-status", motionReady ? "摇晃手机开始对决" : "未收到摇晃感应，可先手动摇号");
+        setGamePhase("ready", motionReady ? "摇晃手机开始对决" : "未收到摇晃感应，可先手动摇号");
         initDiceGame();
     } else if (gameName === "slot") {
-        setText("game-status", "点击开转，高频开奖");
+        setGamePhase("ready", "点击开转，高频开奖");
         initSlotGame();
     } else if (gameName === "lightning") {
-        setText("game-status", "等待可靠速度达到启动值并稳定 2 秒");
+        setGamePhase("checking", "等待可靠速度达到启动值并稳定 2 秒");
         initLightningGame();
     }
 }
@@ -2200,10 +2290,18 @@ function stopRuntimeLoops() {
     lightningJamBatchCount = 0;
     lightningJamBatchRestUntil = 0;
     lightningLastMode = "";
+    lightningResumeFromJam = false;
     lightningOutputPending = false;
     lightningCurrentOutputUntil = 0;
+    lightningLastSafetySampleAt = 0;
     nextPulseAllowedAt = 0;
     sensorStopRequestedForStaleData = false;
+    slotOutputUntil = 0;
+    slotRestUntil = 0;
+    diceRoundId = "";
+    dicePunishSequence = 0;
+    pendingStandaloneRequests.clear();
+    pendingLightningRequests.clear();
 }
 
 function exitGame() {
@@ -2212,7 +2310,10 @@ function exitGame() {
 }
 
 function stopCurrentGame() {
-    if (activeGame === "lightning") stopLocationTracking();
+    if (activeGame === "lightning") {
+        stopLocationTracking();
+        endLightningSession("leave_game");
+    }
     stopRuntimeLoops();
     activeGame = null;
     isDiceShaking = false;
@@ -2232,8 +2333,19 @@ function stopCurrentGame() {
     if (slotButton) {
         slotButton.disabled = false;
     }
-    setText("game-status", "已停止输出");
+    setGamePhase("stopped", "已停止输出");
     setText("global-safety-status", "已请求停止 A/B 输出");
+}
+
+function endLightningSession(reason) {
+    if (!lightningSessionId) return;
+    sendGameMessage({
+        type: "lightning_session_end",
+        sessionId: lightningSessionId,
+        reason
+    });
+    lightningSessionId = "";
+    lightningLastSafetySampleAt = 0;
 }
 
 // --- 6. 统一惩罚发送与本机震动 ---
@@ -2248,7 +2360,7 @@ function canPunish(requiresOrientation = true) {
         if (!sensorStopRequestedForStaleData) {
             sensorStopRequestedForStaleData = true;
             sendGameMessage({ type: "stop_shock" });
-            setText("game-status", "感应器数据已中断，输出已停止；恢复后重新计时");
+            setGamePhase("paused", "感应器数据已中断，输出已停止；恢复后重新计时");
         }
         return false;
     }
@@ -2288,18 +2400,23 @@ function getOutputPayload() {
     };
 }
 
-function sendConfiguredShock(strength, duration) {
+function sendConfiguredShock(strength, duration, metadata = {}) {
     const safeStrength = clamp(Math.round(strength), 0, 200);
     if (safeStrength <= 0) return false;
     // 发送前再次确认硬件就绪状态，防止 App 已扫码但蓝牙设备离线时空发。
     if (!latestDeviceConnected || !isConfiguredOutputReady()) return false;
 
-    return sendGameMessage({
+    const requestId = ++standaloneRequestSequence;
+    const sent = sendGameMessage({
+        ...metadata,
         type: "game_shock_trigger",
+        requestId,
         strength: safeStrength,
         duration: Math.round(duration),
         ...getOutputPayload()
     });
+    if (sent) pendingStandaloneRequests.set(requestId, { ...metadata });
+    return sent;
 }
 
 function formatOutputLabel(cfg) {
@@ -2514,28 +2631,28 @@ function checkShakePunish() {
 
     if (zone.err <= 0) {
         shakeOutSince = null;
-        setText("game-status", "安全区内");
+        setGamePhase("ready", "安全区内");
         return;
     }
 
     if (shakeOutSince === null) {
         shakeOutSince = Date.now();
-        setText("game-status", "已出界，宽容计时中");
+        setGamePhase("checking", "已出界，等待持续判定");
         return;
     }
 
     const elapsed = Date.now() - shakeOutSince;
     if (elapsed < cfg.forgiveMs) {
         const remain = Math.ceil((cfg.forgiveMs - elapsed) / 100) / 10;
-        setText("game-status", `已出界，约 ${remain.toFixed(1)}s 后触发`);
+        setGamePhase("checking", `已出界，约 ${remain.toFixed(1)}s 后触发`);
         vibrateWarning();
         return;
     }
 
     const ratio = zone.dangerRatio;
     const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
-    setText("game-status", `出界惩罚: ${Math.round(strength)}，电完休息 ${cfg.restMs}ms`);
-    sendPulse(strength, 120, cfg.restMs);
+    setGamePhase("output", `持续出界，当前强度 ${Math.round(strength)}`);
+    sendPulse(strength, 120, SENSOR_CONTROL_FRAME_REST_MS);
 }
 
 // --- 8. 游戏 2：保持角度 ---
@@ -2653,28 +2770,28 @@ function checkAnglePunish() {
 
     if (angleState.err <= 0) {
         angleBadSince = null;
-        setText("game-status", "角度稳定");
+        setGamePhase("ready", "角度稳定");
         return;
     }
 
     if (angleBadSince === null) {
         angleBadSince = Date.now();
-        setText("game-status", "角度偏离，等待持续判定");
+        setGamePhase("checking", "角度偏离，等待持续判定");
         return;
     }
 
     const elapsed = Date.now() - angleBadSince;
     if (elapsed < cfg.triggerMs) {
         const remain = Math.ceil((cfg.triggerMs - elapsed) / 100) / 10;
-        setText("game-status", `角度偏离，约 ${remain.toFixed(1)}s 后触发`);
+        setGamePhase("checking", `角度偏离，约 ${remain.toFixed(1)}s 后触发`);
         vibrateWarning();
         return;
     }
 
     const ratio = angleState.dangerRatio;
     const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
-    setText("game-status", `角度惩罚: ${Math.round(strength)}，电完休息 ${cfg.restMs}ms`);
-    sendPulse(strength, 120, cfg.restMs);
+    setGamePhase("output", `持续偏离，当前强度 ${Math.round(strength)}`);
+    sendPulse(strength, 120, SENSOR_CONTROL_FRAME_REST_MS);
 }
 
 // --- 9. 游戏 3：摇骰子对决 ---
@@ -2744,6 +2861,7 @@ function triggerDiceShake(force) {
         isDiceShaking = true;
         diceShakeEnergy = 0;
         setText("dice-instruction", "正在摇号...");
+        setGamePhase("drawing", "骰子正在滚动");
         $("dice-instruction").style.color = "#888888";
         setDiceRoundFaces(["?", "?", "?"], ["?", "?", "?"], true);
         $("btn-roll").disabled = true;
@@ -2776,6 +2894,7 @@ function rollDicesManual() {
     diceShakeEnergy = 30;
     $("btn-roll").disabled = true;
     setText("dice-instruction", "正在摇号...");
+    setGamePhase("drawing", "骰子正在滚动");
     setDiceRoundFaces(["?", "?", "?"], ["?", "?", "?"], true);
 
     let count = 0;
@@ -2839,6 +2958,7 @@ function settleDiceGame() {
     if (outcome.kind === "win") {
         setText("dice-instruction", outcome.reason);
         $("dice-instruction").style.color = "#ffffff";
+        setGamePhase("ready", "本局无需输出");
         vibratePattern([28, 35, 28], 0);
         return;
     }
@@ -2853,11 +2973,13 @@ function rollPlayerDie() {
 
 function startDicePunishQueue(rawCount, reason) {
     const cfg = gameSettings.dice;
-    const cappedCount = capPunishmentCount(rawCount, cfg.maxPunishCount);
+    const plan = calculateDiceExecutionPlan(rawCount, cfg, DICE_OUTPUT_BUDGET_SECONDS);
+    const cappedCount = plan.executionCount;
 
     if (cappedCount <= 0) {
         setText("dice-instruction", "没有惩罚");
         $("dice-instruction").style.color = "#ffffff";
+        setGamePhase("ready", "本局无需输出");
         return;
     }
 
@@ -2874,11 +2996,20 @@ function startDicePunishQueue(rawCount, reason) {
     dicePunishTimer = null;
     dicePunishGeneration++;
     dicePunishRemaining = cappedCount;
-    const cappedText = rawCount > cappedCount ? `，已按上限截到 ${cappedCount} 下` : "";
+    diceRoundId = createRuntimeId("dice");
+    dicePunishSequence = 0;
+    sendGameMessage({
+        type: "dice_round_start",
+        roundId: diceRoundId,
+        plannedCount: cappedCount,
+        singleDuration: Math.round(plan.singleSeconds * 1000)
+    });
+    const cappedText = plan.truncated ? `，按次数或 300 秒总量截到 ${cappedCount} 下` : "";
     const estimateSeconds = estimateDiceQueueSeconds(cappedCount, cfg);
-    setText("dice-instruction", `${reason} | 准备电 ${cappedCount} 下，约 ${estimateSeconds.toFixed(1)}s${cappedText}`);
+    setText("dice-instruction", `${reason} | 准备执行 ${cappedCount} 下，输出共 ${plan.outputSeconds.toFixed(1)}s，含间隔约 ${estimateSeconds.toFixed(1)}s${cappedText}`);
     $("dice-instruction").style.color = "#ff3333";
     $("btn-roll").disabled = true;
+    setGamePhase("checking", "本局惩罚准备中");
     runNextDicePunish(dicePunishGeneration);
 }
 
@@ -2891,7 +3022,14 @@ function runNextDicePunish(generation) {
     const totalDuration = Math.round(cfg.singleSeconds * 1000);
     const gapDuration = Math.round(cfg.gapSeconds * 1000);
     const currentIndex = dicePunishRemaining;
-    const sent = sendConfiguredShock(cfg.strength, totalDuration);
+    const sequence = ++dicePunishSequence;
+    const sent = sendConfiguredShock(cfg.strength, totalDuration, {
+        game: "dice",
+        phase: "dice_hit",
+        roundId: diceRoundId,
+        sequence,
+        plannedCount: sequence + dicePunishRemaining - 1
+    });
     setText(
         "dice-instruction",
         sent
@@ -2908,12 +3046,13 @@ function runNextDicePunish(generation) {
         return;
     }
 
+    setGamePhase("output", `骰子第 ${sequence} 下`);
+
     if (navigator.vibrate) {
         navigator.vibrate(Math.min(900, totalDuration));
     }
 
     dicePunishRemaining -= 1;
-    const nextDelay = dicePunishRemaining <= 0 ? totalDuration : totalDuration + gapDuration;
     dicePunishTimer = setTimeout(() => {
         dicePunishTimer = null;
         if (activeGame !== "dice" || generation !== dicePunishGeneration) {
@@ -2924,14 +3063,58 @@ function runNextDicePunish(generation) {
             setText("dice-instruction", "本局惩罚结束");
             $("dice-instruction").style.color = "#888888";
             $("btn-roll").disabled = !gameSettings.dice.manualRoll;
+            setGamePhase("ready", "本局惩罚结束");
             return;
         }
 
-        runNextDicePunish(generation);
-    }, nextDelay);
+        setGamePhase("interval", "等待下一下");
+        setText("dice-instruction", `间隔中 | 剩余 ${dicePunishRemaining} 下`);
+        dicePunishTimer = setTimeout(() => {
+            dicePunishTimer = null;
+            runNextDicePunish(generation);
+        }, gapDuration);
+    }, totalDuration);
 }
 
 // --- 10. 游戏 4：极速角子机 ---
+
+function beginSlotOutputCycle(duration, restMs, onComplete) {
+    // 输出和输出后的休息必须使用两个清晰阶段，不能再共用一个“冷却截止时间”。
+    // 这样 30 秒长惩罚期间页面会准确显示“输出中”，而不是提前写成“休息中”。
+    const safeDuration = Math.max(0, Math.round(duration));
+    const safeRestMs = Math.max(0, Math.round(restMs));
+    const now = Date.now();
+    slotOutputUntil = now + safeDuration;
+    slotRestUntil = slotOutputUntil + safeRestMs;
+    slotCooldownUntil = slotRestUntil;
+    setGamePhase("output", "角子机正在执行本轮输出");
+
+    const button = $("btn-slot-spin");
+    if (button) {
+        button.disabled = true;
+        button.innerText = "输出中";
+    }
+
+    clearTimeout(slotCooldownTimer);
+    slotCooldownTimer = setTimeout(() => {
+        slotCooldownTimer = null;
+        if (activeGame !== "slot") return;
+
+        if (safeRestMs > 0) {
+            setGamePhase("rest", "角子机强制休息");
+            if (button) button.innerText = "休息中";
+        }
+
+        slotCooldownTimer = setTimeout(() => {
+            slotCooldownTimer = null;
+            if (activeGame !== "slot") return;
+            slotCooldownUntil = 0;
+            slotOutputUntil = 0;
+            slotRestUntil = 0;
+            onComplete();
+        }, safeRestMs);
+    }, safeDuration);
+}
 
 function initSlotGame() {
     slotPressure = 0;
@@ -2939,6 +3122,8 @@ function initSlotGame() {
     slotIsSpinning = false;
     slotCooldownUntil = 0;
     slotLightCooldownUntil = 0;
+    slotOutputUntil = 0;
+    slotRestUntil = 0;
     setText("slot-reel-1", "🍒");
     setText("slot-reel-2", "🔔");
     setText("slot-reel-3", "💎");
@@ -2962,8 +3147,9 @@ function startSlotSpin() {
 
     const now = Date.now();
     if (now < slotCooldownUntil) {
-        const remainSeconds = Math.ceil((slotCooldownUntil - now) / 1000);
-        setText("slot-result", `电完休息中，还剩约 ${remainSeconds}s。`);
+        const outputActive = now < slotOutputUntil;
+        setGamePhase(outputActive ? "output" : "rest", outputActive ? "角子机正在输出" : "角子机强制休息");
+        setText("slot-result", outputActive ? "本轮输出尚未结束。" : "休息尚未结束。" );
         return;
     }
 
@@ -2978,7 +3164,7 @@ function startSlotSpin() {
         button.innerText = "开奖中...";
     }
 
-    setText("game-status", "角子机高速转动中");
+    setGamePhase("drawing", "角子机高速转动中");
     setText("slot-result", "开奖中...");
     setSlotResultState("");
     setSlotReelsSpinning(true);
@@ -3017,13 +3203,14 @@ function finishSlotRound() {
     if (activeGame !== "slot") return;
 
     const button = $("btn-slot-spin");
-    if (button) {
-        button.disabled = false;
-        button.innerText = gameSettings.slot.autoSpin ? "自动连转中" : "开转";
-    }
-
     if (gameSettings.slot.autoSpin) {
         scheduleNextSlotSpin(gameSettings.slot.autoIntervalMs);
+    } else {
+        if (button) {
+            button.disabled = false;
+            button.innerText = "开转";
+        }
+        setGamePhase("ready", "可以开始下一轮");
     }
 }
 
@@ -3035,6 +3222,12 @@ function scheduleNextSlotSpin(delayMs) {
 
     const cooldownDelay = Math.max(0, slotCooldownUntil - Date.now());
     const safeDelay = Math.max(delayMs, cooldownDelay);
+    const button = $("btn-slot-spin");
+    if (button) {
+        button.disabled = true;
+        button.innerText = "间隔中";
+    }
+    setGamePhase("interval", "等待自动连转下一轮");
     slotAutoTimer = setTimeout(startSlotSpin, safeDelay);
 }
 
@@ -3115,31 +3308,48 @@ function applySlotResult(resultType, reels) {
         return true;
     }
 
-    const lightText = resultType === "miss" && cfg.lightPunishEnabled ? triggerSlotLightPunish() : "";
+    const lightResult = resultType === "miss" && cfg.lightPunishEnabled
+        ? triggerSlotLightPunish()
+        : { message: "", sent: false };
     if (resultType === "miss" && slotPressure >= 72) {
         vibrateWarning(28, 360);
     }
-    setText("game-status", lightText ? `${lightText} | 压力 ${Math.round(slotPressure)}%` : `压力 ${Math.round(slotPressure)}%`);
-    return false;
+    if (lightResult.message) {
+        setText("slot-result", `${lightResult.message} | 压力 ${Math.round(slotPressure)}%`);
+    }
+    return lightResult.sent;
 }
 
 function triggerSlotLightPunish() {
     const cfg = gameSettings.slot;
     const now = Date.now();
-    if (now < slotLightCooldownUntil) return "轻电冷却中";
+    if (now < slotLightCooldownUntil) return { message: "轻电仍在休息中", sent: false };
 
     const duration = Math.round(cfg.lightShockSeconds * 1000);
-    const sent = sendConfiguredShock(cfg.strengthMin, duration);
+    const sent = sendConfiguredShock(cfg.strengthMin, duration, {
+        game: "slot",
+        phase: "slot_light"
+    });
     if (sent) {
         const nextAllowedAt = now + duration + cfg.restMs;
         slotLightCooldownUntil = nextAllowedAt;
         slotCooldownUntil = Math.max(slotCooldownUntil, nextAllowedAt);
         vibratePattern([30], 80);
+        beginSlotOutputCycle(duration, cfg.restMs, () => {
+            slotLightCooldownUntil = 0;
+            setText("slot-result", `轻电与休息结束 | 压力 ${Math.round(slotPressure)}%`);
+            finishSlotRound();
+        });
+    } else {
+        setGamePhase("blocked", getOutputBlockReason() || "输出忙");
     }
 
-    return sent
-        ? `没中奖轻电 ${cfg.strengthMin}，休息 ${cfg.restMs}ms`
-        : `${getOutputBlockReason() || "输出忙"}，未输出`;
+    return {
+        sent,
+        message: sent
+            ? `没中奖轻电：强度 ${cfg.strengthMin}，${cfg.lightShockSeconds.toFixed(1)}s`
+            : `${getOutputBlockReason() || "输出忙"}，未输出`
+    };
 }
 
 function triggerSlotPunish(reason) {
@@ -3147,11 +3357,15 @@ function triggerSlotPunish(reason) {
     const duration = Math.round(cfg.shockSeconds * 1000);
     // 所有满槽惩罚都使用用户设置的“满槽惩罚强度”；200 只是可设置上限，后端仍会按硬件限幅截断。
     const strength = Math.round(cfg.strengthMax);
-    const sent = sendConfiguredShock(strength, duration);
+    const sent = sendConfiguredShock(strength, duration, {
+        game: "slot",
+        phase: "slot_full"
+    });
     const shouldClearPressure = cfg.pressureAfterPunish !== "keep";
     const outputBlockReason = getOutputBlockReason() || "输出忙";
 
-    setText("game-status", sent ? `${reason}，已发送请求强度 ${strength}` : `${reason}，${outputBlockReason}`);
+    if (sent) setGamePhase("output", `${reason}，请求强度 ${strength}`);
+    else setGamePhase("blocked", `${reason}，${outputBlockReason}`);
     setText("slot-result", sent ? `${reason} | 请求强度 ${strength}，${(duration / 1000).toFixed(1)}s；实际受 App 限幅` : `${reason} | ${outputBlockReason}，未输出`);
     vibratePattern([120, 45, 180, 45, Math.min(240, duration)], 0);
 
@@ -3162,25 +3376,14 @@ function triggerSlotPunish(reason) {
         return;
     }
 
-    slotCooldownUntil = Date.now() + duration + cfg.restMs;
-    const button = $("btn-slot-spin");
-    if (button) {
-        button.disabled = true;
-        button.innerText = "休息中";
-    }
-
-    clearTimeout(slotCooldownTimer);
-    slotCooldownTimer = setTimeout(() => {
-        if (activeGame !== "slot") return;
-
-        slotCooldownUntil = 0;
+    beginSlotOutputCycle(duration, cfg.restMs, () => {
         setSlotResultState("");
         settleSlotPressureAfterPunish(
             shouldClearPressure,
             shouldClearPressure ? "惩罚结束，压力清零。" : "惩罚结束，压力保留 100%。"
         );
         finishSlotRound();
-    }, duration + cfg.restMs);
+    });
 }
 
 function settleSlotPressureAfterPunish(shouldClearPressure, message) {
@@ -3226,6 +3429,14 @@ function initLightningGame() {
         else startWebLocationWatch();
     }
     const now = Date.now();
+    lightningSessionId = createRuntimeId("lightning");
+    lightningLastSafetySampleAt = 0;
+    sendGameMessage({
+        type: "lightning_session_start",
+        sessionId: lightningSessionId,
+        sessionMinutes: gameSettings.lightning.sessionMinutes,
+        startSpeed: gameSettings.lightning.startSpeed
+    });
     lightningState = createLightningState(now);
     lightningNextOutputAt = now + 1200;
     lightningJamBatchCount = 0;
@@ -3248,7 +3459,7 @@ function requestLightningStop(reason, message) {
     lightningCurrentOutputUntil = 0;
     lightningNextOutputAt = Math.max(lightningNextOutputAt, Date.now() + 500);
     sendGameMessage({ type: "stop_shock", reason });
-    if (message) setText("game-status", message);
+    if (message) setGamePhase("paused", message);
 }
 
 function randomBetween(minimum, maximum) {
@@ -3270,6 +3481,7 @@ function sendLightningOutput(phase, strength, durationSeconds, restSeconds) {
         strength: Math.round(strength),
         duration: Math.round(durationSeconds * 1000),
         restMs: Math.round(restSeconds * 1000),
+        sessionId: lightningSessionId,
         // 后端不接收坐标，只用速度与样本年龄做第二道安全校验。
         speedKmh: latestLocationSample?.speedKmh,
         sampleAgeMs,
@@ -3277,10 +3489,28 @@ function sendLightningOutput(phase, strength, durationSeconds, restSeconds) {
     });
     if (!sent) return false;
 
+    pendingLightningRequests.set(requestId, lightningSessionId);
     lightningOutputPending = true;
     lightningCurrentOutputUntil = now + durationSeconds * 1000;
     lightningNextOutputAt = lightningCurrentOutputUntil + restSeconds * 1000;
     return true;
+}
+
+function sendLightningSafetySample(result, now) {
+    // 长输出期间不能只相信开始瞬间的速度。每秒向后台续报一次脱敏状态，
+    // 后台只在收到新鲜、合规的样本后才继续维持本次输出。
+    if (!lightningSessionId || now - lightningLastSafetySampleAt < 1000) return;
+    lightningLastSafetySampleAt = now;
+    const sampleAgeMs = latestLocationSample
+        ? Math.max(0, now - Number(latestLocationSample.timestamp))
+        : null;
+    sendGameMessage({
+        type: "lightning_safety_sample",
+        sessionId: lightningSessionId,
+        mode: result.state.mode,
+        speedKmh: result.sampleValid ? result.state.lastSpeedKmh : null,
+        sampleAgeMs: Number.isFinite(sampleAgeMs) ? sampleAgeMs : null
+    });
 }
 
 function formatLightningMode(mode) {
@@ -3309,34 +3539,75 @@ function updateLightningDashboard(result, cfg, now) {
     );
 
     let nextAction = "保持页面在前台";
+    let phase = "checking";
+    let phaseDetail = "等待速度与定位判定";
     if (result.state.mode === "waiting_speed") {
         const candidateAt = result.state.startCandidateSince;
         nextAction = candidateAt === null
             ? `达到 ${cfg.startSpeed} km/h`
             : `稳定验证 ${Math.max(0, (2000 - (now - candidateAt)) / 1000).toFixed(1)}s`;
+        phaseDetail = "等待达到启动速度";
     } else if (result.state.mode === "overspeed") {
         const recoveryAt = result.state.overspeedRecoverySince;
         nextAction = recoveryAt === null
             ? `低于 60 后等待 ${cfg.overspeedRecoverySeconds}s`
             : `恢复倒计时 ${Math.max(0, cfg.overspeedRecoverySeconds - (now - recoveryAt) / 1000).toFixed(1)}s`;
+        phase = "paused";
+        phaseDetail = "达到 60 km/h，等待恢复";
     } else if (result.state.mode === "low_pending") {
         nextAction = `低速暂停确认 ${Math.max(0, 5 - (now - result.state.lowSince) / 1000).toFixed(1)}s`;
+        phase = "paused";
+        phaseDetail = "速度低于启动值";
     } else if (result.state.mode === "low_paused" && cfg.jamEnabled) {
         nextAction = `堵车模式还有 ${Math.max(0, cfg.jamEntrySeconds - (now - result.state.lowSince) / 1000).toFixed(0)}s`;
+        phase = "paused";
+        phaseDetail = "低速暂停，等待堵车规则";
+    } else if (result.state.mode === "low_paused") {
+        nextAction = "速度恢复后重新判断";
+        phase = "paused";
+        phaseDetail = "低速暂停";
     } else if (result.state.mode === "jam") {
-        nextAction = now < lightningJamBatchRestUntil
-            ? `整轮休息 ${Math.ceil((lightningJamBatchRestUntil - now) / 1000)}s`
-            : `本轮 ${lightningJamBatchCount}/${cfg.jamBatchCount}`;
+        if (lightningOutputPending) {
+            nextAction = `本轮 ${lightningJamBatchCount}/${cfg.jamBatchCount}`;
+            phase = "output";
+            phaseDetail = "堵车随机输出";
+        } else if (now < lightningJamBatchRestUntil) {
+            nextAction = `整轮休息 ${Math.ceil((lightningJamBatchRestUntil - now) / 1000)}s`;
+            phase = "rest";
+            phaseDetail = "堵车整轮休息";
+        } else if (now < lightningNextOutputAt) {
+            nextAction = `本轮 ${lightningJamBatchCount}/${cfg.jamBatchCount}`;
+            phase = "interval";
+            phaseDetail = "堵车随机间隔";
+        } else {
+            phase = "ready";
+            phaseDetail = "准备堵车随机输出";
+        }
     } else if (result.state.mode === "driving") {
-        nextAction = now < lightningNextOutputAt
-            ? `强制休息 ${Math.ceil((lightningNextOutputAt - now) / 1000)}s`
-            : "准备下一轮输出";
+        if (lightningOutputPending) {
+            nextAction = "当前一轮正在输出";
+            phase = "output";
+            phaseDetail = "按当前速度输出";
+        } else if (now < lightningNextOutputAt) {
+            nextAction = `强制休息 ${Math.ceil((lightningNextOutputAt - now) / 1000)}s`;
+            phase = "rest";
+            phaseDetail = "行驶强制休息";
+        } else {
+            nextAction = "准备下一轮输出";
+            phase = "ready";
+            phaseDetail = "速度合规，准备输出";
+        }
     } else if (result.state.mode === "gps_blocked") {
         nextAction = "恢复可靠定位后重新判断";
+        phase = "paused";
+        phaseDetail = "定位数据不可用";
     } else if (result.state.mode === "session_complete") {
         nextAction = "返回列表后可重新开始";
+        phase = "stopped";
+        phaseDetail = "本局时间结束";
     }
     setText("lightning-next-action", nextAction);
+    setGamePhase(phase, phaseDetail);
 }
 
 function runLightningLoop() {
@@ -3346,6 +3617,7 @@ function runLightningLoop() {
     const result = advanceLightningState(lightningState, cfg, latestLocationSample, now);
     const modeChanged = lightningLastMode && lightningLastMode !== result.state.mode;
     lightningState = result.state;
+    sendLightningSafetySample(result, now);
 
     if (lightningOutputPending && now >= lightningCurrentOutputUntil) {
         lightningOutputPending = false;
@@ -3373,12 +3645,16 @@ function runLightningLoop() {
         lightningJamBatchRestUntil = 0;
         lightningNextOutputAt = now + 500;
     }
-    if (modeChanged && lightningLastMode === "jam" && result.state.mode === "driving") {
-        // 堵车规则切回行驶规则时先强制产生一段无输出间隔，不能把两套规则首尾粘在一起。
-        requestLightningStop("lightning_jam_to_driving", "已离开堵车模式，确认停止后切换到行驶规则");
-        lightningNextOutputAt = now + 1000;
+    if (modeChanged && lightningLastMode === "jam" && result.state.mode !== "jam") {
+        // 离开堵车后先记住切换来源；状态机会继续验证两秒稳定速度，真正进入行驶时
+        // 再完整执行玩家设置的行驶休息，不能退化成写死的一秒。
+        lightningResumeFromJam = true;
         lightningJamBatchCount = 0;
         lightningJamBatchRestUntil = 0;
+    }
+    if (modeChanged && result.state.mode === "driving" && lightningResumeFromJam) {
+        lightningNextOutputAt = now + cfg.drivingRestSeconds * 1000;
+        lightningResumeFromJam = false;
     }
 
     lightningLastMode = result.state.mode;
@@ -3388,7 +3664,7 @@ function runLightningLoop() {
     if (lightningOutputPending || now < lightningNextOutputAt) return;
     const blockReason = getOutputBlockReason();
     if (blockReason) {
-        setText("game-status", `${blockReason}，雷电极速保持停止`);
+        setGamePhase("blocked", `${blockReason}，雷电极速保持停止`);
         lightningNextOutputAt = now + 1000;
         return;
     }
@@ -3397,9 +3673,8 @@ function runLightningLoop() {
         const strength = calculateLightningStrength(result.state.lastSpeedKmh, cfg);
         if (strength <= 0) return;
         const sent = sendLightningOutput("driving", strength, cfg.continuousSeconds, cfg.drivingRestSeconds);
-        setText("game-status", sent
-            ? `行驶输出请求：强度 ${strength}，${cfg.continuousSeconds}s；随后休息 ${cfg.drivingRestSeconds}s`
-            : "后台通信不可用，未发送行驶输出");
+        if (sent) setGamePhase("output", `行驶强度 ${strength}，本轮 ${cfg.continuousSeconds}s`);
+        else setGamePhase("blocked", "后台通信不可用，未发送行驶输出");
         return;
     }
 
@@ -3408,20 +3683,20 @@ function runLightningLoop() {
         lightningJamBatchCount = 0;
         lightningJamBatchRestUntil = now + cfg.jamBatchRestSeconds * 1000;
         lightningNextOutputAt = lightningJamBatchRestUntil;
-        setText("game-status", `堵车模式完成一轮，强制休息 ${cfg.jamBatchRestSeconds}s`);
+        setGamePhase("rest", "堵车模式完成一轮");
         return;
     }
 
     const sent = sendLightningOutput("jam", cfg.jamStrength, cfg.jamShockSeconds, 0);
     if (!sent) {
-        setText("game-status", "后台通信不可用，未发送堵车输出");
+        setGamePhase("blocked", "后台通信不可用，未发送堵车输出");
         lightningNextOutputAt = now + 1000;
         return;
     }
     lightningJamBatchCount++;
     const randomGapSeconds = randomBetween(cfg.jamGapMinSeconds, cfg.jamGapMaxSeconds);
     lightningNextOutputAt = lightningCurrentOutputUntil + randomGapSeconds * 1000;
-    setText("game-status", `堵车随机输出：强度 ${cfg.jamStrength}，${cfg.jamShockSeconds}s；随后随机休息`);
+    setGamePhase("output", `堵车强度 ${cfg.jamStrength}，本次 ${cfg.jamShockSeconds}s`);
 }
 
 // --- 12. 初始化入口 ---
