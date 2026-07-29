@@ -31,7 +31,7 @@ android {
         minSdk = 35
         targetSdk = 36
         // versionCode 只负责 Android 升级顺序；公开显示统一使用上面的语义化版本。
-        versionCode = 3
+        versionCode = 4
         versionName = publicVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -32,7 +32,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(f'version = "{self.version}"', pyproject)
         self.assertIn(f'version = "{self.version}"', uv_lock)
         self.assertIn('versionName = publicVersion', android_build)
-        self.assertIn('versionCode = 3', android_build)
+        self.assertIn('versionCode = 4', android_build)
         self.assertRegex(
             changelog,
             rf"## \[{re.escape(self.version)}\] - \d{{4}}-\d{{2}}-\d{{2}}",

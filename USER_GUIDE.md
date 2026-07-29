@@ -1,4 +1,4 @@
-# GameBridge for Fun 1.1.0-beta.1 用户手册
+# GameBridge for Fun 1.1.0-beta.2 用户手册
 
 本文面向实际使用者，说明如何启动、连接、安装手机 HTTPS 证书、选择游戏、调整参数和处理紧急情况。
 
@@ -194,7 +194,7 @@ APK 支持 Android 15 或更高版本，不兼容 Android 14 及更早系统。
 
 APK 模式需要三个部分同时在线：设备 App 在手机后台维持硬件连接，电脑运行桥接服务，GameBridge for Fun APK 在手机前台读取动作并运行小游戏。设备 App 和 GameBridge for Fun APK 可以运行在同一台 Android 手机上。
 
-1. 安装项目 `APK/GameBridgeForFun-Android15-v1.1.0-beta.1.apk` 并打开；该包使用项目独立正式签名，不需要安装网页 HTTPS 根证书。
+1. 安装项目 `APK/GameBridgeForFun-Android15-v1.1.0-beta.2.apk` 并打开；该包使用项目独立正式签名，不需要安装网页 HTTPS 根证书。
    如果手机装过旧的调试签名包，先卸载旧包再安装；旧包的本地游戏设置会一并清除。
 2. 在电脑运行 `start.command`，并先完成设备 App 远控绑定。
 3. 用手机系统相机扫描电脑控制台的 `Android APK` 二维码，系统会自动唤起 APK 并连接普通 HTTP/WS 游戏入口。

@@ -1,6 +1,6 @@
 # GameBridge for Fun
 
-当前版本：`1.1.0-beta.1`
+当前版本：`1.1.0-beta.2`
 
 集成平衡挑战、角子机、骰宝与移动速度挑战的新能源体感游戏套件。游戏结果通过 macOS 本地网关转换为兼容电刺激体感设备的强度和波形指令，电脑、手机网页与 Android APK 共用同一套规则。
 
@@ -43,7 +43,7 @@
 
 ## Android APK
 
-公开安装包为 `APK/GameBridgeForFun-Android15-v1.1.0-beta.1.apk`，要求 Android 15 或更高版本。`APK/SHA256.txt` 用于核对文件完整性，安装包使用独立正式签名，不再使用 Android 调试签名。
+公开安装包为 `APK/GameBridgeForFun-Android15-v1.1.0-beta.2.apk`，要求 Android 15 或更高版本。`APK/SHA256.txt` 用于核对文件完整性，安装包使用独立正式签名，不再使用 Android 调试签名。
 
 如果手机安装过旧的调试签名包，必须先卸载旧包再安装本版本；Android 不允许不同签名直接覆盖，同步清除的本地游戏设置需要重新配置。
 

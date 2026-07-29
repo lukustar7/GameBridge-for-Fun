@@ -1,6 +1,6 @@
 [project]
 name = "gamebridge-for-fun"
-version = "1.1.0-beta.1"
+version = "1.1.0-beta.2"
 description = "集成平衡挑战、角子机与骰宝的新能源体感游戏套件"
 readme = "README.md"
 license = { file = "LICENSE.md" }
