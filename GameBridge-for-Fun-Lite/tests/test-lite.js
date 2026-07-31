@@ -358,6 +358,12 @@ function testRequiredFiles() {
     assert.match(version, /^\d+\.\d+\.\d+-(alpha|beta)\.\d+$/);
     assert.ok(html.includes(version), "页面版本必须与 VERSION 一致");
     assert.ok(worker.includes(version), "缓存版本必须与 VERSION 一致");
+    assert.ok(fs.readFileSync(path.join(liteRoot, "README.md"), "utf8").includes(version), "Lite README 版本必须同步");
+    assert.ok(fs.readFileSync(path.join(liteRoot, "USER_GUIDE.md"), "utf8").includes(version), "Lite 使用说明版本必须同步");
+    assert.ok(fs.readFileSync(path.join(liteRoot, "CHANGELOG.md"), "utf8").includes(`## [${version}]`), "Lite 版本必须有正式变更记录");
+    ["game-config.js", "game-runtime.js", "main.js"].forEach((fileName) => {
+        assert.ok(worker.includes(fileName), `离线缓存不得遗漏 ${fileName}`);
+    });
 
     const manifest = JSON.parse(fs.readFileSync(path.join(liteRoot, "manifest.json"), "utf8"));
     assert.equal(manifest.start_url, "./");

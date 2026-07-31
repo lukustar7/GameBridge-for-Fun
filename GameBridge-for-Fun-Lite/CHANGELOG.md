@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-07-31
+
 ### Added
 
 - 补齐原版五种玩法的全部参数、默认值、分组标签、逐项说明、单玩法恢复默认和方向玩法手动校准入口。
@@ -37,7 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - 新增 `17` 种固定波形和 `1` 种按时长筛选的随机模式，所有不足 `1 秒` 的输出统一提升到 `1 秒`。
 - 新增三页移动端界面、全局通道与波形设置、权限重试、低强度试电和常驻急停。
 - 新增版本化离线缓存和延迟更新流程，输出期间可激活更新的入口数量降为 `0`。
-- 新增 GitHub Pages 自动部署检查，只上传 Lite 子目录，进入站点产物的原版运行文件数量为 `0`。
+- 新增部署边界检查；Lite 页面和离线缓存访问上级目录运行文件的数量为 `0`。
 
 ### Changed
 

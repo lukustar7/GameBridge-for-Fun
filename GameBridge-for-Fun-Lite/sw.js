@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "gamebridge-lite-0.1.0-alpha.1";
+const CACHE_NAME = "gamebridge-lite-0.1.0-beta.1";
 const APP_SHELL = Object.freeze([
     "./",
     "./index.html",

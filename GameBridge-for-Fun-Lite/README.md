@@ -1,6 +1,6 @@
 # GameBridge for Fun Lite
 
-当前版本：`0.1.0-alpha.1`
+当前版本：`0.1.0-beta.1`
 
 在线使用：[https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/](https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/)
 
@@ -11,15 +11,15 @@ Lite 是无需电脑网关和配套 App、由浏览器直接连接特定电刺�
 ## 当前范围
 
 - 支持具备 Web Bluetooth 的 Android Chromium 浏览器，按公开 V2、V3 蓝牙协议识别设备。
-- 提供手抖挑战、保持角度、摇骰子对决、极速角子机和雷电极速五种玩法。
+- 提供手抖挑战、保持角度、摇骰子对决、极速角子机和雷电极速五种玩法；字段、默认值和核心判定规则与电脑网关版对齐。
 - 首次联网后缓存全部运行资源；离线时可启动已缓存版本，蓝牙和传感器均在本机处理。
 - iPhone、iPad 的 Safari 不提供 Web Bluetooth，当前不能直接使用 Lite 连接设备。
 
 ## 使用
 
 1. 使用 Android Chrome 或 Edge 打开上面的 HTTPS 页面。
-2. 在“设备与安全”中连接设备，设置通道、波形和网页 A/B 安全上限，再完成输出确认。
-3. 先用低强度试电验证通道，随后进入“选择玩法”。
+2. 在“设备与安全”中连接设备，设置通道、B 通道比例、波形和网页 A/B 安全上限，再完成输出确认。
+3. 分别使用 A、B 或 A+B 低强度试电验证实际接线，随后进入“选择玩法”。
 
 完整权限说明、安装、离线更新和故障处理见 [USER_GUIDE.md](USER_GUIDE.md)。
 
@@ -40,6 +40,12 @@ python3 -m http.server 4173 --directory GameBridge-for-Fun-Lite
 ## 部署边界
 
 GitHub Pages 当前从仓库分支发布整个项目，Lite 固定使用 `GameBridge-for-Fun-Lite/` 子目录地址。原版源码、证书说明和 APK 不会被 Lite 页面加载或缓存。
+
+## 直连限幅说明
+
+Lite 绕过配套 App，因此不存在可以继续依赖的“App 内限幅”。页面中的 A/B 网页上限就是 Lite 的软件请求上限，所有玩法和试电在写入蓝牙前都会再次受它约束；B 通道还可以选择与 A 相同或按 A 的比例降低。
+
+网页上限不能修改设备固件，也不能保证无线归零指令一定送达。开始前仍应确认设备电源或物理停止方式可立即触及，并由输出接收者或监护者掌握。更换设备、通道、波形或网页上限后，页面会撤销本次确认并要求重新核对。
 
 ## 安全
 
