@@ -5,16 +5,18 @@
     const waveforms = window.LiteWaveforms;
     const rules = window.GameBridgeForFunLogic;
     const gameConfig = window.LiteGameConfig;
+    const gameRuntime = window.LiteGameRuntime;
     const BleDriver = window.LiteBleDriver && window.LiteBleDriver.BleDriver;
     const OutputController = window.LiteOutputController && window.LiteOutputController.OutputController;
     const PwaManager = window.LitePwaManager && window.LitePwaManager.PwaManager;
 
-    if (!protocol || !waveforms || !rules || !gameConfig || !BleDriver || !OutputController || !PwaManager) {
+    if (!protocol || !waveforms || !rules || !gameConfig || !gameRuntime || !BleDriver || !OutputController || !PwaManager) {
         document.body.textContent = "Lite 运行文件不完整，请重新加载完整目录。";
         return;
     }
 
-    const STORAGE_KEY = "gamebridge-lite-settings-v1";
+    const STORAGE_KEY = "gamebridge-lite-settings-v2";
+    const LEGACY_STORAGE_KEY = "gamebridge-lite-settings-v1";
     const SENSOR_MAX_AGE_MS = 1000;
     const LOCATION_MAX_AGE_MS = 3000;
     const SLOT_SYMBOLS = Object.freeze(["7️⃣", "🍀", "⭐", "💎", "🔔", "🍒"]);
@@ -43,6 +45,8 @@
         capabilityMotion: byId("capability-motion"),
         capabilityLocation: byId("capability-location"),
         capabilityOffline: byId("capability-offline"),
+        capabilityWake: byId("capability-wake"),
+        capabilityVibration: byId("capability-vibration"),
         waveformSelect: byId("waveform-select"),
         bStrengthMode: byId("b-strength-mode"),
         bStrengthPercent: byId("b-strength-percent"),
@@ -57,7 +61,7 @@
         outputConfirmCheckbox: byId("output-confirm-checkbox"),
         confirmOutput: byId("confirm-output"),
         confirmationStatus: byId("confirmation-status"),
-        testOutput: byId("test-output"),
+        testOutputs: Array.from(document.querySelectorAll("[data-test-channel]")),
         gameListView: byId("game-list-view"),
         gameSettingsView: byId("game-settings-view"),
         settingsTitle: byId("settings-title"),
@@ -72,6 +76,7 @@
         playScreen: byId("play-screen"),
         playTitle: byId("play-title"),
         playStage: byId("play-stage"),
+        gameCanvas: byId("game-canvas"),
         playPrimary: byId("play-primary"),
         playSecondary: byId("play-secondary"),
         playMeter: byId("play-meter"),
@@ -116,14 +121,18 @@
     });
     const pwa = new PwaManager();
 
-    function cloneDefaults() {
-        return gameConfig.cloneDefaultSettings();
-    }
-
     function readStoredObject() {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.schemaVersion === 2) {
+                return parsed;
+            }
+            const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
+            if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+                // 旧版玩法字段含义不同，只迁移全局接线和网页上限；玩法恢复为已核对的原版默认值。
+                return { global: legacy.global || {} };
+            }
+            return {};
         } catch (_error) {
             return {};
         }
@@ -152,13 +161,15 @@
     }
 
     function loadGameSettings() {
-        const restored = rules.restoreSettings(cloneDefaults(), readStoredObject().games);
-        return rules.applyStandaloneShockDurationFloor(restored);
+        const normalized = gameConfig.normalizeSettings(readStoredObject().games);
+        normalized.lightning = rules.normalizeLightningSettings(normalized.lightning, DEFAULT_SETTINGS.lightning);
+        return rules.applyStandaloneShockDurationFloor(normalized);
     }
 
     function saveSettings() {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                schemaVersion: 2,
                 global: { ...globalSettings, confirmed: false },
                 games: gameSettings
             }));
@@ -182,6 +193,87 @@
         element.textContent = text;
     }
 
+    function verifyLocationSpeed() {
+        return new Promise((resolve) => {
+            let validSamples = 0;
+            let firstValidAt = 0;
+            let settled = false;
+            let watchId = null;
+            const finish = (ready, message) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timeout);
+                if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+                setCapability(elements.capabilityLocation, ready ? "ready" : "blocked", message);
+                resolve(ready);
+            };
+            const timeout = window.setTimeout(() => {
+                finish(false, "未取得可靠 GPS/GNSS 速度");
+            }, 8000);
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const speed = Number(position.coords.speed);
+                    const accuracy = Number(position.coords.accuracy);
+                    const timestamp = Number(position.timestamp) || Date.now();
+                    const valid = Number.isFinite(speed) && speed >= 0 &&
+                        Number.isFinite(accuracy) && accuracy > 0 && accuracy <= 50 &&
+                        Math.abs(Date.now() - timestamp) <= LOCATION_MAX_AGE_MS;
+                    if (!valid) {
+                        validSamples = 0;
+                        firstValidAt = 0;
+                        setCapability(elements.capabilityLocation, "pending", "已授权，正在等待可靠速度");
+                        return;
+                    }
+                    if (validSamples === 0) firstValidAt = Date.now();
+                    validSamples += 1;
+                    if (validSamples >= 2 && Date.now() - firstValidAt >= 700) {
+                        finish(true, `速度可用 · 精度约 ${Math.round(accuracy)} 米`);
+                    } else {
+                        setCapability(elements.capabilityLocation, "pending", "已收到速度，正在确认持续性");
+                    }
+                },
+                (error) => finish(false, error.code === 1 ? "定位已拒绝" : "GPS/GNSS 暂不可用"),
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+        });
+    }
+
+    function verifyMotionData() {
+        return new Promise((resolve) => {
+            let orientationReady = false;
+            let motionReady = false;
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timeout);
+                window.removeEventListener("deviceorientation", handleOrientation, true);
+                window.removeEventListener("devicemotion", handleMotion, true);
+                if (orientationReady && motionReady) {
+                    setCapability(elements.capabilityMotion, "ready", "方向与摇晃数据可用");
+                } else if (orientationReady) {
+                    setCapability(elements.capabilityMotion, "pending", "方向可用，摇晃数据未验证");
+                } else if (motionReady) {
+                    setCapability(elements.capabilityMotion, "pending", "摇晃可用，方向数据未验证");
+                } else {
+                    setCapability(elements.capabilityMotion, "blocked", "未收到传感器数据");
+                }
+                resolve(orientationReady || motionReady);
+            };
+            const handleOrientation = (event) => {
+                orientationReady = Number.isFinite(Number(event.beta)) && Number.isFinite(Number(event.gamma));
+                if (orientationReady && motionReady) finish();
+            };
+            const handleMotion = (event) => {
+                motionReady = gameRuntime.motionForce(event) !== null;
+                if (orientationReady && motionReady) finish();
+            };
+            const timeout = window.setTimeout(finish, 3500);
+            window.addEventListener("deviceorientation", handleOrientation, true);
+            window.addEventListener("devicemotion", handleMotion, true);
+        });
+    }
+
     async function checkCapabilities(requestPermissions) {
         const bluetoothReady = window.isSecureContext && BleDriver.isSupported(navigator);
         setCapability(
@@ -190,41 +282,53 @@
             bluetoothReady ? "可用" : (window.isSecureContext ? "浏览器不支持" : "需要 HTTPS")
         );
 
-        if (typeof DeviceOrientationEvent === "undefined") {
+        setCapability(
+            elements.capabilityWake,
+            navigator.wakeLock && typeof navigator.wakeLock.request === "function" ? "ready" : "blocked",
+            navigator.wakeLock && typeof navigator.wakeLock.request === "function" ? "可用" : "不支持，请手动防锁屏"
+        );
+        setCapability(
+            elements.capabilityVibration,
+            typeof navigator.vibrate === "function" ? "ready" : "blocked",
+            typeof navigator.vibrate === "function" ? "可用" : "不支持，不影响输出"
+        );
+
+        if (typeof DeviceOrientationEvent === "undefined" && typeof DeviceMotionEvent === "undefined") {
             setCapability(elements.capabilityMotion, "blocked", "设备不提供");
         } else {
-            let motionText = "开始玩法时授权";
+            let motionText = "开始相关玩法时授权";
             let motionState = "pending";
-            if (requestPermissions && typeof DeviceOrientationEvent.requestPermission === "function") {
+            if (requestPermissions) {
                 try {
-                    const result = await DeviceOrientationEvent.requestPermission();
-                    motionState = result === "granted" ? "ready" : "blocked";
-                    motionText = result === "granted" ? "已授权" : "已拒绝";
+                    const requests = [];
+                    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+                        requests.push(DeviceOrientationEvent.requestPermission());
+                    }
+                    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+                        requests.push(DeviceMotionEvent.requestPermission());
+                    }
+                    const results = await Promise.all(requests);
+                    const granted = results.every((result) => result === "granted");
+                    if (granted) {
+                        setCapability(elements.capabilityMotion, "pending", "已授权，正在验证数据");
+                        await verifyMotionData();
+                        motionState = null;
+                    } else {
+                        motionState = "blocked";
+                        motionText = "已拒绝";
+                    }
                 } catch (_error) {
                     motionState = "blocked";
                     motionText = "授权失败";
                 }
             }
-            setCapability(elements.capabilityMotion, motionState, motionText);
+            if (motionState) setCapability(elements.capabilityMotion, motionState, motionText);
         }
 
         if (!navigator.geolocation) {
             setCapability(elements.capabilityLocation, "blocked", "没有 GPS/GNSS 接口");
         } else if (requestPermissions) {
-            await new Promise((resolve) => {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const hasSpeed = Number.isFinite(position.coords.speed);
-                        setCapability(elements.capabilityLocation, hasSpeed ? "ready" : "pending", hasSpeed ? "速度可用" : "已授权，速度待实测");
-                        resolve();
-                    },
-                    (error) => {
-                        setCapability(elements.capabilityLocation, "blocked", error.code === 1 ? "定位已拒绝" : "暂时无法定位");
-                        resolve();
-                    },
-                    { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
-                );
-            });
+            await verifyLocationSpeed();
         } else {
             let permissionText = "进入玩法时检查";
             let permissionState = "pending";
@@ -303,7 +407,9 @@
 
     function updateReadyState() {
         const ready = readyForOutput();
-        elements.testOutput.disabled = !ready || output.isRunning() || Boolean(activeSession);
+        elements.testOutputs.forEach((button) => {
+            button.disabled = !ready || output.isRunning() || Boolean(activeSession);
+        });
         elements.startGame.disabled = !ready;
         elements.startGame.textContent = ready ? "开始游戏" : "连接并确认设置后开始";
     }
@@ -398,6 +504,19 @@
                 }
             });
         }
+    }
+
+    function syncVisibleSettingControls() {
+        if (!selectedGame) return;
+        elements.settingsFields.querySelectorAll("[data-setting-key]").forEach((input) => {
+            const value = gameSettings[selectedGame][input.dataset.settingKey];
+            if (input.type === "checkbox") input.checked = Boolean(value);
+            else input.value = String(value);
+            if (input.type === "range") {
+                const valueLabel = input.closest(".setting-field")?.querySelector("output");
+                if (valueLabel) valueLabel.textContent = `${value}${input.dataset.unit || ""}`;
+            }
+        });
     }
 
     function switchSettingsCategory(categoryIndex, focusTab) {
@@ -503,17 +622,9 @@
         } else {
             gameSettings[selectedGame][key] = input.value;
         }
-        if (["shake", "angle", "slot"].includes(selectedGame)) {
-            const cfg = gameSettings[selectedGame];
-            if (cfg.strengthMin > cfg.strengthMax) {
-                const changedMaximum = key === "strengthMax";
-                if (changedMaximum) cfg.strengthMin = cfg.strengthMax;
-                else cfg.strengthMax = cfg.strengthMin;
-            }
-        }
-        if (selectedGame === "lightning") {
-            gameSettings.lightning = rules.normalizeLightningSettings(gameSettings.lightning, DEFAULT_SETTINGS.lightning);
-        }
+        gameSettings = gameConfig.normalizeSettings(gameSettings);
+        gameSettings.lightning = rules.normalizeLightningSettings(gameSettings.lightning, DEFAULT_SETTINGS.lightning);
+        syncVisibleSettingControls();
         refreshConditionalSettingFields();
         saveSettings();
     }
@@ -675,7 +786,7 @@
             if (gameName === "shake" || gameName === "angle") {
                 await startOrientationGame(session);
             } else if (gameName === "dice") {
-                startDiceGame(session);
+                await startDiceGame(session);
             } else if (gameName === "slot") {
                 startSlotGame(session);
             } else if (gameName === "lightning") {
@@ -725,15 +836,40 @@
         }
     }
 
+    async function requestMotionPermission() {
+        if (typeof DeviceMotionEvent === "undefined") {
+            throw new Error("当前设备没有动作传感器接口，无法使用摇晃开局");
+        }
+        if (typeof DeviceMotionEvent.requestPermission === "function") {
+            const result = await DeviceMotionEvent.requestPermission();
+            if (result !== "granted") {
+                throw new Error("动作权限被拒绝，请在浏览器设置中允许后重试");
+            }
+        }
+    }
+
     async function startOrientationGame(session) {
         await requestOrientationPermission();
         if (!isSessionCurrent(session)) {
             return;
         }
         const cfg = gameSettings[session.type];
-        let baseline = null;
+        let baseline = calibration[session.type] ? { ...calibration[session.type] } : null;
+        let latestOrientation = null;
         let lastSensorAt = Date.now();
         let sensorStopped = false;
+        let outsideSince = null;
+        let animationFrame = null;
+        const canvas = elements.gameCanvas;
+        const context = canvas.getContext("2d");
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.max(280, canvas.clientWidth || 320);
+        const height = Math.max(240, canvas.clientHeight || 300);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        context.setTransform(dpr, 0, 0, dpr, 0, 0);
+        canvas.hidden = false;
+        session.ball = { x: width / 2, y: height / 2, vx: 0, vy: 0, radius: 8 };
         await output.startContinuous(0, GAME_META[session.type].title);
 
         const handleOrientation = (event) => {
@@ -746,26 +882,162 @@
                 return;
             }
             lastSensorAt = Date.now();
+            latestOrientation = { beta, gamma };
             if (!baseline) {
                 baseline = { beta, gamma };
+                calibration[session.type] = { ...baseline };
                 setPlayDisplay("已校准", "保持当前姿态，移动后开始判定", 0);
-                return;
             }
-            const deviation = Math.hypot(beta - baseline.beta, gamma - baseline.gamma);
-            const threshold = session.type === "shake" ? cfg.safeAngle : cfg.tolerance;
-            const ramp = session.type === "shake" ? cfg.rampAngle : cfg.rampDegrees;
-            const ratio = rules.clamp((deviation - threshold) / Math.max(1, ramp - threshold), 0, 1);
-            const strength = Math.round(cfg.maxStrength * ratio);
-            output.updateContinuous(strength, GAME_META[session.type].title);
-            setPlayDisplay(
-                `${deviation.toFixed(1)}°`,
-                strength > 0 ? `超出安全范围，请求强度 ${strength}` : "位于安全范围，保持停止",
-                ratio * 100
-            );
         };
 
         window.addEventListener("deviceorientation", handleOrientation, true);
         session.cleanups.push(() => window.removeEventListener("deviceorientation", handleOrientation, true));
+        session.cleanups.push(() => {
+            if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+            canvas.hidden = true;
+        });
+
+        function drawBackground(dangerRatio) {
+            context.fillStyle = "#02070e";
+            context.fillRect(0, 0, width, height);
+            context.strokeStyle = "#142235";
+            context.lineWidth = 1;
+            for (let x = 0; x <= width; x += 36) {
+                context.beginPath();
+                context.moveTo(x, 0);
+                context.lineTo(x, height);
+                context.stroke();
+            }
+            for (let y = 0; y <= height; y += 36) {
+                context.beginPath();
+                context.moveTo(0, y);
+                context.lineTo(width, y);
+                context.stroke();
+            }
+            if (dangerRatio > 0) {
+                context.fillStyle = `rgba(255, 63, 74, ${0.05 + dangerRatio * 0.18})`;
+                context.fillRect(0, 0, width, height);
+            }
+        }
+
+        function applyDelayedOutput(error, dangerRatio, delayMs, safeText, checkingText) {
+            if (error <= 0) {
+                outsideSince = null;
+                output.updateContinuous(0, GAME_META[session.type].title);
+                setStage("等待判定");
+                return { strength: 0, detail: safeText };
+            }
+            const now = Date.now();
+            if (outsideSince === null) outsideSince = now;
+            if (now - outsideSince < delayMs) {
+                output.updateContinuous(0, GAME_META[session.type].title);
+                setStage("持续判定中");
+                return { strength: 0, detail: checkingText };
+            }
+            const strength = gameRuntime.interpolateStrength(cfg.strengthMin, cfg.strengthMax, dangerRatio);
+            output.updateContinuous(strength, GAME_META[session.type].title);
+            setStage("输出中");
+            return { strength, detail: `持续偏离，请求强度 ${strength}` };
+        }
+
+        function drawShakeFrame() {
+            const ball = session.ball;
+            if (latestOrientation && baseline) {
+                const relativeBeta = rules.clamp(latestOrientation.beta - baseline.beta, -45, 45);
+                const relativeGamma = rules.clamp(latestOrientation.gamma - baseline.gamma, -45, 45);
+                const sensitivity = cfg.sensitivity / 100;
+                ball.vx += relativeGamma * 0.07 * sensitivity;
+                ball.vy += relativeBeta * 0.07 * sensitivity;
+            }
+            ball.vx *= 0.982;
+            ball.vy *= 0.982;
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+            if (ball.x - ball.radius < 0 || ball.x + ball.radius > width) {
+                ball.x = rules.clamp(ball.x, ball.radius, width - ball.radius);
+                ball.vx *= -0.5;
+            }
+            if (ball.y - ball.radius < 0 || ball.y + ball.radius > height) {
+                ball.y = rules.clamp(ball.y, ball.radius, height - ball.radius);
+                ball.vy *= -0.5;
+            }
+            const zone = gameRuntime.getShakeZoneState(ball, cfg, width, height);
+            drawBackground(zone.dangerRatio);
+            context.strokeStyle = zone.err > 0 ? "#ff3f4a" : "#59d7ff";
+            context.lineWidth = 3;
+            context.beginPath();
+            if (cfg.mode === "gap") {
+                context.arc(zone.centerX, zone.centerY, zone.inner, 0, Math.PI * 2);
+                context.stroke();
+                context.beginPath();
+            }
+            context.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
+            context.stroke();
+            context.fillStyle = zone.err > 0 ? "#ff3f4a" : "#ffffff";
+            context.beginPath();
+            context.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            context.fill();
+            const status = applyDelayedOutput(
+                zone.err,
+                zone.dangerRatio,
+                cfg.forgiveMs,
+                "弹珠在安全区内，当前保持停止",
+                "弹珠已出界，正在持续判定"
+            );
+            setPlayDisplay(`${Math.round(zone.dangerRatio * 100)}%`, status.detail, zone.dangerRatio * 100);
+        }
+
+        function drawAngleFrame() {
+            const offset = latestOrientation && baseline
+                ? rules.clamp(latestOrientation.beta - baseline.beta, -90, 90)
+                : 0;
+            const angleState = gameRuntime.getAngleState(offset, cfg);
+            drawBackground(angleState.dangerRatio);
+            const padding = 26;
+            const gaugeWidth = width - padding * 2;
+            const centerY = height / 2;
+            const toX = (angle) => padding + ((angle + 90) / 180) * gaugeWidth;
+            const targetX = toX(cfg.targetOffset);
+            const currentX = toX(angleState.offset);
+            const tolerancePixels = cfg.tolerance / 180 * gaugeWidth;
+            context.strokeStyle = "#30435b";
+            context.lineWidth = 2;
+            context.beginPath();
+            context.moveTo(padding, centerY);
+            context.lineTo(width - padding, centerY);
+            context.stroke();
+            context.strokeStyle = angleState.err > 0 ? "#fb923c" : "#22c55e";
+            context.lineWidth = 9;
+            context.lineCap = "round";
+            context.beginPath();
+            context.moveTo(targetX - tolerancePixels, centerY);
+            context.lineTo(targetX + tolerancePixels, centerY);
+            context.stroke();
+            context.lineCap = "butt";
+            context.strokeStyle = angleState.err > 0 ? "#ff3f4a" : "#ffffff";
+            context.lineWidth = 3;
+            context.beginPath();
+            context.moveTo(currentX, centerY - 62);
+            context.lineTo(currentX, centerY + 62);
+            context.stroke();
+            const status = applyDelayedOutput(
+                angleState.err,
+                angleState.dangerRatio,
+                cfg.triggerMs,
+                "位于目标角度范围，当前保持停止",
+                "角度已偏离，正在持续判定"
+            );
+            setPlayDisplay(`${Math.round(angleState.offset)}°`, `${status.detail}；目标 ${cfg.targetOffset}°`, angleState.dangerRatio * 100);
+        }
+
+        function renderFrame() {
+            if (!isSessionCurrent(session) || sensorStopped) return;
+            if (session.type === "shake") drawShakeFrame();
+            else drawAngleFrame();
+            animationFrame = window.requestAnimationFrame(renderFrame);
+        }
+        animationFrame = window.requestAnimationFrame(renderFrame);
+
         const watchdog = window.setInterval(() => {
             if (!isSessionCurrent(session) || sensorStopped) {
                 return;
@@ -782,14 +1054,34 @@
     }
 
     function randomDice() {
-        return Array.from({ length: 3 }, () => 1 + Math.floor(Math.random() * 6));
+        return Array.from({ length: 3 }, () => gameRuntime.rollDie(Math.random));
     }
 
-    function startDiceGame(session) {
-        elements.gameAction.hidden = false;
-        elements.gameAction.textContent = "摇骰子";
-        setPlayDisplay("—  —  —", "点击摇骰子开始一局");
+    function randomOpponentDice(difficulty) {
+        return Array.from({ length: 3 }, () => gameRuntime.rollOpponentDie(difficulty, Math.random));
+    }
+
+    async function startDiceGame(session) {
+        const cfg = gameSettings.dice;
+        if (!cfg.manualRoll) {
+            await requestMotionPermission();
+        }
+        elements.gameAction.hidden = !cfg.manualRoll;
+        elements.gameAction.textContent = "手动摇骰子";
+        setPlayDisplay("—  —  —", cfg.manualRoll ? "摇晃手机或点击按钮开始一局" : "摇晃手机开始一局");
         elements.gameAction.onclick = () => runDiceRound(session);
+        let lastMotionTriggerAt = 0;
+        const handleMotion = (event) => {
+            if (!isSessionCurrent(session) || session.busy) return;
+            const force = gameRuntime.motionForce(event);
+            const now = Date.now();
+            if (force !== null && force > cfg.shakeSensitivity && now - lastMotionTriggerAt > 1000) {
+                lastMotionTriggerAt = now;
+                runDiceRound(session);
+            }
+        };
+        window.addEventListener("devicemotion", handleMotion, true);
+        session.cleanups.push(() => window.removeEventListener("devicemotion", handleMotion, true));
     }
 
     async function runDiceRound(session) {
@@ -800,8 +1092,15 @@
         elements.gameAction.disabled = true;
         try {
             const cfg = gameSettings.dice;
+            setStage("摇号中");
+            for (let index = 0; index < 8; index += 1) {
+                setPlayDisplay(`${randomDice().join(" · ")}  /  ${randomOpponentDice(cfg.opponentDifficulty).join(" · ")}`, "骰子正在滚动");
+                if (navigator.vibrate) navigator.vibrate(25);
+                const continued = await sessionDelay(session, 90);
+                if (!continued) return;
+            }
             const player = randomDice();
-            const opponent = randomDice();
+            const opponent = randomOpponentDice(cfg.opponentDifficulty);
             const result = rules.evaluateDiceRound(player, opponent, cfg.leopardMultiplier);
             const plan = rules.calculateDiceExecutionPlan(result.punishmentCount, cfg, 300);
             setPlayDisplay(
@@ -818,7 +1117,7 @@
                 }
                 setStage("输出中");
                 elements.playSecondary.textContent = `${result.reason}；第 ${index + 1} / ${plan.executionCount} 下`;
-                await output.playPulse(cfg.baseStrength, plan.singleSeconds * 1000, "骰子结算");
+                await output.playPulse(cfg.strength, plan.singleSeconds * 1000, "骰子结算");
                 if (index < plan.executionCount - 1 && isSessionCurrent(session)) {
                     setStage("间隔中");
                     elements.playSecondary.textContent = "本轮间隔中，下一下尚未开始";
@@ -836,7 +1135,7 @@
         } finally {
             if (isSessionCurrent(session)) {
                 session.busy = false;
-                elements.gameAction.disabled = false;
+                elements.gameAction.disabled = !gameSettings.dice.manualRoll;
             }
         }
     }
@@ -844,9 +1143,25 @@
     function startSlotGame(session) {
         session.slotState = { pressure: 0, missStreak: 0 };
         elements.gameAction.hidden = false;
-        elements.gameAction.textContent = "开始摇奖";
-        setPlayDisplay("？  ？  ？", "压力 0%，点击开始摇奖", 0);
+        elements.gameAction.textContent = gameSettings.slot.autoSpin ? "自动连转中" : "开始摇奖";
+        setPlayDisplay("🍒  🔔  💎", gameSettings.slot.autoSpin ? "压力 0%，即将自动开转" : "压力 0%，点击开始摇奖", 0);
         elements.gameAction.onclick = () => runSlotRound(session);
+        if (gameSettings.slot.autoSpin) {
+            scheduleNextSlotRound(session, 600);
+        }
+    }
+
+    function scheduleNextSlotRound(session, delayMs) {
+        if (!isSessionCurrent(session) || !gameSettings.slot.autoSpin) return;
+        session.busy = true;
+        elements.gameAction.disabled = true;
+        elements.gameAction.textContent = "间隔中";
+        setStage("间隔中");
+        elements.playSecondary.textContent = "自动连转间隔中，下一轮尚未开始";
+        sessionTimeout(session, () => {
+            session.busy = false;
+            runSlotRound(session);
+        }, delayMs);
     }
 
     async function runSlotRound(session) {
@@ -857,6 +1172,14 @@
         elements.gameAction.disabled = true;
         try {
             const cfg = gameSettings.slot;
+            elements.gameAction.textContent = "开奖中";
+            setStage("摇奖中");
+            const spinDeadline = Date.now() + cfg.spinMs;
+            while (Date.now() < spinDeadline) {
+                setPlayDisplay(Array.from({ length: 3 }, () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)]).join("  "), "图标正在转动", session.slotState.pressure);
+                const continued = await sessionDelay(session, Math.min(70, Math.max(1, spinDeadline - Date.now())));
+                if (!continued) return;
+            }
             const reels = rules.buildSlotResult(cfg, SLOT_SYMBOLS, Math.random);
             const resultType = rules.classifySlotResult(reels);
             session.slotState = rules.advanceSlotState(session.slotState, cfg, resultType);
@@ -868,29 +1191,44 @@
 
             if (session.slotState.triggerPunishment) {
                 setStage("输出中");
-                await output.playPulse(cfg.shockStrength, cfg.shockSeconds * 1000, session.slotState.punishmentReason);
-                if (cfg.fullAfter === "reset") {
-                    session.slotState.pressure = 0;
-                } else if (cfg.fullAfter === "half") {
-                    session.slotState.pressure = 50;
+                const completed = await output.playPulse(cfg.strengthMax, cfg.shockSeconds * 1000, session.slotState.punishmentReason);
+                if (completed) {
+                    session.slotState.pressure = cfg.pressureAfterPunish === "keep" ? 100 : 0;
+                    session.slotState.missStreak = 0;
                 }
-                elements.playSecondary.textContent = `满槽惩罚完成；当前压力 ${session.slotState.pressure}%`;
+                elements.playSecondary.textContent = completed
+                    ? `满槽惩罚完成；当前压力 ${session.slotState.pressure}%`
+                    : "满槽惩罚未完成，压力保持不变";
                 elements.playMeterFill.style.width = `${session.slotState.pressure}%`;
-            } else if (resultType === "miss" && cfg.lightStrength > 0) {
+                if (completed) await runSlotRest(session, cfg.restMs);
+            } else if (resultType === "miss" && cfg.lightPunishEnabled && cfg.strengthMin > 0) {
                 setStage("输出中");
-                await output.playPulse(cfg.lightStrength, cfg.lightShockSeconds * 1000, "没中奖轻电");
+                const completed = await output.playPulse(cfg.strengthMin, cfg.lightShockSeconds * 1000, "没中奖轻电");
                 elements.playSecondary.textContent = `${session.slotState.message}；轻电完成`;
+                if (completed) await runSlotRest(session, cfg.restMs);
             }
-            setStage("等待判定");
+            if (isSessionCurrent(session)) setStage("等待判定");
         } catch (error) {
             showMessage(error.message || "角子机结算失败", "error");
             await output.emergencyStop("角子机结算异常");
         } finally {
             if (isSessionCurrent(session)) {
                 session.busy = false;
-                elements.gameAction.disabled = false;
+                if (gameSettings.slot.autoSpin) {
+                    scheduleNextSlotRound(session, gameSettings.slot.autoIntervalMs);
+                } else {
+                    elements.gameAction.disabled = false;
+                    elements.gameAction.textContent = "开始摇奖";
+                }
             }
         }
+    }
+
+    async function runSlotRest(session, restMs) {
+        if (!isSessionCurrent(session) || restMs <= 0) return;
+        setStage("休息中");
+        elements.playSecondary.textContent = "本轮输出完成，正在强制休息";
+        await sessionDelay(session, restMs);
     }
 
     function lightningModeText(mode) {
@@ -920,6 +1258,7 @@
         session.jamTimer = null;
         session.jamBusy = false;
         session.jamCount = 0;
+        session.resumeFromJam = false;
         session.lightningQueue = Promise.resolve();
         await output.startContinuous(0, "雷电极速等待速度");
 
@@ -930,10 +1269,13 @@
                 }
                 const speedMps = Number(position.coords.speed);
                 const accuracy = Number(position.coords.accuracy);
+                const timestamp = Number(position.timestamp) || Date.now();
                 session.lastLocationSample = {
-                    valid: Number.isFinite(speedMps) && speedMps >= 0 && Number.isFinite(accuracy) && accuracy <= 100,
+                    valid: Number.isFinite(speedMps) && speedMps >= 0 &&
+                        Number.isFinite(accuracy) && accuracy > 0 && accuracy <= 50 &&
+                        Math.abs(Date.now() - timestamp) <= LOCATION_MAX_AGE_MS,
                     speedKmh: Number.isFinite(speedMps) ? speedMps * 3.6 : null,
-                    timestamp: Date.now()
+                    timestamp
                 };
                 queueLightningTick(session);
             },
@@ -995,10 +1337,16 @@
             const wasJam = session.lastMode === "jam" || session.jamBusy || session.jamTimer;
             cancelJamSchedule(session);
             if (wasJam) {
+                session.resumeFromJam = true;
                 await output.stop("离开堵车规则");
             }
 
             if (mode === "driving") {
+                if (session.resumeFromJam) {
+                    session.driveCycleStartedAt = null;
+                    session.driveRestUntil = now + session.lightningSettings.drivingRestSeconds * 1000;
+                    session.resumeFromJam = false;
+                }
                 if (now < session.driveRestUntil) {
                     await ensureLightningContinuous(session, 0);
                     setStage("休息中");
@@ -1048,7 +1396,8 @@
         if (!isSessionCurrent(session) || session.jamBusy || session.jamTimer) {
             return;
         }
-        const delayMs = session.jamCount === 0 ? 0 : randomJamGap(session.lightningSettings);
+        const justEnteredJam = session.lastMode !== "jam" && session.jamCount === 0;
+        const delayMs = justEnteredJam ? 500 : randomJamGap(session.lightningSettings);
         session.jamTimer = sessionTimeout(session, () => runJamPulse(session), delayMs);
     }
 
@@ -1197,21 +1546,34 @@
             configureOutput();
             updateReadyState();
         });
-        elements.testOutput.addEventListener("click", async () => {
+        elements.testOutputs.forEach((button) => button.addEventListener("click", async () => {
             if (!readyForOutput()) {
                 return;
             }
-            elements.testOutput.disabled = true;
+            const testMode = protocol.normalizeChannel(button.dataset.testChannel);
+            if (!rules.hasSafeOutputLimits(testMode, globalSettings.limitA, globalSettings.limitB)) {
+                showMessage("该测试通道的网页上限必须大于 0。", "error");
+                return;
+            }
+            elements.testOutputs.forEach((item) => { item.disabled = true; });
             try {
+                output.configure({
+                    ...globalSettings,
+                    outputMode: testMode,
+                    bStrengthMode: "same",
+                    bStrengthPercent: 100,
+                    waveform: "game_default"
+                });
                 await output.playPulse(15, 1000, "低强度试电");
-                showMessage("1 秒低强度试电完成。", "info");
+                showMessage(`${testMode.toUpperCase()} 通道 1 秒低强度试电完成。`, "info");
             } catch (error) {
                 showMessage(error.message || "试电失败", "error");
                 await output.emergencyStop("试电异常");
             } finally {
+                configureOutput();
                 updateReadyState();
             }
-        });
+        }));
 
         document.querySelectorAll(".game-card").forEach((card) => {
             card.addEventListener("click", () => renderGameSettings(card.dataset.game));
@@ -1280,6 +1642,7 @@
         });
         elements.resetSettings.addEventListener("click", () => {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_error) {}
+            try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (_error) {}
             window.location.reload();
         });
 

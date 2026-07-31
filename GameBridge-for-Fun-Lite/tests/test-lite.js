@@ -311,6 +311,20 @@ function testGameConfigurationMatchesOriginal() {
     Object.values(config.SETTING_GROUPS).flat().flatMap((group) => group.fields).forEach((field) => {
         assert.ok(field.help && field.help.length >= 8, `${field.key} 必须有面向用户的说明`);
     });
+
+    const hostile = config.cloneDefaultSettings();
+    hostile.shake.strengthMin = -500;
+    hostile.shake.strengthMax = 999;
+    hostile.dice.singleSeconds = 999;
+    hostile.slot.winRate = "always-win";
+    hostile.lightning.jamGapMinSeconds = 60;
+    hostile.lightning.jamGapMaxSeconds = 5;
+    const normalized = config.normalizeSettings(hostile);
+    assert.equal(normalized.shake.strengthMin, 0);
+    assert.equal(normalized.shake.strengthMax, 200);
+    assert.equal(normalized.dice.singleSeconds, 30);
+    assert.equal(normalized.slot.winRate, config.DEFAULT_SETTINGS.slot.winRate);
+    assert.equal(normalized.lightning.jamGapMaxSeconds, 65, "随机间隔上限必须始终高于下限至少 5 秒");
 }
 
 function testRequiredFiles() {
@@ -325,6 +339,7 @@ function testRequiredFiles() {
         "css/style.css",
         "js/main.js",
         "js/game-config.js",
+        "js/game-runtime.js",
         "js/ble-driver.js",
         "js/coyote-protocol.js",
         "js/output-controller.js",
@@ -380,6 +395,46 @@ function testGameSettingsExperienceMatchesOriginal() {
     assert.ok(mainSource.includes('role", "tablist"'), "长设置页必须使用原版的分组标签结构");
     assert.ok(mainSource.includes("field.help"), "动态生成的每一项参数必须显示解释文字");
     assert.ok(mainSource.includes("SETTING_CATEGORIES"), "设置页分组必须由已核对的玩法契约生成");
+    assert.ok(mainSource.includes('gamebridge-lite-settings-v2'), "规则字段变化后必须隔离旧版不兼容的玩法缓存");
+    assert.ok(mainSource.includes("schemaVersion: 2"), "本地设置必须带有可审计的结构版本");
+    assert.ok(html.includes('id="capability-wake"'), "全局能力中心必须保留屏幕常亮检查");
+    assert.ok(html.includes('id="capability-vibration"'), "全局能力中心必须保留本机震动检查");
+    ["a", "b", "ab"].forEach((mode) => {
+        assert.ok(html.includes(`data-test-channel="${mode}"`), `低强度试电必须保留原版的 ${mode.toUpperCase()} 独立入口`);
+    });
+}
+
+function testRuntimeRuleParity() {
+    const runtimePath = path.join(liteRoot, "js/game-runtime.js");
+    assert.ok(fs.existsSync(runtimePath), "传感器与随机玩法必须使用可独立测试的运行规则模块");
+    const runtime = require(runtimePath);
+
+    assert.deepEqual(
+        runtime.getShakeZoneState({ x: 80, y: 50 }, { mode: "radius", safeRadius: 20, gapInner: 10 }, 100, 100),
+        { centerX: 50, centerY: 50, inner: 0, outer: 20, err: 10, dangerRatio: 10 / 22 },
+        "手抖挑战必须按弹珠与安全圆的真实距离判定"
+    );
+    assert.equal(
+        runtime.getShakeZoneState({ x: 55, y: 50 }, { mode: "gap", safeRadius: 30, gapInner: 10 }, 100, 100).err,
+        5,
+        "夹缝模式太靠近中心也必须算出界"
+    );
+    assert.deepEqual(
+        runtime.getAngleState(24, { targetOffset: 10, tolerance: 4, rampDegrees: 20 }),
+        { offset: 24, err: 10, dangerRatio: 0.5 },
+        "保持角度必须使用目标偏移、允许误差和拉满角度"
+    );
+    assert.equal(runtime.interpolateStrength(20, 80, 0.5), 50);
+    assert.equal(runtime.rollOpponentDie("easy", () => 0), 1);
+    assert.equal(runtime.rollOpponentDie("hard", () => 0), 2);
+
+    const mainSource = fs.readFileSync(path.join(liteRoot, "js/main.js"), "utf8");
+    ["safeAngle", "rampAngle", "baseStrength", "shockStrength", "lightStrength", "fullAfter"].forEach((oldKey) => {
+        assert.ok(!mainSource.includes(`cfg.${oldKey}`), `运行时不得继续读取已删除的旧参数 ${oldKey}`);
+    });
+    ["strengthMin", "strengthMax", "targetOffset", "triggerMs", "shakeSensitivity", "opponentDifficulty", "manualRoll", "spinMs", "restMs", "autoSpin", "pressureAfterPunish"].forEach((key) => {
+        assert.ok(mainSource.includes(`.${key}`), `运行时必须实际使用原版参数 ${key}`);
+    });
 }
 
 async function run() {
@@ -394,6 +449,7 @@ async function run() {
     testDeploymentPathAndDirectControlConfirmation();
     testGlobalOutputControlsMatchOriginal();
     testGameSettingsExperienceMatchesOriginal();
+    testRuntimeRuleParity();
     process.stdout.write("Lite 单元测试通过\n");
 }
 

@@ -830,6 +830,16 @@ input[type="range"] {
     gap: 13px;
 }
 
+.test-action-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.test-action-grid button {
+    min-height: 48px;
+}
+
 .version-panel > div {
     display: flex;
     justify-content: space-between;
@@ -858,6 +868,14 @@ input[type="range"] {
     background:
         radial-gradient(circle at center, rgb(78 172 255 / 0.15), transparent 60%),
         #050d18;
+}
+
+.game-canvas {
+    width: min(100%, 520px);
+    height: clamp(240px, 62vw, 340px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: #02070e;
 }
 
 .play-visual > strong {

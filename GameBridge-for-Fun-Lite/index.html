@@ -64,6 +64,16 @@
                             <strong>离线运行</strong>
                             <span id="capability-offline" class="capability-state">检查中</span>
                         </div>
+                        <div class="capability-card">
+                            <span class="capability-mark" aria-hidden="true">ON</span>
+                            <strong>屏幕常亮</strong>
+                            <span id="capability-wake" class="capability-state">检查中</span>
+                        </div>
+                        <div class="capability-card">
+                            <span class="capability-mark" aria-hidden="true">V</span>
+                            <strong>本机震动</strong>
+                            <span id="capability-vibration" class="capability-state">检查中</span>
+                        </div>
                     </div>
                 </section>
 
@@ -123,7 +133,7 @@
                         <div class="confirmation-box">
                             <label class="check-row">
                                 <input id="output-confirm-checkbox" type="checkbox">
-                                <span>我已核对当前网页 A/B 安全上限，并确认所选通道接线正确、可以立即停止设备。</span>
+                                <span>我已核对当前网页 A/B 安全上限和实际接线，并确认可以立即停止设备。</span>
                             </label>
                             <button id="confirm-output" class="secondary-button" type="button">确认当前输出设置</button>
                             <p id="confirmation-status" class="field-help">连接或修改设置后需要重新确认。</p>
@@ -137,8 +147,12 @@
                         <span class="summary-value">强度 15 · 1 秒</span>
                     </summary>
                     <div class="disclosure-body">
-                        <p class="supporting-text">试电使用当前通道和波形，强度固定为 15、持续 1 秒，并继续受 A/B 网页上限约束。</p>
-                        <button id="test-output" class="primary-button full-width" type="button" disabled>开始低强度试电</button>
+                        <p class="supporting-text">分别试 A、B 或 A+B。固定使用强度 15、游戏默认波形和 1 秒时长，并继续受对应网页上限约束。</p>
+                        <div class="test-action-grid">
+                            <button class="primary-button" type="button" data-test-channel="a" disabled>试 A</button>
+                            <button class="primary-button" type="button" data-test-channel="b" disabled>试 B</button>
+                            <button class="primary-button" type="button" data-test-channel="ab" disabled>试 A+B</button>
+                        </div>
                     </div>
                 </details>
             </section>
@@ -222,6 +236,7 @@
                     <span id="play-stage" class="stage-badge">等待判定</span>
                 </div>
                 <div id="play-visual" class="play-visual" aria-live="polite">
+                    <canvas id="game-canvas" class="game-canvas" hidden aria-label="当前玩法的实时判定画面"></canvas>
                     <strong id="play-primary">准备开始</strong>
                     <span id="play-secondary">请保持页面在前台</span>
                     <div id="play-meter" class="meter" hidden><span></span></div>
@@ -264,6 +279,7 @@
     <script src="./js/waveforms.js"></script>
     <script src="./js/game-logic.js"></script>
     <script src="./js/game-config.js"></script>
+    <script src="./js/game-runtime.js"></script>
     <script src="./js/ble-driver.js"></script>
     <script src="./js/output-controller.js"></script>
     <script src="./js/pwa-manager.js"></script>

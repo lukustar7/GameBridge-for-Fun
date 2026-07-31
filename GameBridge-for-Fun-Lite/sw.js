@@ -11,6 +11,7 @@ const APP_SHELL = Object.freeze([
     "./js/waveforms.js",
     "./js/game-logic.js",
     "./js/game-config.js",
+    "./js/game-runtime.js",
     "./js/ble-driver.js",
     "./js/output-controller.js",
     "./js/pwa-manager.js",

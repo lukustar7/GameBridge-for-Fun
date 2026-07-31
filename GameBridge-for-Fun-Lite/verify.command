@@ -11,6 +11,7 @@ node --check js/ble-driver.js
 node --check js/output-controller.js
 node --check js/game-logic.js
 node --check js/game-config.js
+node --check js/game-runtime.js
 node --check js/pwa-manager.js
 node --check js/main.js
 node --check sw.js

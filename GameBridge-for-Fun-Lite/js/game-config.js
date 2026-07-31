@@ -216,6 +216,38 @@
         );
     }
 
+    function normalizeSettings(candidate) {
+        const normalized = cloneDefaultSettings();
+        const source = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+        Object.entries(SETTING_GROUPS).forEach(([gameName, groups]) => {
+            const savedGame = source[gameName];
+            if (!savedGame || typeof savedGame !== "object" || Array.isArray(savedGame)) return;
+            groups.flatMap((group) => group.fields).forEach((field) => {
+                const value = savedGame[field.key];
+                if (field.type === "range" && typeof value === "number" && Number.isFinite(value)) {
+                    normalized[gameName][field.key] = Math.min(field.max, Math.max(field.min, value));
+                } else if (field.type === "toggle" && typeof value === "boolean") {
+                    normalized[gameName][field.key] = value;
+                } else if (field.type === "select" && field.options.some(([allowed]) => allowed === value)) {
+                    normalized[gameName][field.key] = value;
+                }
+            });
+        });
+
+        ["shake", "angle", "slot"].forEach((gameName) => {
+            const cfg = normalized[gameName];
+            if (cfg.strengthMin > cfg.strengthMax) {
+                [cfg.strengthMin, cfg.strengthMax] = [cfg.strengthMax, cfg.strengthMin];
+            }
+        });
+        const lightning = normalized.lightning;
+        lightning.maxStrength = Math.max(lightning.startStrength, lightning.maxStrength);
+        lightning.fullSpeed = Math.max(lightning.startSpeed + 10, lightning.fullSpeed);
+        lightning.jamStrength = Math.min(lightning.maxStrength, lightning.jamStrength);
+        lightning.jamGapMaxSeconds = Math.max(lightning.jamGapMinSeconds + 5, lightning.jamGapMaxSeconds);
+        return normalized;
+    }
+
     return Object.freeze({
         DEFAULT_DEVICE_LIMITS,
         DEFAULT_OUTPUT_SETTINGS,
@@ -223,6 +255,7 @@
         GAME_META,
         SETTING_CATEGORIES,
         SETTING_GROUPS,
-        cloneDefaultSettings
+        cloneDefaultSettings,
+        normalizeSettings
     });
 }));
