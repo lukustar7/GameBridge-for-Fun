@@ -6,15 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-### Added
-- 新增 `GameBridge-for-Fun-Lite/` 纯网页独立版目录，实现零电脑、零官方 App、零硬件网关的跨平台极简控制体验。
-- 复用原版纯规则引擎 `static/game-logic.js` 与纯黑 OLED `#000000` 视觉框架，实现手抖、角度、骰子、角子机、雷电极速 5 大玩法无缝移植。
-- 新增 WebBluetooth 原生蓝牙驱动 `js/ble-driver.js`，支持设备过滤、MAC 贴纸编号辨识、RSSI 近场排序、物理微弱震动确认，以及郊狼 2.0 (3字节小端) 和 3.0 (8字节V3) 双硬件协议。
-- 新增底层 3 重安全熔断引擎 `js/safety-guard.js`，包含 `Math.min` 出口数学卡死、0.15 秒到期断电归零看门狗与常驻急停面板。
-- 新增 PWA `Service Worker` 离线缓存服务 `sw.js`、`manifest.json` 与 `js/pwa-manager.js`，实现 150KB 极速加载、全离线秒开、资源完整性自检与版本更新弹窗提醒。
-- 新增浏览器蓝牙能力与权限检测，在 iOS Safari 等不支持 WebBluetooth 的环境上自动提供弹窗拦截与 `Blueify` / `WebBLE` 浏览器下载指引。
-- 新增 3 项 Lite 独立版架构与 PWA 规范自动化测试用例，Python 单元测试用例总数从 96 项增加到 99 项。
-
 ## [1.1.0-beta.2] - 2026-07-29
 
 ### Added

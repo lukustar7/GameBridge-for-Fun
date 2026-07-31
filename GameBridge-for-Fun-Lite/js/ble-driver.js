@@ -1,160 +1,246 @@
-/* GameBridge-for-Fun-Lite WebBluetooth 原生驱动
-   支持郊狼 2.0 (3字节小端) 与 郊狼 3.0 (8字节V3波形) 直连
-*/
+(function (root, factory) {
+    "use strict";
 
-class CoyoteBLEDriver {
-  constructor() {
-    this.device = null;
-    this.server = null;
-    this.rxCharacteristic = null;
-    this.deviceType = 'COYOTE_030'; // 默认 3.0，握手后按 UUID / 广播名自动区分
-    this.deviceName = '';
-    this.isConnected = false;
-    this.onStatusChangeCallback = null;
-
-    // 官方协议 UUID 常量
-    this.SERVICE_UUID_V3 = '955a0001-0925-423a-ab0a-80b1e19b2a07';
-    this.CHAR_UUID_V3 = '955a0002-0925-423a-ab0a-80b1e19b2a07';
-    
-    this.SERVICE_UUID_V2 = '0000180c-0000-1000-8000-00805f9b34fb';
-    this.CHAR_UUID_V2 = '00002a56-0000-1000-8000-00805f9b34fb';
-  }
-
-  // 设置状态变化回调
-  onStatusChange(fn) {
-    this.onStatusChangeCallback = fn;
-  }
-
-  _notifyStatus(statusText, connected = false) {
-    this.isConnected = connected;
-    if (this.onStatusChangeCallback) {
-      this.onStatusChangeCallback({
-        connected,
-        statusText,
-        deviceType: this.deviceType,
-        deviceName: this.deviceName
-      });
+    const api = factory(root.CoyoteProtocol || (typeof require === "function" ? require("./coyote-protocol.js") : null));
+    if (typeof module === "object" && module.exports) {
+        module.exports = api;
     }
-  }
+    root.LiteBleDriver = api;
+}(typeof globalThis !== "undefined" ? globalThis : this, function (protocol) {
+    "use strict";
 
-  // 检查浏览器是否具备 WebBluetooth 硬件接口
-  static isSupported() {
-    return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
-  }
-
-  // 请求弹出系统蓝牙选择器弹窗并建立连接
-  async requestAndConnect() {
-    if (!CoyoteBLEDriver.isSupported()) {
-      throw new Error('当前浏览器不支持网页蓝牙 (WebBluetooth)');
+    if (!protocol) {
+        throw new Error("蓝牙驱动缺少协议模块");
     }
 
-    try {
-      this._notifyStatus('正在扫描蓝牙设备...', false);
-
-      // 请求弹出蓝牙挑选框（兼容 2.0 与 3.0 服务广播）
-      this.device = await navigator.bluetooth.requestDevice({
-        filters: [
-          { namePrefix: 'DG-LAB' },
-          { namePrefix: 'DungeonLab' },
-          { namePrefix: 'Coyote' }
-        ],
-        optionalServices: [this.SERVICE_UUID_V3, this.SERVICE_UUID_V2]
-      });
-
-      if (!this.device) {
-        throw new Error('未选择任何设备');
-      }
-
-      this.deviceName = this.device.name || 'Coyote Device';
-      
-      // 按设备名称判断型号
-      if (this.deviceName.includes('2.0') || this.deviceName.includes('COYOTE_020')) {
-        this.deviceType = 'COYOTE_020';
-      } else {
-        this.deviceType = 'COYOTE_030';
-      }
-
-      // 监听物理断开事件
-      this.device.addEventListener('gattserverdisconnected', () => {
-        this._notifyStatus('蓝牙已断开', false);
-      });
-
-      this._notifyStatus('正在建立 GATT 连接...', false);
-      this.server = await this.device.gatt.connect();
-
-      // 获取服务与写入特征
-      if (this.deviceType === 'COYOTE_020') {
-        const service = await this.server.getPrimaryService(this.SERVICE_UUID_V2);
-        this.rxCharacteristic = await service.getCharacteristic(this.CHAR_UUID_V2);
-      } else {
-        const service = await this.server.getPrimaryService(this.SERVICE_UUID_V3);
-        this.rxCharacteristic = await service.getCharacteristic(this.CHAR_UUID_V3);
-      }
-
-      // 连接成功，记忆设备标识
-      localStorage.setItem('gb_lite_last_device_id', this.device.id);
-      this._notifyStatus(`已连接: ${this.deviceName}`, true);
-      return true;
-
-    } catch (err) {
-      this._notifyStatus(`连接失败: ${err.message}`, false);
-      throw err;
-    }
-  }
-
-  // 下发脉冲控制数据
-  async sendPulse(channelAStrength, channelBStrength, durationMs = 100) {
-    if (!this.isConnected || !this.rxCharacteristic) {
-      return false;
+    async function writeCharacteristic(characteristic, bytes) {
+        if (!characteristic) {
+            throw new Error("设备缺少必要的蓝牙特征");
+        }
+        if (typeof characteristic.writeValueWithoutResponse === "function") {
+            await characteristic.writeValueWithoutResponse(bytes);
+            return;
+        }
+        if (typeof characteristic.writeValue === "function") {
+            await characteristic.writeValue(bytes);
+            return;
+        }
+        throw new Error("当前浏览器不支持蓝牙写入");
     }
 
-    try {
-      let payload;
-      if (this.deviceType === 'COYOTE_020') {
-        // 二代 3 字节小端编解码：X(5bit脉宽), Y(10bit间隔), Z(9bit强度)
-        // 强度转换：2.0 协议强度为设备强度除以 5 (0~20)
-        const waveZ = Math.min(20, Math.floor(channelAStrength / 5));
-        const pulseX = 5;
-        const pauseY = 95; // 组装为 100Hz 帧
-        const packed = (pulseX & 0x1F) | ((pauseY & 0x3FF) << 5) | ((waveZ & 0x1FF) << 15);
-        payload = new Uint8Array([
-          packed & 0xFF,
-          (packed >> 8) & 0xFF,
-          (packed >> 16) & 0xFF
-        ]);
-      } else {
-        // 三代 8 字节波形序列（100Hz 频率帧）
-        const stA = Math.min(200, Math.max(0, channelAStrength));
-        const stB = Math.min(200, Math.max(0, channelBStrength));
-        payload = new Uint8Array([100, 100, 100, 100, stA, stA, stB, stB]);
-      }
+    class BleDriver {
+        constructor(options) {
+            const callbacks = options || {};
+            this.onStatus = typeof callbacks.onStatus === "function" ? callbacks.onStatus : function () {};
+            this.onActualStrength = typeof callbacks.onActualStrength === "function"
+                ? callbacks.onActualStrength
+                : function () {};
+            this.device = null;
+            this.server = null;
+            this.protocolVersion = null;
+            this.characteristics = {};
+            this.connected = false;
+            this.sequence = 0;
+            this.queue = Promise.resolve();
+            this._boundDisconnect = this._handleDisconnect.bind(this);
+            this._boundNotification = this._handleNotification.bind(this);
+        }
 
-      await this.rxCharacteristic.writeValueWithoutResponse(payload);
-      return true;
-    } catch (e) {
-      console.warn('蓝牙下发失败:', e);
-      return false;
+        static isSupported(navigatorObject) {
+            const candidate = navigatorObject || (typeof navigator !== "undefined" ? navigator : null);
+            return Boolean(candidate && candidate.bluetooth && typeof candidate.bluetooth.requestDevice === "function");
+        }
+
+        async connect(navigatorObject) {
+            const candidate = navigatorObject || (typeof navigator !== "undefined" ? navigator : null);
+            if (!BleDriver.isSupported(candidate)) {
+                throw new Error("当前浏览器没有 Web Bluetooth，无法直接连接设备");
+            }
+
+            await this.disconnect();
+            this.onStatus({ state: "connecting", message: "正在选择并识别设备" });
+            try {
+                this.device = await candidate.bluetooth.requestDevice({
+                    filters: [
+                        { services: [protocol.UUIDS.v3.service] },
+                        { services: [protocol.UUIDS.v2.service] },
+                        { namePrefix: "47L121000" },
+                        { namePrefix: "D-LAB ESTIM01" }
+                    ],
+                    optionalServices: [protocol.UUIDS.v2.service, protocol.UUIDS.v3.service]
+                });
+                this.device.addEventListener("gattserverdisconnected", this._boundDisconnect);
+                this.server = await this.device.gatt.connect();
+                await this._discoverProtocol();
+                this.connected = true;
+                await this.stop();
+                this.onStatus({
+                    state: "connected",
+                    message: `${this.device.name || "已选设备"} · ${this.protocolVersion}`,
+                    protocol: this.protocolVersion
+                });
+                return {
+                    name: this.device.name || "未命名设备",
+                    protocol: this.protocolVersion
+                };
+            } catch (error) {
+                const failedDevice = this.device;
+                this._resetConnection(false);
+                if (failedDevice && failedDevice.gatt && failedDevice.gatt.connected) {
+                    failedDevice.gatt.disconnect();
+                }
+                this.onStatus({ state: "error", message: error.message || "蓝牙连接失败" });
+                throw error;
+            }
+        }
+
+        async disconnect() {
+            if (this.connected) {
+                try {
+                    await this.stop();
+                } catch (_error) {
+                    // 断开动作以切断连接为主，设备已经离线时无需阻塞。
+                }
+            }
+            const device = this.device;
+            this._resetConnection(false);
+            if (device && device.gatt && device.gatt.connected) {
+                device.gatt.disconnect();
+            }
+            this.onStatus({ state: "disconnected", message: "尚未连接设备" });
+        }
+
+        async writeFrame(frame) {
+            if (!this.connected || !this.protocolVersion) {
+                throw new Error("蓝牙连接已断开");
+            }
+            const payload = frame || {};
+            const strengthA = Math.round(Number(payload.strengthA) || 0);
+            const strengthB = Math.round(Number(payload.strengthB) || 0);
+            const point = Array.isArray(payload.point) ? payload.point : [10, 0];
+            return this._enqueue(async () => {
+                if (!this.connected) {
+                    throw new Error("蓝牙连接已断开");
+                }
+                if (this.protocolVersion === "3.0") {
+                    const bytes = protocol.encodeV3Frame({
+                        sequence: this.sequence,
+                        mode: 0x0f,
+                        strengthA,
+                        strengthB,
+                        point
+                    });
+                    this.sequence = (this.sequence + 1) & 0x0f;
+                    await writeCharacteristic(this.characteristics.write, bytes);
+                    return;
+                }
+                await writeCharacteristic(
+                    this.characteristics.strength,
+                    protocol.encodeV2Strength(strengthA, strengthB)
+                );
+                await writeCharacteristic(this.characteristics.waveA, protocol.encodeV2WavePoint(point));
+                await writeCharacteristic(this.characteristics.waveB, protocol.encodeV2WavePoint(point));
+            });
+        }
+
+        async stop() {
+            if (!this.connected || !this.protocolVersion) {
+                return;
+            }
+            return this._enqueue(async () => {
+                if (!this.connected) {
+                    return;
+                }
+                if (this.protocolVersion === "3.0") {
+                    const zero = protocol.encodeV3Frame({
+                        sequence: this.sequence,
+                        mode: 0x0f,
+                        strengthA: 0,
+                        strengthB: 0,
+                        point: [10, 0]
+                    });
+                    this.sequence = (this.sequence + 1) & 0x0f;
+                    await writeCharacteristic(this.characteristics.write, zero);
+                    return;
+                }
+                await writeCharacteristic(this.characteristics.strength, protocol.encodeV2Strength(0, 0));
+                const zeroWave = protocol.encodeV2WavePoint([10, 0]);
+                await writeCharacteristic(this.characteristics.waveA, zeroWave);
+                await writeCharacteristic(this.characteristics.waveB, zeroWave);
+            });
+        }
+
+        async _discoverProtocol() {
+            let service = null;
+            try {
+                service = await this.server.getPrimaryService(protocol.UUIDS.v3.service);
+            } catch (_error) {
+                service = null;
+            }
+            if (service) {
+                this.protocolVersion = "3.0";
+                this.characteristics.write = await service.getCharacteristic(protocol.UUIDS.v3.write);
+                try {
+                    this.characteristics.notify = await service.getCharacteristic(protocol.UUIDS.v3.notify);
+                    await this.characteristics.notify.startNotifications();
+                    this.characteristics.notify.addEventListener("characteristicvaluechanged", this._boundNotification);
+                } catch (_error) {
+                    // 通知只用于显示设备实际强度，缺失时不影响停止和输出控制。
+                    this.characteristics.notify = null;
+                }
+                return;
+            }
+
+            try {
+                service = await this.server.getPrimaryService(protocol.UUIDS.v2.service);
+            } catch (_error) {
+                service = null;
+            }
+            if (!service) {
+                throw new Error("所选设备不是已支持的 2.0 或 3.0 型号");
+            }
+            this.protocolVersion = "2.0";
+            this.characteristics.strength = await service.getCharacteristic(protocol.UUIDS.v2.strength);
+            this.characteristics.waveA = await service.getCharacteristic(protocol.UUIDS.v2.waveA);
+            this.characteristics.waveB = await service.getCharacteristic(protocol.UUIDS.v2.waveB);
+        }
+
+        _enqueue(task) {
+            const next = this.queue.catch(function () {}).then(task);
+            this.queue = next;
+            return next;
+        }
+
+        _handleNotification(event) {
+            const parsed = protocol.parseV3Notification(event.target.value);
+            if (parsed) {
+                this.onActualStrength(parsed);
+            }
+        }
+
+        _handleDisconnect() {
+            this._resetConnection(true);
+            this.onStatus({ state: "disconnected", message: "设备连接已断开，输出任务已作废" });
+        }
+
+        _resetConnection(preserveDevice) {
+            if (this.characteristics.notify) {
+                this.characteristics.notify.removeEventListener("characteristicvaluechanged", this._boundNotification);
+            }
+            if (this.device) {
+                this.device.removeEventListener("gattserverdisconnected", this._boundDisconnect);
+            }
+            this.connected = false;
+            this.server = null;
+            this.protocolVersion = null;
+            this.characteristics = {};
+            this.sequence = 0;
+            this.queue = Promise.resolve();
+            if (!preserveDevice) {
+                this.device = null;
+            }
+        }
     }
-  }
 
-  // 物理微弱震动试电确认（确认连对实体设备）
-  async triggerPhysicsIdentify() {
-    if (!this.isConnected) return;
-    // 下发 0.2 秒强度 15 的安全微弱测试脉冲
-    await this.sendPulse(15, 15, 200);
-    setTimeout(async () => {
-      await this.sendPulse(0, 0, 100);
-    }, 200);
-  }
-
-  // 断开蓝牙连接
-  disconnect() {
-    if (this.device && this.device.gatt.connected) {
-      // 断开前发送清零包
-      this.sendPulse(0, 0, 100).finally(() => {
-        this.device.gatt.disconnect();
-        this._notifyStatus('已断开连接', false);
-      });
-    }
-  }
-}
+    return Object.freeze({ BleDriver, writeCharacteristic });
+}));

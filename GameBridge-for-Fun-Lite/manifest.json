@@ -1,17 +1,20 @@
 {
-  "name": "GameBridge for Fun Lite",
-  "short_name": "GameBridge",
-  "description": "零电脑、零 APP 的纯网页极简郊狼游戏控制终端",
-  "start_url": "./index.html",
-  "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
-  "orientation": "portrait",
-  "icons": [
-    {
-      "src": "./icons/icon-192.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
-  ]
+    "id": "./",
+    "name": "GameBridge for Fun Lite",
+    "short_name": "GameBridge Lite",
+    "description": "由浏览器直接连接设备的实验性体感游戏套件",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "background_color": "#07101d",
+    "theme_color": "#0b1424",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "./icons/icon-192.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
 }

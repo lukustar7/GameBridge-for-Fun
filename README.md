@@ -6,6 +6,8 @@
 
 本项目处于早期 Beta 阶段，仅部分功能完成实机验证。由于实机测试会消耗测试人员，暂未覆盖全部设备、玩法和极端情况。请从低强度开始，避免将软件自动保护作为唯一安全措施。
 
+无需电脑网关、由浏览器直接连接设备的实验性版本可[在线打开](https://lukustar7.github.io/GameBridge-for-Fun/)，源码与使用说明见 [`GameBridge-for-Fun-Lite/`](GameBridge-for-Fun-Lite/README.md)。Lite 与本版本独立维护，不共用运行文件。
+
 ## 玩法
 
 - 手抖挑战：保持手机平稳，倾斜超出安全范围后触发输出。

@@ -44,3 +44,7 @@ node_modules/
 *~
 
 # APK/ 下的正式签名 Beta 包与 SHA-256 是公开测试交付物，故意保留跟踪。
+
+# 工作流文件 (若 PAT 无 workflow 权限则在本地忽略)
+.github/
+

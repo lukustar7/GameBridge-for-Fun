@@ -1,55 +1,72 @@
-/* GameBridge-for-Fun-Lite PWA Manager
-   负责离线缓存注册、资源完整性检测与版本更新平滑提醒
-*/
+(function (root) {
+    "use strict";
 
-class PWAManager {
-  constructor() {
-    this.swRegistration = null;
-    this.onUpdateFoundCallback = null;
-  }
+    class PwaManager {
+        constructor() {
+            this.registration = null;
+            this.updateCallback = function () {};
+            this.reloadRequested = false;
+        }
 
-  // 监听新版本更新回调
-  onUpdateFound(fn) {
-    this.onUpdateFoundCallback = fn;
-  }
+        onUpdateFound(callback) {
+            this.updateCallback = typeof callback === "function" ? callback : function () {};
+        }
 
-  // 初始化 Service Worker 注册与自检
-  async init() {
-    if ('serviceWorker' in navigator) {
-      try {
-        this.swRegistration = await navigator.serviceWorker.register('./sw.js');
-        console.log('[PWA] Service Worker 注册成功:', this.swRegistration.scope);
-
-        // 监听版本更新事件
-        this.swRegistration.addEventListener('updatefound', () => {
-          const newWorker = this.swRegistration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // 后台成功下载新版本资源，向用户弹窗提醒
-                if (this.onUpdateFoundCallback) {
-                  this.onUpdateFoundCallback();
+        async init() {
+            if (!("serviceWorker" in navigator) || !window.isSecureContext) {
+                return { supported: false, controlled: false };
+            }
+            try {
+                this.registration = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+                navigator.serviceWorker.addEventListener("controllerchange", () => {
+                    if (this.reloadRequested) {
+                        window.location.reload();
+                    }
+                });
+                this.registration.addEventListener("updatefound", () => {
+                    const worker = this.registration.installing;
+                    if (!worker) {
+                        return;
+                    }
+                    worker.addEventListener("statechange", () => {
+                        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                            this.updateCallback();
+                        }
+                    });
+                });
+                if (this.registration.waiting && navigator.serviceWorker.controller) {
+                    this.updateCallback();
                 }
-              }
-            });
-          }
-        });
-      } catch (err) {
-        console.warn('[PWA] Service Worker 注册失败:', err);
-      }
-    }
-  }
+                return {
+                    supported: true,
+                    controlled: Boolean(navigator.serviceWorker.controller)
+                };
+            } catch (error) {
+                return { supported: true, controlled: false, error };
+            }
+        }
 
-  // 用户点击 [立即更新] 时激活新版本 Service Worker
-  applyUpdate() {
-    if (this.swRegistration && this.swRegistration.waiting) {
-      this.swRegistration.waiting.postMessage({ action: 'skipWaiting' });
-    }
-    window.location.reload();
-  }
+        async checkForUpdate() {
+            if (!this.registration) {
+                return false;
+            }
+            await this.registration.update();
+            return Boolean(this.registration.waiting);
+        }
 
-  // 检查是否处于 PWA 独立全屏运行模式
-  static isPWA() {
-    return (window.matchMedia('(display-mode: standalone)').matches) || (window.navigator.standalone === true);
-  }
-}
+        applyUpdate(isSafeToReload) {
+            if (!isSafeToReload || !this.registration || !this.registration.waiting) {
+                return false;
+            }
+            this.reloadRequested = true;
+            this.registration.waiting.postMessage({ action: "activate-update" });
+            return true;
+        }
+
+        static isInstalled() {
+            return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+        }
+    }
+
+    root.LitePwaManager = Object.freeze({ PwaManager });
+}(typeof globalThis !== "undefined" ? globalThis : this));

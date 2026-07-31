@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" fill="#000000"/>
-  <path d="M256 64 L128 288 L256 288 L224 448 L384 224 L256 224 Z" fill="#00e5ff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="GameBridge Lite">
+  <rect width="512" height="512" rx="112" fill="#0b1424"/>
+  <circle cx="256" cy="256" r="176" fill="#153a5d" stroke="#315b83" stroke-width="12"/>
+  <path d="M274 92 142 292h112l-24 128 140-220h-108z" fill="#62d7ea" stroke="#b7ecff" stroke-linejoin="round" stroke-width="8"/>
 </svg>
