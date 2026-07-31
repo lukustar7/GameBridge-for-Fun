@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const liteRoot = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(liteRoot, "..");
@@ -42,6 +43,16 @@ function testProtocolEncoding() {
         protocol.channelStrengths(80, "ab", 15, 20),
         { a: 15, b: 20 },
         "最终出口必须同时受两个用户上限约束"
+    );
+    assert.deepEqual(
+        protocol.channelStrengths(80, "ab", 200, 200, "percent", 50),
+        { a: 80, b: 40 },
+        "A+B 按比例模式必须与原版一样降低 B 通道强度"
+    );
+    assert.deepEqual(
+        protocol.channelStrengths(80, "b", 200, 200, "same", 10),
+        { a: 0, b: 80 },
+        "B 同强度模式不得错误套用比例"
     );
 }
 
@@ -238,6 +249,70 @@ function testIndependentRuleCopy() {
     assert.equal(copied, original, "Lite 的规则快照必须与当前原版一致，但运行时不得跨目录引用");
 }
 
+function extractObjectConstant(source, constantName) {
+    const marker = `const ${constantName} =`;
+    const markerIndex = source.indexOf(marker);
+    assert.ok(markerIndex >= 0, `原版缺少 ${constantName}`);
+    const start = source.indexOf("{", markerIndex + marker.length);
+    let depth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+        const character = source[index];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+            } else if (character === "\\") {
+                escaped = true;
+            } else if (character === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (["\"", "'", "`"].includes(character)) {
+            quote = character;
+        } else if (character === "{") {
+            depth += 1;
+        } else if (character === "}") {
+            depth -= 1;
+            if (depth === 0) {
+                return source.slice(start, index + 1);
+            }
+        }
+    }
+    throw new Error(`${constantName} 对象没有正确结束`);
+}
+
+function testGameConfigurationMatchesOriginal() {
+    const configPath = path.join(liteRoot, "js/game-config.js");
+    assert.ok(fs.existsSync(configPath), "Lite 必须用独立配置模块完整保存原版玩法参数契约");
+    const config = require(configPath);
+    const originalSource = fs.readFileSync(path.join(projectRoot, "static/game.js"), "utf8");
+    const originalDefaults = JSON.parse(JSON.stringify(vm.runInNewContext(
+        `(${extractObjectConstant(originalSource, "DEFAULT_SETTINGS")})`
+    )));
+    const originalOutput = JSON.parse(JSON.stringify(vm.runInNewContext(
+        `(${extractObjectConstant(originalSource, "DEFAULT_OUTPUT_SETTINGS")})`
+    )));
+
+    assert.deepEqual(config.DEFAULT_SETTINGS, originalDefaults, "五个玩法的字段和默认值必须与原版一致");
+    assert.deepEqual(config.DEFAULT_OUTPUT_SETTINGS, originalOutput, "A/B 输出模式和比例默认值必须与原版一致");
+    assert.deepEqual(
+        Object.fromEntries(Object.entries(config.SETTING_GROUPS).map(([game, groups]) => [
+            game,
+            groups.flatMap((group) => group.fields.map((field) => field.key)).sort()
+        ])),
+        Object.fromEntries(Object.entries(originalDefaults).map(([game, defaults]) => [
+            game,
+            Object.keys(defaults).sort()
+        ])),
+        "每个原版参数都必须在 Lite 设置页出现一次，不能缺失、改名或多出另一套规则"
+    );
+    Object.values(config.SETTING_GROUPS).flat().flatMap((group) => group.fields).forEach((field) => {
+        assert.ok(field.help && field.help.length >= 8, `${field.key} 必须有面向用户的说明`);
+    });
+}
+
 function testRequiredFiles() {
     [
         "README.md",
@@ -249,6 +324,7 @@ function testRequiredFiles() {
         "sw.js",
         "css/style.css",
         "js/main.js",
+        "js/game-config.js",
         "js/ble-driver.js",
         "js/coyote-protocol.js",
         "js/output-controller.js",
@@ -287,6 +363,25 @@ function testDeploymentPathAndDirectControlConfirmation() {
     assert.ok(!liteReadme.includes("GitHub Actions"), "当前分支 Pages 部署说明不得误导用户切换发布源");
 }
 
+function testGlobalOutputControlsMatchOriginal() {
+    const html = fs.readFileSync(path.join(liteRoot, "index.html"), "utf8");
+    const mainSource = fs.readFileSync(path.join(liteRoot, "js/main.js"), "utf8");
+    assert.ok(html.includes('id="b-strength-mode"'), "Lite 必须提供原版的 B 通道同强度/按比例设置");
+    assert.ok(html.includes('id="b-strength-percent"'), "Lite 必须提供原版的 B 通道比例滑块");
+    assert.ok(html.indexOf("./js/game-config.js") < html.indexOf("./js/main.js"), "玩法契约必须先于主程序加载");
+    assert.ok(mainSource.includes("window.LiteGameConfig"), "主程序必须使用通过对照测试的独立玩法契约");
+}
+
+function testGameSettingsExperienceMatchesOriginal() {
+    const html = fs.readFileSync(path.join(liteRoot, "index.html"), "utf8");
+    const mainSource = fs.readFileSync(path.join(liteRoot, "js/main.js"), "utf8");
+    assert.ok(html.includes('id="restore-game-defaults"'), "每个玩法必须可以单独恢复原版默认值");
+    assert.ok(html.includes('id="calibrate-game-pose"'), "方向玩法必须保留原版的手动校准入口");
+    assert.ok(mainSource.includes('role", "tablist"'), "长设置页必须使用原版的分组标签结构");
+    assert.ok(mainSource.includes("field.help"), "动态生成的每一项参数必须显示解释文字");
+    assert.ok(mainSource.includes("SETTING_CATEGORIES"), "设置页分组必须由已核对的玩法契约生成");
+}
+
 async function run() {
     testProtocolEncoding();
     testWaveformAdaptation();
@@ -294,8 +389,11 @@ async function run() {
     await testSlowBluetoothCannotExtendFinitePulse();
     await testBleProtocolDiscovery();
     testIndependentRuleCopy();
+    testGameConfigurationMatchesOriginal();
     testRequiredFiles();
     testDeploymentPathAndDirectControlConfirmation();
+    testGlobalOutputControlsMatchOriginal();
+    testGameSettingsExperienceMatchesOriginal();
     process.stdout.write("Lite 单元测试通过\n");
 }
 

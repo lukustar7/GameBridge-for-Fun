@@ -4,11 +4,12 @@
     const protocol = window.CoyoteProtocol;
     const waveforms = window.LiteWaveforms;
     const rules = window.GameBridgeForFunLogic;
+    const gameConfig = window.LiteGameConfig;
     const BleDriver = window.LiteBleDriver && window.LiteBleDriver.BleDriver;
     const OutputController = window.LiteOutputController && window.LiteOutputController.OutputController;
     const PwaManager = window.LitePwaManager && window.LitePwaManager.PwaManager;
 
-    if (!protocol || !waveforms || !rules || !BleDriver || !OutputController || !PwaManager) {
+    if (!protocol || !waveforms || !rules || !gameConfig || !BleDriver || !OutputController || !PwaManager) {
         document.body.textContent = "Lite 运行文件不完整，请重新加载完整目录。";
         return;
     }
@@ -18,119 +19,14 @@
     const LOCATION_MAX_AGE_MS = 3000;
     const SLOT_SYMBOLS = Object.freeze(["7️⃣", "🍀", "⭐", "💎", "🔔", "🍒"]);
 
-    const DEFAULT_SETTINGS = Object.freeze({
-        shake: Object.freeze({ safeAngle: 8, rampAngle: 25, maxStrength: 30 }),
-        angle: Object.freeze({ tolerance: 8, rampDegrees: 25, maxStrength: 30 }),
-        dice: Object.freeze({ baseStrength: 20, singleSeconds: 1, gapSeconds: 1, leopardMultiplier: 3, maxPunishCount: 36 }),
-        slot: Object.freeze({
-            winRate: "standard",
-            missGain: 20,
-            streakBonus: 5,
-            smallWinDrop: 15,
-            jackpotDrop: 40,
-            lightStrength: 10,
-            lightShockSeconds: 1,
-            shockStrength: 30,
-            shockSeconds: 2,
-            sevenRule: "full",
-            fullAfter: "reset"
-        }),
-        lightning: Object.freeze({
-            startSpeed: 10,
-            startStrength: 20,
-            maxStrength: 80,
-            fullSpeed: 50,
-            continuousSeconds: 8,
-            drivingRestSeconds: 3,
-            overspeedRecoverySeconds: 5,
-            sessionMinutes: 10,
-            jamEnabled: false,
-            jamStrength: 30,
-            jamEntrySeconds: 40,
-            jamShockSeconds: 1.5,
-            jamGapMinSeconds: 12,
-            jamGapMaxSeconds: 25,
-            jamBatchCount: 5,
-            jamBatchRestSeconds: 60
-        })
-    });
+    const DEFAULT_OUTPUT_SETTINGS = gameConfig.DEFAULT_OUTPUT_SETTINGS;
+    const DEFAULT_DEVICE_LIMITS = gameConfig.DEFAULT_DEVICE_LIMITS;
+    const DEFAULT_SETTINGS = gameConfig.DEFAULT_SETTINGS;
 
-    const GAME_META = Object.freeze({
-        shake: Object.freeze({ title: "手抖挑战", description: "以开始时的姿态为中心，偏离安全角度后按距离线性增加强度。" }),
-        angle: Object.freeze({ title: "保持角度", description: "开始时自动校准目标姿态，超出容差后按偏离程度增加强度。" }),
-        dice: Object.freeze({ title: "摇骰子对决", description: "双方各摇三颗骰子；输几点输出几下，豹子按点数乘倍率结算。" }),
-        slot: Object.freeze({ title: "极速角子机", description: "三个图标同时开奖；未中奖会推高压力，满槽后按基础输出执行。" }),
-        lightning: Object.freeze({ title: "雷电极速", description: "达到启动速度后按速度改变强度；低速、超速、定位异常和到时都会停止。" })
-    });
+    const GAME_META = gameConfig.GAME_META;
+    const SETTING_CATEGORIES = gameConfig.SETTING_CATEGORIES;
 
-    const SETTING_GROUPS = Object.freeze({
-        shake: [
-            { title: "基础", fields: [
-                { key: "safeAngle", label: "安全角度", type: "range", min: 2, max: 25, step: 1, unit: "°" },
-                { key: "rampAngle", label: "达到最大强度的偏离", type: "range", min: 10, max: 60, step: 1, unit: "°" },
-                { key: "maxStrength", label: "玩法请求最大强度", type: "range", min: 0, max: 100, step: 1, unit: "" }
-            ] }
-        ],
-        angle: [
-            { title: "基础", fields: [
-                { key: "tolerance", label: "允许偏离", type: "range", min: 2, max: 25, step: 1, unit: "°" },
-                { key: "rampDegrees", label: "达到最大强度的偏离", type: "range", min: 10, max: 60, step: 1, unit: "°" },
-                { key: "maxStrength", label: "玩法请求最大强度", type: "range", min: 0, max: 100, step: 1, unit: "" }
-            ] }
-        ],
-        dice: [
-            { title: "结算", fields: [
-                { key: "baseStrength", label: "每下请求强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "singleSeconds", label: "每下时长", type: "range", min: 1, max: 30, step: 0.5, unit: " 秒" },
-                { key: "gapSeconds", label: "每下间隔", type: "range", min: 0, max: 10, step: 0.5, unit: " 秒" },
-                { key: "leopardMultiplier", label: "豹子倍率", type: "range", min: 1, max: 6, step: 1, unit: " 倍" },
-                { key: "maxPunishCount", label: "单局最多执行", type: "range", min: 1, max: 36, step: 1, unit: " 下" }
-            ] }
-        ],
-        slot: [
-            { title: "基础输出", fields: [
-                { key: "shockStrength", label: "满槽请求强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "shockSeconds", label: "满槽惩罚时长", type: "range", min: 1, max: 30, step: 0.5, unit: " 秒" },
-                { key: "fullAfter", label: "惩罚后压力", type: "select", options: [["reset", "清空"], ["half", "降到 50%"], ["keep", "保持满槽"]] }
-            ] },
-            { title: "轻电规则", fields: [
-                { key: "lightStrength", label: "没中奖轻电强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "lightShockSeconds", label: "没中奖轻电时长", type: "range", min: 1, max: 5, step: 0.5, unit: " 秒" },
-                { key: "missGain", label: "没中奖压力增加", type: "range", min: 5, max: 50, step: 5, unit: "%" },
-                { key: "streakBonus", label: "连续没中奖加成", type: "range", min: 0, max: 20, step: 1, unit: "%" }
-            ] },
-            { title: "中奖规则", fields: [
-                { key: "winRate", label: "中奖倾向", type: "select", options: [["loose", "宽松"], ["standard", "标准"], ["brutal", "残酷"]] },
-                { key: "smallWinDrop", label: "小奖降低压力", type: "range", min: 0, max: 50, step: 5, unit: "%" },
-                { key: "jackpotDrop", label: "大奖降低压力", type: "range", min: 0, max: 100, step: 5, unit: "%" },
-                { key: "sevenRule", label: "三个图标全是 7️⃣", type: "select", options: [["full", "进入满槽，本局不输出"], ["reset", "清空压力"], ["shock", "立即执行满槽惩罚"]] }
-            ] }
-        ],
-        lightning: [
-            { title: "基础", fields: [
-                { key: "startSpeed", label: "启动速度", type: "range", min: 5, max: 20, step: 1, unit: " km/h" },
-                { key: "startStrength", label: "启动请求强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "maxStrength", label: "玩法请求最大强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "fullSpeed", label: "达到最大强度的速度", type: "range", min: 15, max: 55, step: 1, unit: " km/h" },
-                { key: "sessionMinutes", label: "单局时长", type: "range", min: 1, max: 30, step: 1, unit: " 分钟" }
-            ] },
-            { title: "行驶", fields: [
-                { key: "continuousSeconds", label: "每轮连续输出", type: "range", min: 3, max: 30, step: 1, unit: " 秒" },
-                { key: "drivingRestSeconds", label: "每轮强制休息", type: "range", min: 3, max: 30, step: 1, unit: " 秒" },
-                { key: "overspeedRecoverySeconds", label: "超速恢复等待", type: "range", min: 0, max: 10, step: 1, unit: " 秒" }
-            ] },
-            { title: "堵车", fields: [
-                { key: "jamEnabled", label: "启用“都是你的错”", type: "toggle" },
-                { key: "jamEntrySeconds", label: "低速多久进入堵车", type: "range", min: 20, max: 120, step: 5, unit: " 秒" },
-                { key: "jamStrength", label: "堵车请求强度", type: "range", min: 0, max: 100, step: 1, unit: "" },
-                { key: "jamShockSeconds", label: "堵车单次输出", type: "range", min: 1, max: 20, step: 0.5, unit: " 秒" },
-                { key: "jamGapMinSeconds", label: "随机间隔最短", type: "range", min: 10, max: 60, step: 1, unit: " 秒" },
-                { key: "jamGapMaxSeconds", label: "随机间隔最长", type: "range", min: 15, max: 120, step: 1, unit: " 秒" },
-                { key: "jamBatchCount", label: "每批最多触发", type: "range", min: 1, max: 10, step: 1, unit: " 次" },
-                { key: "jamBatchRestSeconds", label: "每批强制休息", type: "range", min: 30, max: 180, step: 5, unit: " 秒" }
-            ] }
-        ]
-    });
+    const SETTING_GROUPS = gameConfig.SETTING_GROUPS;
 
     const byId = (id) => document.getElementById(id);
     const elements = {
@@ -148,6 +44,11 @@
         capabilityLocation: byId("capability-location"),
         capabilityOffline: byId("capability-offline"),
         waveformSelect: byId("waveform-select"),
+        bStrengthMode: byId("b-strength-mode"),
+        bStrengthPercent: byId("b-strength-percent"),
+        bStrengthPercentValue: byId("b-strength-percent-value"),
+        bChannelOptions: byId("b-channel-options"),
+        bStrengthPercentBlock: byId("b-strength-percent-block"),
         limitA: byId("limit-a"),
         limitB: byId("limit-b"),
         limitAValue: byId("limit-a-value"),
@@ -163,6 +64,9 @@
         settingsDescription: byId("settings-description"),
         settingsFields: byId("game-settings-fields"),
         settingsForm: byId("game-settings-form"),
+        restoreGameDefaults: byId("restore-game-defaults"),
+        calibrateGamePose: byId("calibrate-game-pose"),
+        settingsMessage: byId("settings-message"),
         startGame: byId("start-game"),
         backToGames: byId("back-to-games"),
         playScreen: byId("play-screen"),
@@ -193,6 +97,7 @@
     let sessionSequence = 0;
     let toastTimer = null;
     let wakeLock = null;
+    const calibration = { shake: null, angle: null };
 
     const driver = new BleDriver({
         onStatus: handleDriverStatus,
@@ -212,7 +117,7 @@
     const pwa = new PwaManager();
 
     function cloneDefaults() {
-        return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) => [key, { ...value }]));
+        return gameConfig.cloneDefaultSettings();
     }
 
     function readStoredObject() {
@@ -226,11 +131,21 @@
 
     function loadGlobalSettings() {
         const candidate = readStoredObject().global || {};
+        const outputMode = protocol.normalizeChannel(candidate.outputMode || candidate.channel);
+        const bStrengthMode = ["same", "percent"].includes(candidate.bStrengthMode)
+            ? candidate.bStrengthMode
+            : DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
         return {
-            channel: protocol.normalizeChannel(candidate.channel),
+            outputMode,
+            bStrengthMode,
+            bStrengthPercent: Math.round(rules.clamp(
+                candidate.bStrengthPercent ?? DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
+                10,
+                100
+            )),
             waveform: waveforms.normalizeKey(candidate.waveform),
-            limitA: Math.round(rules.clamp(candidate.limitA ?? 30, 0, 200)),
-            limitB: Math.round(rules.clamp(candidate.limitB ?? 30, 0, 200)),
+            limitA: Math.round(rules.clamp(candidate.limitA ?? DEFAULT_DEVICE_LIMITS.limitA, 0, 200)),
+            limitB: Math.round(rules.clamp(candidate.limitB ?? DEFAULT_DEVICE_LIMITS.limitB, 0, 200)),
             // 每次打开页面或重新连接都要求现场重新确认，不能沿用昨天的接线结论。
             confirmed: false
         };
@@ -358,9 +273,14 @@
 
     function configureOutput() {
         output.configure(globalSettings);
-        const channelLabel = globalSettings.channel === "a" ? "只用 A" : (globalSettings.channel === "b" ? "只用 B" : "A + B");
+        const channelLabel = globalSettings.outputMode === "a" ? "只用 A" : (globalSettings.outputMode === "b" ? "只用 B" : "A + B");
+        const bLabel = globalSettings.bStrengthMode === "same"
+            ? "B 同强度"
+            : `B ${globalSettings.bStrengthPercent}%`;
         const waveform = waveforms.listOptions().find((item) => item.key === globalSettings.waveform);
-        elements.outputSummary.textContent = `${waveform ? waveform.label : "游戏默认"} · ${channelLabel}`;
+        elements.outputSummary.textContent = `${waveform ? waveform.label : "游戏默认"} · ${channelLabel}${globalSettings.outputMode === "a" ? "" : ` · ${bLabel}`}`;
+        elements.bChannelOptions.hidden = globalSettings.outputMode === "a";
+        elements.bStrengthPercentBlock.hidden = globalSettings.bStrengthMode !== "percent";
     }
 
     function invalidateOutputConfirmation(message, persist) {
@@ -375,7 +295,7 @@
 
     function readyForOutput() {
         return driver.connected && globalSettings.confirmed && rules.hasSafeOutputLimits(
-            globalSettings.channel,
+            globalSettings.outputMode,
             globalSettings.limitA,
             globalSettings.limitB
         );
@@ -400,6 +320,18 @@
     }
 
     function createSettingControl(gameName, field) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "setting-field";
+        wrapper.dataset.settingField = field.key;
+        if (field.visibleWhen) {
+            wrapper.dataset.visibleKey = field.visibleWhen.key;
+            wrapper.dataset.visibleEquals = String(field.visibleWhen.equals);
+        }
+
+        const help = document.createElement("p");
+        help.className = "field-help";
+        help.textContent = field.help;
+
         if (field.type === "toggle") {
             const label = document.createElement("label");
             label.className = "toggle-field";
@@ -410,11 +342,10 @@
             input.checked = Boolean(gameSettings[gameName][field.key]);
             input.dataset.settingKey = field.key;
             label.append(text, input);
-            return label;
+            wrapper.append(label, help);
+            return wrapper;
         }
 
-        const wrapper = document.createElement("div");
-        wrapper.className = "setting-field";
         const label = document.createElement("label");
         const labelText = document.createElement("span");
         labelText.textContent = field.label;
@@ -449,8 +380,94 @@
         input.dataset.settingKey = field.key;
         label.htmlFor = `setting-${gameName}-${field.key}`;
         input.id = `setting-${gameName}-${field.key}`;
-        wrapper.append(label, input);
+        wrapper.append(label, input, help);
         return wrapper;
+    }
+
+    function refreshConditionalSettingFields() {
+        if (!selectedGame) {
+            return;
+        }
+        elements.settingsFields.querySelectorAll("[data-visible-key]").forEach((field) => {
+            field.hidden = String(gameSettings[selectedGame][field.dataset.visibleKey]) !== field.dataset.visibleEquals;
+        });
+        if (selectedGame === "lightning") {
+            elements.settingsFields.querySelectorAll("[data-setting-field^='jam']").forEach((field) => {
+                if (field.dataset.settingField !== "jamEnabled") {
+                    field.hidden = !gameSettings.lightning.jamEnabled;
+                }
+            });
+        }
+    }
+
+    function switchSettingsCategory(categoryIndex, focusTab) {
+        const tabs = Array.from(elements.settingsFields.querySelectorAll("[role='tab']"));
+        const panels = Array.from(elements.settingsFields.querySelectorAll("[role='tabpanel']"));
+        tabs.forEach((tab, index) => {
+            const selected = index === categoryIndex;
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            if (selected && focusTab) {
+                tab.focus();
+            }
+        });
+        panels.forEach((panel, index) => {
+            panel.hidden = index !== categoryIndex;
+        });
+    }
+
+    function createSettingsTabs(gameName) {
+        const categories = SETTING_CATEGORIES[gameName];
+        const tabList = document.createElement("div");
+        tabList.className = "setting-category-tabs";
+        tabList.setAttribute("role", "tablist");
+        tabList.setAttribute("aria-label", `${GAME_META[gameName].title}设置分类`);
+
+        categories.forEach((category, categoryIndex) => {
+            const tab = document.createElement("button");
+            tab.type = "button";
+            tab.id = `setting-tab-${gameName}-${categoryIndex}`;
+            tab.setAttribute("role", "tab");
+            tab.setAttribute("aria-controls", `setting-panel-${gameName}-${categoryIndex}`);
+            tab.textContent = category.label;
+            tab.addEventListener("click", () => switchSettingsCategory(categoryIndex, false));
+            tab.addEventListener("keydown", (event) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                    return;
+                }
+                event.preventDefault();
+                let targetIndex = categoryIndex;
+                if (event.key === "ArrowLeft") targetIndex = (categoryIndex - 1 + categories.length) % categories.length;
+                if (event.key === "ArrowRight") targetIndex = (categoryIndex + 1) % categories.length;
+                if (event.key === "Home") targetIndex = 0;
+                if (event.key === "End") targetIndex = categories.length - 1;
+                switchSettingsCategory(targetIndex, true);
+            });
+            tabList.append(tab);
+        });
+        elements.settingsFields.append(tabList);
+
+        categories.forEach((category, categoryIndex) => {
+            const panel = document.createElement("div");
+            panel.id = `setting-panel-${gameName}-${categoryIndex}`;
+            panel.className = "setting-category-panel";
+            panel.setAttribute("role", "tabpanel");
+            panel.setAttribute("aria-labelledby", `setting-tab-${gameName}-${categoryIndex}`);
+            category.groups.forEach((groupIndex) => {
+                const group = SETTING_GROUPS[gameName][groupIndex];
+                const section = document.createElement("section");
+                section.className = "setting-group";
+                const heading = document.createElement("h3");
+                heading.textContent = group.title;
+                const body = document.createElement("div");
+                body.className = "setting-group-body";
+                group.fields.forEach((field) => body.append(createSettingControl(gameName, field)));
+                section.append(heading, body);
+                panel.append(section);
+            });
+            elements.settingsFields.append(panel);
+        });
+        switchSettingsCategory(0, false);
     }
 
     function renderGameSettings(gameName) {
@@ -458,18 +475,10 @@
         elements.settingsTitle.textContent = GAME_META[gameName].title;
         elements.settingsDescription.textContent = GAME_META[gameName].description;
         elements.settingsFields.replaceChildren();
-        SETTING_GROUPS[gameName].forEach((group, index) => {
-            const details = document.createElement("details");
-            details.className = "setting-group";
-            details.open = index === 0 || SETTING_GROUPS[gameName].length === 1;
-            const summary = document.createElement("summary");
-            summary.textContent = group.title;
-            const body = document.createElement("div");
-            body.className = "setting-group-body";
-            group.fields.forEach((field) => body.append(createSettingControl(gameName, field)));
-            details.append(summary, body);
-            elements.settingsFields.append(details);
-        });
+        createSettingsTabs(gameName);
+        elements.calibrateGamePose.hidden = gameName !== "shake" && gameName !== "angle";
+        elements.settingsMessage.textContent = "";
+        refreshConditionalSettingFields();
         elements.gameListView.hidden = true;
         elements.gameSettingsView.hidden = false;
         updateReadyState();
@@ -494,12 +503,59 @@
         } else {
             gameSettings[selectedGame][key] = input.value;
         }
+        if (["shake", "angle", "slot"].includes(selectedGame)) {
+            const cfg = gameSettings[selectedGame];
+            if (cfg.strengthMin > cfg.strengthMax) {
+                const changedMaximum = key === "strengthMax";
+                if (changedMaximum) cfg.strengthMin = cfg.strengthMax;
+                else cfg.strengthMax = cfg.strengthMin;
+            }
+        }
+        if (selectedGame === "lightning") {
+            gameSettings.lightning = rules.normalizeLightningSettings(gameSettings.lightning, DEFAULT_SETTINGS.lightning);
+        }
+        refreshConditionalSettingFields();
         saveSettings();
     }
 
     function setStage(stage) {
         elements.playStage.textContent = stage;
         elements.playStage.dataset.stage = stage;
+    }
+
+    async function calibrateCurrentPose() {
+        const gameName = selectedGame;
+        if (gameName !== "shake" && gameName !== "angle") {
+            return;
+        }
+        elements.calibrateGamePose.disabled = true;
+        elements.settingsMessage.textContent = "正在读取当前姿态…";
+        try {
+            await requestOrientationPermission();
+            const sample = await new Promise((resolve, reject) => {
+                const timeout = window.setTimeout(() => {
+                    window.removeEventListener("deviceorientation", handleSample, true);
+                    reject(new Error("没有收到方向数据，请检查浏览器权限后重试"));
+                }, 3000);
+                function handleSample(event) {
+                    const beta = Number(event.beta);
+                    const gamma = Number(event.gamma);
+                    if (!Number.isFinite(beta) || !Number.isFinite(gamma)) {
+                        return;
+                    }
+                    window.clearTimeout(timeout);
+                    window.removeEventListener("deviceorientation", handleSample, true);
+                    resolve({ beta, gamma });
+                }
+                window.addEventListener("deviceorientation", handleSample, true);
+            });
+            calibration[gameName] = sample;
+            elements.settingsMessage.textContent = "已使用当前握持姿态作为本次会话基准。";
+        } catch (error) {
+            elements.settingsMessage.textContent = error.message || "姿态校准失败，请检查权限后重试。";
+        } finally {
+            elements.calibrateGamePose.disabled = false;
+        }
     }
 
     function setPlayDisplay(primary, secondary, meterPercent) {
@@ -1065,7 +1121,10 @@
         elements.limitB.value = String(globalSettings.limitB);
         elements.limitAValue.textContent = String(globalSettings.limitA);
         elements.limitBValue.textContent = String(globalSettings.limitB);
-        const channel = document.querySelector(`input[name="output-channel"][value="${globalSettings.channel}"]`);
+        elements.bStrengthMode.value = globalSettings.bStrengthMode;
+        elements.bStrengthPercent.value = String(globalSettings.bStrengthPercent);
+        elements.bStrengthPercentValue.textContent = `${globalSettings.bStrengthPercent}%`;
+        const channel = document.querySelector(`input[name="output-channel"][value="${globalSettings.outputMode}"]`);
         if (channel) {
             channel.checked = true;
         }
@@ -1089,10 +1148,21 @@
 
         document.querySelectorAll("input[name='output-channel']").forEach((input) => {
             input.addEventListener("change", () => {
-                globalSettings.channel = input.value;
+                globalSettings.outputMode = protocol.normalizeChannel(input.value);
                 configureOutput();
                 invalidateOutputConfirmation("通道已变化，需要重新确认接线。", true);
             });
+        });
+        elements.bStrengthMode.addEventListener("change", () => {
+            globalSettings.bStrengthMode = elements.bStrengthMode.value === "same" ? "same" : "percent";
+            configureOutput();
+            invalidateOutputConfirmation("B 通道强度规则已变化，需要重新确认。", true);
+        });
+        elements.bStrengthPercent.addEventListener("input", () => {
+            globalSettings.bStrengthPercent = Number(elements.bStrengthPercent.value);
+            elements.bStrengthPercentValue.textContent = `${elements.bStrengthPercent.value}%`;
+            configureOutput();
+            invalidateOutputConfirmation("B 通道强度比例已变化，需要重新确认。", true);
         });
         elements.waveformSelect.addEventListener("change", () => {
             globalSettings.waveform = waveforms.normalizeKey(elements.waveformSelect.value);
@@ -1118,7 +1188,7 @@
                 showMessage("请先勾选接线与网页 A/B 安全上限确认。", "error");
                 return;
             }
-            if (!rules.hasSafeOutputLimits(globalSettings.channel, globalSettings.limitA, globalSettings.limitB)) {
+            if (!rules.hasSafeOutputLimits(globalSettings.outputMode, globalSettings.limitA, globalSettings.limitB)) {
                 showMessage("所选通道的网页上限必须大于 0。", "error");
                 return;
             }
@@ -1153,6 +1223,14 @@
         });
         elements.settingsFields.addEventListener("input", updateGameSetting);
         elements.settingsFields.addEventListener("change", updateGameSetting);
+        elements.restoreGameDefaults.addEventListener("click", () => {
+            if (!selectedGame) return;
+            gameSettings[selectedGame] = { ...DEFAULT_SETTINGS[selectedGame] };
+            saveSettings();
+            renderGameSettings(selectedGame);
+            elements.settingsMessage.textContent = "已恢复当前玩法的原版默认设置。";
+        });
+        elements.calibrateGamePose.addEventListener("click", calibrateCurrentPose);
         elements.settingsForm.addEventListener("submit", async (event) => {
             event.preventDefault();
             if (!selectedGame || !readyForOutput()) {

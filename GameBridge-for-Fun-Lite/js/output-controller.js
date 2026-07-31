@@ -44,6 +44,8 @@
             this.desiredStrength = 0;
             this.config = {
                 channel: "a",
+                bStrengthMode: "percent",
+                bStrengthPercent: 50,
                 limitA: 30,
                 limitB: 30,
                 waveform: waveforms.DEFAULT_KEY
@@ -53,7 +55,9 @@
         configure(settings) {
             const next = settings || {};
             this.config = {
-                channel: protocol.normalizeChannel(next.channel),
+                channel: protocol.normalizeChannel(next.outputMode || next.channel),
+                bStrengthMode: next.bStrengthMode === "same" ? "same" : "percent",
+                bStrengthPercent: Math.round(clamp(next.bStrengthPercent, 10, 100, 50)),
                 limitA: Math.round(clamp(next.limitA, 0, 200, 0)),
                 limitB: Math.round(clamp(next.limitB, 0, 200, 0)),
                 waveform: waveforms.normalizeKey(next.waveform)
@@ -203,7 +207,9 @@
                 strength,
                 this.config.channel,
                 this.config.limitA,
-                this.config.limitB
+                this.config.limitB,
+                this.config.bStrengthMode,
+                this.config.bStrengthPercent
             );
             await this.driver.writeFrame({
                 strengthA: strengths.a,

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- 补齐原版五种玩法的全部参数、默认值、分组标签、逐项说明、单玩法恢复默认和方向玩法手动校准入口。
+- 补齐原版 A/B 通道“同强度”与“按 A 比例”规则；网页安全上限继续在最终蓝牙出口强制生效。
+
 ### Fixed
 
 - 修正 GitHub Pages 在线入口和部署说明，固定使用 `GameBridge-for-Fun-Lite/` 子目录。

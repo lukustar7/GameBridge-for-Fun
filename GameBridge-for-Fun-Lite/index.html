@@ -94,6 +94,19 @@
                             </div>
                         </fieldset>
 
+                        <div id="b-channel-options" class="dependent-settings" hidden>
+                            <label class="field-label" for="b-strength-mode">B 通道强度</label>
+                            <select id="b-strength-mode" class="select-control">
+                                <option value="percent">按 A 通道比例</option>
+                                <option value="same">与 A 通道相同</option>
+                            </select>
+                            <p class="field-help">与原版一致：可以让 B 跟随 A，或按 A 的一定比例输出；两个通道仍分别受网页上限约束。</p>
+                            <div id="b-strength-percent-block" class="range-block">
+                                <label for="b-strength-percent"><span>B 相对 A 的比例</span><output id="b-strength-percent-value" for="b-strength-percent">50%</output></label>
+                                <input id="b-strength-percent" type="range" min="10" max="100" step="5" value="50">
+                            </div>
+                        </div>
+
                         <label class="field-label" for="waveform-select">波形感觉</label>
                         <select id="waveform-select" class="select-control"></select>
                         <p class="field-help">“游戏默认”适合短输出；“随机”会按本次时长避开慢启动波形。</p>
@@ -170,6 +183,11 @@
                     </div>
                     <form id="game-settings-form">
                         <div id="game-settings-fields" class="settings-fields"></div>
+                        <div class="settings-actions">
+                            <button id="restore-game-defaults" class="secondary-button" type="button">恢复当前玩法默认</button>
+                            <button id="calibrate-game-pose" class="secondary-button" type="button" hidden>校准当前姿态</button>
+                        </div>
+                        <p id="settings-message" class="field-help" role="status" aria-live="polite"></p>
                         <button id="start-game" class="primary-button full-width" type="submit" disabled>连接并确认设置后开始</button>
                     </form>
                 </section>
@@ -245,6 +263,7 @@
     <script src="./js/coyote-protocol.js"></script>
     <script src="./js/waveforms.js"></script>
     <script src="./js/game-logic.js"></script>
+    <script src="./js/game-config.js"></script>
     <script src="./js/ble-driver.js"></script>
     <script src="./js/output-controller.js"></script>
     <script src="./js/pwa-manager.js"></script>

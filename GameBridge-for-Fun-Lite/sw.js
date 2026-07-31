@@ -10,6 +10,7 @@ const APP_SHELL = Object.freeze([
     "./js/coyote-protocol.js",
     "./js/waveforms.js",
     "./js/game-logic.js",
+    "./js/game-config.js",
     "./js/ble-driver.js",
     "./js/output-controller.js",
     "./js/pwa-manager.js",
