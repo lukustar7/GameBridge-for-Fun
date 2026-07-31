@@ -2,7 +2,7 @@
 
 当前版本：`0.1.0-alpha.1`
 
-在线使用：[https://lukustar7.github.io/GameBridge-for-Fun/](https://lukustar7.github.io/GameBridge-for-Fun/)
+在线使用：[https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/](https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/)
 
 Lite 是无需电脑网关和配套 App、由浏览器直接连接特定电刺激体感设备的实验性 PWA。它独立保存运行文件，不会加载仓库上级目录中的原版代码。
 
@@ -17,8 +17,8 @@ Lite 是无需电脑网关和配套 App、由浏览器直接连接特定电刺�
 
 ## 使用
 
-1. 使用 Android Chrome 或 Edge 打开部署后的 HTTPS 页面。
-2. 在“设备与安全”中连接设备，设置通道、波形和 A/B 上限，再完成输出确认。
+1. 使用 Android Chrome 或 Edge 打开上面的 HTTPS 页面。
+2. 在“设备与安全”中连接设备，设置通道、波形和网页 A/B 安全上限，再完成输出确认。
 3. 先用低强度试电验证通道，随后进入“选择玩法”。
 
 完整权限说明、安装、离线更新和故障处理见 [USER_GUIDE.md](USER_GUIDE.md)。
@@ -39,14 +39,14 @@ python3 -m http.server 4173 --directory GameBridge-for-Fun-Lite
 
 ## 部署边界
 
-仓库内的 `.github/workflows/lite-pages.yml` 只检查并发布本目录，原版、证书和 APK 不会进入站点。仓库管理员首次使用时需在 GitHub 的 `Settings > Pages > Source` 选择 `GitHub Actions`；此后 Lite 文件变化会自动部署。
+GitHub Pages 当前从仓库分支发布整个项目，Lite 固定使用 `GameBridge-for-Fun-Lite/` 子目录地址。原版源码、证书说明和 APK 不会被 Lite 页面加载或缓存。
 
 ## 安全
 
 - 输出接收者必须是知情同意、能够立即停止设备的成年人；首次使用从低强度、单通道开始。
 - 不得跨胸布置电极，不得用于头颈、破损皮肤、睡眠、饮酒、驾驶或无法自行停止的场景。
 - 雷电极速仅限封闭并已清场的非公共区域；驾驶员、骑行者和载具操作者不得操作游戏，也不得成为输出接收者。
-- 页面隐藏、连接断开、传感器超时、玩法切换和急停会请求归零，但软件不能替代设备 App、物理停止和人工监护。
+- 页面隐藏、连接断开、传感器超时、玩法切换和急停会请求归零，但软件不能替代设备物理停止和人工监护。
 - 玩法中的角子机与骰子只用于无金钱娱乐，严禁赌博、押注、收费抽奖或财物输赢。
 
 ## 项目关系与许可

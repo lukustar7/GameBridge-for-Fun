@@ -1115,7 +1115,7 @@
                 return;
             }
             if (!elements.outputConfirmCheckbox.checked) {
-                showMessage("请先勾选接线与硬件限幅确认。", "error");
+                showMessage("请先勾选接线与网页 A/B 安全上限确认。", "error");
                 return;
             }
             if (!rules.hasSafeOutputLimits(globalSettings.channel, globalSettings.limitA, globalSettings.limitB)) {
@@ -1182,7 +1182,7 @@
             } else {
                 await output.emergencyStop("用户按下立即停止");
             }
-            showMessage("停止请求已执行，仍请确认硬件侧输出已归零。", "info");
+            showMessage("停止请求已执行，请直接确认设备输出已归零。", "info");
         });
 
         elements.dismissUpdate.addEventListener("click", () => { elements.updateToast.hidden = true; });

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- 修正 GitHub Pages 在线入口和部署说明，固定使用 `GameBridge-for-Fun-Lite/` 子目录。
+- 修正直连版要求用户确认“硬件侧限幅”的错误文案，明确安全边界由网页 A/B 上限、设备物理停止和人工监护共同承担。
+
 ## [0.1.0-alpha.1] - 2026-07-31
 
 ### Added

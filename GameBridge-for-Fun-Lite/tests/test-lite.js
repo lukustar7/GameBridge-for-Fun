@@ -274,6 +274,19 @@ function testRequiredFiles() {
     assert.equal(manifest.display, "standalone");
 }
 
+function testDeploymentPathAndDirectControlConfirmation() {
+    const publicUrl = "https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/";
+    const rootReadme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
+    const liteReadme = fs.readFileSync(path.join(liteRoot, "README.md"), "utf8");
+    const html = fs.readFileSync(path.join(liteRoot, "index.html"), "utf8");
+
+    assert.ok(rootReadme.includes(publicUrl), "根 README 必须指向实际部署的 Lite 子目录");
+    assert.ok(liteReadme.includes(publicUrl), "Lite README 必须指向实际部署的 Lite 子目录");
+    assert.ok(!html.includes("硬件侧设置安全限幅"), "直连版不能要求用户确认并不存在的硬件侧限幅设置");
+    assert.ok(html.includes("网页 A/B 安全上限"), "直连版必须明确由当前网页承担 A/B 限幅");
+    assert.ok(!liteReadme.includes("GitHub Actions"), "当前分支 Pages 部署说明不得误导用户切换发布源");
+}
+
 async function run() {
     testProtocolEncoding();
     testWaveformAdaptation();
@@ -282,6 +295,7 @@ async function run() {
     await testBleProtocolDiscovery();
     testIndependentRuleCopy();
     testRequiredFiles();
+    testDeploymentPathAndDirectControlConfirmation();
     process.stdout.write("Lite 单元测试通过\n");
 }
 
