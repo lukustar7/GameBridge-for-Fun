@@ -407,6 +407,7 @@ function testGlobalOutputControlsMatchOriginal() {
     assert.ok(html.includes('id="edit-output"'), "Lite 锁定后必须提供明确的修改入口");
     assert.ok(mainSource.includes("setOutputLockPresentation"), "Lite 必须统一切换输出控件的锁定状态");
     assert.ok(mainSource.includes("clampGameStrengthSettings"), "Lite 游戏设置必须在页面层受首页安全上限约束");
+    assert.ok(mainSource.includes("if (effectiveLimit <= 0) return false;"), "零限额应禁止输出但不能破坏已保存的玩法强度");
 }
 
 function testGameSettingsExperienceMatchesOriginal() {
@@ -417,8 +418,9 @@ function testGameSettingsExperienceMatchesOriginal() {
     assert.ok(mainSource.includes('role", "tablist"'), "长设置页必须使用原版的分组标签结构");
     assert.ok(mainSource.includes("field.help"), "动态生成的每一项参数必须显示解释文字");
     assert.ok(mainSource.includes("SETTING_CATEGORIES"), "设置页分组必须由已核对的玩法契约生成");
-    assert.ok(mainSource.includes('gamebridge-lite-settings-v2'), "规则字段变化后必须隔离旧版不兼容的玩法缓存");
-    assert.ok(mainSource.includes("schemaVersion: 2"), "本地设置必须带有可审计的结构版本");
+    assert.ok(mainSource.includes('gamebridge-lite-settings-v3'), "规则字段变化后必须隔离旧版不兼容的玩法缓存");
+    assert.ok(mainSource.includes('gamebridge-lite-settings-v2'), "新结构必须读取上一版设置并迁移保留玩法");
+    assert.ok(mainSource.includes("schemaVersion: 3"), "本地设置必须带有可审计的结构版本");
     assert.ok(html.includes('id="capability-wake"'), "全局能力中心必须保留屏幕常亮检查");
     assert.ok(html.includes('id="capability-vibration"'), "全局能力中心必须保留本机震动检查");
     ["a", "b", "ab"].forEach((mode) => {

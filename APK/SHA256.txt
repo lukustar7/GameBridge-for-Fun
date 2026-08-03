@@ -1,1 +1,1 @@
-d75a1cfa936c4349dec37c16046528d8ec127d5a9dd821ea4052a4c7600293f3  GameBridgeForFun-Android15-v1.1.0-beta.2.apk
+aeb55939eaf915fdb1a98d8f038df84a7162dfe6bd042ed42dd1439912a7bdd7  GameBridgeForFun-Android15-v1.1.0-beta.3.apk

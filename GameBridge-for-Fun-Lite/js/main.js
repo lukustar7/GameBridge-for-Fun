@@ -15,7 +15,8 @@
         return;
     }
 
-    const STORAGE_KEY = "gamebridge-lite-settings-v2";
+    const STORAGE_KEY = "gamebridge-lite-settings-v3";
+    const PREVIOUS_STORAGE_KEY = "gamebridge-lite-settings-v2";
     const LEGACY_STORAGE_KEY = "gamebridge-lite-settings-v1";
     const SENSOR_MAX_AGE_MS = 1000;
     const LOCATION_MAX_AGE_MS = 3000;
@@ -128,12 +129,17 @@
     function readStoredObject() {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.schemaVersion === 2) {
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.schemaVersion === 3) {
                 return parsed;
+            }
+            const previous = JSON.parse(localStorage.getItem(PREVIOUS_STORAGE_KEY) || "null");
+            if (previous && typeof previous === "object" && !Array.isArray(previous) && previous.schemaVersion === 2) {
+                // v2 中已下架玩法会由当前白名单丢弃，其余玩法和全局设置继续保留。
+                return previous;
             }
             const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
             if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
-                // 旧版玩法字段含义不同，只迁移全局接线和网页上限；玩法恢复为已核对的原版默认值。
+                // 早期 Lite 玩法字段含义不同，只迁移全局接线和网页上限；玩法恢复为已核对的第一版默认值。
                 return { global: legacy.global || {} };
             }
             return {};
@@ -168,7 +174,10 @@
         const normalized = gameConfig.normalizeSettings(readStoredObject().games);
         normalized.lightning = rules.normalizeLightningSettings(normalized.lightning, DEFAULT_SETTINGS.lightning);
         const restored = rules.applyStandaloneShockDurationFloor(normalized);
-        return rules.clampGameStrengthSettings(restored, getEffectiveStrengthLimit());
+        const effectiveLimit = getEffectiveStrengthLimit();
+        return effectiveLimit > 0
+            ? rules.clampGameStrengthSettings(restored, effectiveLimit)
+            : restored;
     }
 
     function getEffectiveStrengthLimit() {
@@ -182,7 +191,9 @@
     }
 
     function enforceGameStrengthLimit() {
-        const limited = rules.clampGameStrengthSettings(gameSettings, getEffectiveStrengthLimit());
+        const effectiveLimit = getEffectiveStrengthLimit();
+        if (effectiveLimit <= 0) return false;
+        const limited = rules.clampGameStrengthSettings(gameSettings, effectiveLimit);
         const changed = JSON.stringify(limited) !== JSON.stringify(gameSettings);
         gameSettings = limited;
         return changed;
@@ -201,7 +212,7 @@
     function saveSettings() {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                schemaVersion: 2,
+                schemaVersion: 3,
                 global: { ...globalSettings, confirmed: false },
                 games: gameSettings
             }));
@@ -531,8 +542,9 @@
             input = document.createElement("input");
             input.type = "range";
             input.min = String(field.min);
-            input.max = String(isStrengthSetting(gameName, field.key)
-                ? Math.min(field.max, getEffectiveStrengthLimit())
+            const effectiveLimit = getEffectiveStrengthLimit();
+            input.max = String(isStrengthSetting(gameName, field.key) && effectiveLimit > 0
+                ? Math.min(field.max, effectiveLimit)
                 : field.max);
             input.step = String(field.step);
             input.value = String(gameSettings[gameName][field.key]);
@@ -1634,7 +1646,7 @@
             enforceGameStrengthLimit();
             saveSettings();
             renderGameSettings(selectedGame);
-            elements.settingsMessage.textContent = "已恢复当前玩法的原版默认设置。";
+            elements.settingsMessage.textContent = "已恢复当前玩法的第一版默认设置。";
         });
         elements.calibrateGamePose.addEventListener("click", calibrateCurrentPose);
         elements.settingsForm.addEventListener("submit", async (event) => {
@@ -1686,6 +1698,7 @@
         });
         elements.resetSettings.addEventListener("click", () => {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_error) {}
+            try { localStorage.removeItem(PREVIOUS_STORAGE_KEY); } catch (_error) {}
             try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (_error) {}
             window.location.reload();
         });

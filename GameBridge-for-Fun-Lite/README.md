@@ -1,10 +1,10 @@
 # GameBridge for Fun Lite
 
-当前版本：`0.1.0-beta.1`
+当前版本：`0.1.0-beta.2`
 
 在线使用：[https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/](https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/)
 
-Lite 是无需电脑网关和配套 App、由浏览器直接连接特定电刺激体感设备的实验性 PWA。它独立保存运行文件，不会加载仓库上级目录中的原版代码。
+Lite 是无需电脑网关和配套 App、由浏览器直接连接特定电刺激体感设备的实验性 PWA。它独立保存运行文件，不会加载仓库上级目录中的第一版代码。
 
 本项目处于早期 Beta 阶段，仅部分功能完成实机验证。由于实机测试会消耗测试人员，暂未覆盖全部设备、玩法和极端情况。请从低强度开始，避免将软件自动保护作为唯一安全措施。
 
@@ -39,7 +39,7 @@ python3 -m http.server 4173 --directory GameBridge-for-Fun-Lite
 
 ## 部署边界
 
-GitHub Pages 当前从仓库分支发布整个项目，Lite 固定使用 `GameBridge-for-Fun-Lite/` 子目录地址。原版源码、证书说明和 APK 不会被 Lite 页面加载或缓存。
+GitHub Pages 当前从仓库分支发布整个项目，Lite 固定使用 `GameBridge-for-Fun-Lite/` 子目录地址。第一版源码、证书说明和 APK 不会被 Lite 页面加载或缓存。
 
 ## 直连限幅说明
 

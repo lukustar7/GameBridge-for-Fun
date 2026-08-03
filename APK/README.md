@@ -1,12 +1,12 @@
 # Android APK
 
-`GameBridgeForFun-Android15-v1.1.0-beta.2.apk` 是可直接安装的 Android 15+ 正式签名 Beta 包，不需要安装网页 HTTPS 根证书。
+`GameBridgeForFun-Android15-v1.1.0-beta.3.apk` 是可直接安装的 Android 15+ 正式签名 Beta 包，不需要安装网页 HTTPS 根证书。
 
 安装过旧调试签名包的手机必须先卸载旧包；Android 不允许不同签名直接覆盖，卸载会同步清除旧包内的本地游戏设置。
 
 电脑必须运行 `start.command`，设备 App 保持硬件连接，GameBridge for Fun APK 保持前台。每次重启电脑服务后，需要重新扫描控制台中的 Android APK 二维码。
 
-雷电极速需要设备具备 GPS/GNSS，并允许精确定位；APK 只把速度、精度和时间交给游戏页，不传入经纬度。无 GPS/GNSS 的设备仍可安装并使用其他四个玩法。
+雷电极速需要设备具备 GPS/GNSS，并允许精确定位；APK 只把速度、精度和时间交给游戏页，不传入经纬度。无 GPS/GNSS 的设备仍可安装并使用其他三个玩法。
 
 `SHA256.txt` 用于核对 APK 文件是否完整。`./verify.command` 只读核对公开包的内部版本、校验值和签名；只有维护者执行 `./android/build-release.command` 才会使用仓库外的正式密钥刷新安装包。
 

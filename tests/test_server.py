@@ -734,8 +734,8 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         server.game_connection_lightning_session.clear()
         server.game_connection_lightning_session.update(self.original_lightning_sessions)
 
-    async def test_four_games_share_limits_reject_overlap_and_confirm_emergency_stop(self):
-        """模拟手持、角度、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
+    async def test_output_paths_share_limits_reject_overlap_and_confirm_emergency_stop(self):
+        """模拟持续控制帧、骰子和角子机，核对限幅、拒绝重叠与 A/B 急停回执。"""
         websocket = ScriptedGameWebSocket([
             # 手持感应：先发一帧持续脉冲，再立即执行用户急停。
             (0, {
@@ -746,7 +746,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
                 "waveform": "game_default",
             }),
             (0.03, {"type": "stop_shock"}),
-            # 角度挑战：故意提交超大数值，后端必须按 A=40、B=30 截断。
+            # 持续控制帧故意提交超大数值，后端必须按 A=40、B=30 截断。
             (0.24, {
                 "type": "game_pulse",
                 "strength": 999,
@@ -812,7 +812,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         pulse_events = [event for event in self.fake_client.events if event[0] == "send_pulse"]
         clear_channels = [event[1] for event in self.fake_client.events if event[0] == "clear_pulses"]
 
-        # 六次代表：手持 A；角度 A/B；骰子 A；角子机 A/B。若重叠请求被错误排队，这里会多一次。
+        # 六次代表：两组持续控制 A 与 A/B；骰子 A；角子机 A/B。若重叠请求被错误排队，这里会多一次。
         self.assertEqual(len(temporary_events), 6, self.fake_client.events)
         self.assertEqual(len(pulse_events), 6)
         self.assertEqual([event[3] for event in pulse_events[1:3]], ["breathing", "breathing"])
@@ -869,7 +869,7 @@ class FullGameDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(server.state["game_client_connected"])
 
     async def test_lightning_game_has_authoritative_strength_duration_and_rest_limits(self):
-        """第五个游戏即使被伪造超大参数，也只能执行受限的一轮并拒绝冷却期重叠。"""
+        """移动玩法即使被伪造超大参数，也只能执行受限的一轮并拒绝冷却期重叠。"""
         session_id = "lightning-authoritative-test"
         websocket = ScriptedGameWebSocket([
             (0, {
