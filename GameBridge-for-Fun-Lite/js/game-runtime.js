@@ -42,20 +42,6 @@
         };
     }
 
-    function getAngleState(offset, cfg) {
-        const safeOffset = clamp(offset, -90, 90);
-        const target = clamp(cfg && cfg.targetOffset, -45, 45);
-        const tolerance = clamp(cfg && cfg.tolerance, 0, 90);
-        const rampDegrees = Math.max(1, Number(cfg && cfg.rampDegrees) || 1);
-        const rawErr = Math.abs(safeOffset - target) - tolerance;
-        const err = Math.max(0, rawErr);
-        return {
-            offset: safeOffset,
-            err,
-            dangerRatio: clamp(err / rampDegrees, 0, 1)
-        };
-    }
-
     function interpolateStrength(minimum, maximum, ratio) {
         const safeMinimum = clamp(minimum, 0, 200);
         const safeMaximum = clamp(maximum, safeMinimum, 200);
@@ -90,7 +76,6 @@
     }
 
     return Object.freeze({
-        getAngleState,
         getShakeZoneState,
         interpolateStrength,
         motionForce,

@@ -136,7 +136,7 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertEqual(console_strength[0].get("max"), "30")
 
     def test_all_games_send_one_confirmed_global_output_config(self):
-        """五个游戏不得再保存各自通道；冲突旧配置未确认前必须阻止正式输出。"""
+        """四个游戏不得再保存各自通道；冲突旧配置未确认前必须阻止正式输出。"""
 
         defaults_start = self.game_script_text.index("const DEFAULT_SETTINGS = {")
         defaults_end = self.game_script_text.index("const {", defaults_start)
@@ -213,9 +213,11 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertLess(setup_position, play_position)
         self.assertLess(play_position, info_position)
         self.assertIn('let activeSelectionTab = "play";', self.game_script_text)
-        self.assertEqual(self.game_text.count('class="game-card-icon"'), 5)
+        self.assertEqual(self.game_text.count('class="game-card-icon"'), 4)
         self.assertNotIn('id="shake-rest-ms"', self.game_text)
-        self.assertNotIn('id="angle-rest-ms"', self.game_text)
+        self.assertNotIn("保持角度", self.game_text)
+        self.assertNotIn('id="settings-angle"', self.game_text)
+        self.assertNotIn("angle:", self.game_script_text)
 
         expected_ranges = {
             "dice-single-seconds": ("1.0", "30.0"),
@@ -275,7 +277,7 @@ class InterfaceStructureTests(unittest.TestCase):
             for tag, attrs in self.game.elements
             if tag == "details" and "settings-group" in attrs.get("class", "").split()
         ]
-        for game in ("shake", "angle", "dice", "slot", "lightning"):
+        for game in ("shake", "dice", "slot", "lightning"):
             with self.subTest(game=game):
                 defaults = [
                     attrs

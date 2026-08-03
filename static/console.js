@@ -327,11 +327,11 @@ function updateUI(data) {
     if (data.https_enabled && data.https_port && data.secure_web_ws_port) {
         const secureGameUrl = `https://${certifiedHost}:${data.https_port}/static/game.html?ws=${data.secure_web_ws_port}&token=${gameToken}`;
         setText("secure-game-url-text", secureGameUrl);
-        setText("secure-game-hint", `手抖挑战和保持角度请先安装手机证书，再使用 HTTPS 入口：${secureGameUrl}`);
+        setText("secure-game-hint", `手抖挑战请先安装手机证书，再使用 HTTPS 入口：${secureGameUrl}`);
         renderQRCode(secureGameQR, secureGameUrl, "HTTPS 游戏操纵端");
     } else {
         setText("secure-game-url-text", "HTTPS 服务未启用：请确认 openssl 可用并重启服务。");
-        setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战和保持角度可能无法取得手机感应器权限。");
+        setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战可能无法取得手机感应器权限。");
         clearQRCode(secureGameQR);
     }
 

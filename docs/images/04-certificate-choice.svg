@@ -15,7 +15,7 @@
 
     <rect x="616" y="158" width="520" height="402" rx="26" fill="#0b1120" stroke="#fbbf24" stroke-opacity=".55" stroke-width="2"/>
     <rect x="656" y="198" width="82" height="142" rx="18" fill="#111c31" stroke="#fbbf24" stroke-width="3"/><circle cx="697" cy="255" r="23" fill="none" stroke="#fbbf24" stroke-width="5"/><path d="M681 255l11 11 21-25" fill="none" stroke="#fbbf24" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="770" y="222" class="h">iPhone 或 Android 浏览器</text><text x="770" y="266" class="warn">感应玩法建议安装证书</text><text x="770" y="306" class="p">手抖挑战、保持角度需要 HTTPS</text><text x="770" y="338" class="p">骰子手动摇号、角子机可不依赖感应器</text>
+    <text x="770" y="222" class="h">iPhone 或 Android 浏览器</text><text x="770" y="266" class="warn">感应玩法建议安装证书</text><text x="770" y="306" class="p">手抖挑战需要 HTTPS</text><text x="770" y="338" class="p">骰子手动摇号、角子机可不依赖感应器</text>
     <rect x="656" y="388" width="440" height="112" rx="18" fill="#2a210b"/><path d="M687 414l24 42h-48z" fill="#fbbf24"/><rect x="684" y="429" width="6" height="15" rx="3" fill="#2a210b"/><circle cx="687" cy="450" r="3" fill="#2a210b"/><text x="766" y="432" class="p">iPhone 安装后还要</text><text x="766" y="466" fill="#f8fafc" font-size="18" font-weight="700">手动开启“完全信任”</text>
   </g>
   <text x="600" y="622" text-anchor="middle" class="small">根证书只从当前电脑控制台下载；不要发送或复制 Mac 应用数据目录中的任何私钥文件</text>

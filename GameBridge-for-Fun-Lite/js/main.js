@@ -66,6 +66,7 @@
         confirmationStatus: byId("confirmation-status"),
         testOutputs: Array.from(document.querySelectorAll("[data-test-channel]")),
         gameListView: byId("game-list-view"),
+        gameListTitle: byId("game-list-title"),
         gameSettingsView: byId("game-settings-view"),
         settingsTitle: byId("settings-title"),
         settingsDescription: byId("settings-description"),
@@ -105,7 +106,7 @@
     let sessionSequence = 0;
     let toastTimer = null;
     let wakeLock = null;
-    const calibration = { shake: null, angle: null };
+    const calibration = { shake: null };
 
     const driver = new BleDriver({
         onStatus: handleDriverStatus,
@@ -653,7 +654,7 @@
         elements.settingsDescription.textContent = GAME_META[gameName].description;
         elements.settingsFields.replaceChildren();
         createSettingsTabs(gameName);
-        elements.calibrateGamePose.hidden = gameName !== "shake" && gameName !== "angle";
+        elements.calibrateGamePose.hidden = gameName !== "shake";
         elements.settingsMessage.textContent = "";
         refreshConditionalSettingFields();
         elements.gameListView.hidden = true;
@@ -665,6 +666,23 @@
         window.requestAnimationFrame(() => {
             window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
         });
+    }
+
+    function showGameList() {
+        selectedGame = null;
+        elements.settingsFields.replaceChildren();
+        elements.settingsTitle.textContent = "游戏设置";
+        elements.settingsDescription.textContent = "";
+        elements.settingsMessage.textContent = "";
+        elements.gameSettingsView.hidden = true;
+        elements.gameListView.hidden = false;
+        elements.playScreen.hidden = true;
+        elements.taskTabs.hidden = false;
+        switchPage("games");
+        if (!document.hidden) {
+            elements.gameListTitle.focus({ preventScroll: true });
+            window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+        }
     }
 
     function updateGameSetting(event) {
@@ -695,7 +713,7 @@
 
     async function calibrateCurrentPose() {
         const gameName = selectedGame;
-        if (gameName !== "shake" && gameName !== "angle") {
+        if (gameName !== "shake") {
             return;
         }
         elements.calibrateGamePose.disabled = true;
@@ -842,7 +860,7 @@
         acquireWakeLock();
 
         try {
-            if (gameName === "shake" || gameName === "angle") {
+            if (gameName === "shake") {
                 await startOrientationGame(session);
             } else if (gameName === "dice") {
                 await startDiceGame(session);
@@ -857,7 +875,7 @@
         }
     }
 
-    async function stopActiveSession(reason, returnToSettings) {
+    async function stopActiveSession(reason, returnToList) {
         const session = activeSession;
         if (session) {
             activeSession = null;
@@ -875,10 +893,8 @@
         await releaseWakeLock();
         elements.playScreen.hidden = true;
         elements.taskTabs.hidden = false;
-        if (returnToSettings !== false) {
-            switchPage("games");
-            elements.gameListView.hidden = !selectedGame;
-            elements.gameSettingsView.hidden = !selectedGame;
+        if (returnToList !== false) {
+            showGameList();
         }
         updateReadyState();
     }
@@ -1046,53 +1062,9 @@
             setPlayDisplay(`${Math.round(zone.dangerRatio * 100)}%`, status.detail, zone.dangerRatio * 100);
         }
 
-        function drawAngleFrame() {
-            const offset = latestOrientation && baseline
-                ? rules.clamp(latestOrientation.beta - baseline.beta, -90, 90)
-                : 0;
-            const angleState = gameRuntime.getAngleState(offset, cfg);
-            drawBackground(angleState.dangerRatio);
-            const padding = 26;
-            const gaugeWidth = width - padding * 2;
-            const centerY = height / 2;
-            const toX = (angle) => padding + ((angle + 90) / 180) * gaugeWidth;
-            const targetX = toX(cfg.targetOffset);
-            const currentX = toX(angleState.offset);
-            const tolerancePixels = cfg.tolerance / 180 * gaugeWidth;
-            context.strokeStyle = "#30435b";
-            context.lineWidth = 2;
-            context.beginPath();
-            context.moveTo(padding, centerY);
-            context.lineTo(width - padding, centerY);
-            context.stroke();
-            context.strokeStyle = angleState.err > 0 ? "#fb923c" : "#22c55e";
-            context.lineWidth = 9;
-            context.lineCap = "round";
-            context.beginPath();
-            context.moveTo(targetX - tolerancePixels, centerY);
-            context.lineTo(targetX + tolerancePixels, centerY);
-            context.stroke();
-            context.lineCap = "butt";
-            context.strokeStyle = angleState.err > 0 ? "#ff3f4a" : "#ffffff";
-            context.lineWidth = 3;
-            context.beginPath();
-            context.moveTo(currentX, centerY - 62);
-            context.lineTo(currentX, centerY + 62);
-            context.stroke();
-            const status = applyDelayedOutput(
-                angleState.err,
-                angleState.dangerRatio,
-                cfg.triggerMs,
-                "位于目标角度范围，当前保持停止",
-                "角度已偏离，正在持续判定"
-            );
-            setPlayDisplay(`${Math.round(angleState.offset)}°`, `${status.detail}；目标 ${cfg.targetOffset}°`, angleState.dangerRatio * 100);
-        }
-
         function renderFrame() {
             if (!isSessionCurrent(session) || sensorStopped) return;
-            if (session.type === "shake") drawShakeFrame();
-            else drawAngleFrame();
+            drawShakeFrame();
             animationFrame = window.requestAnimationFrame(renderFrame);
         }
         animationFrame = window.requestAnimationFrame(renderFrame);
@@ -1652,9 +1624,7 @@
             card.addEventListener("click", () => renderGameSettings(card.dataset.game));
         });
         elements.backToGames.addEventListener("click", () => {
-            selectedGame = null;
-            elements.gameSettingsView.hidden = true;
-            elements.gameListView.hidden = false;
+            showGameList();
         });
         elements.settingsFields.addEventListener("input", updateGameSetting);
         elements.settingsFields.addEventListener("change", updateGameSetting);

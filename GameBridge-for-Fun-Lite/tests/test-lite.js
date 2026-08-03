@@ -306,7 +306,8 @@ function testGameConfigurationMatchesOriginal() {
         `(${extractObjectConstant(originalSource, "DEFAULT_OUTPUT_SETTINGS")})`
     )));
 
-    assert.deepEqual(config.DEFAULT_SETTINGS, originalDefaults, "五个玩法的字段和默认值必须与原版一致");
+    assert.deepEqual(config.DEFAULT_SETTINGS, originalDefaults, "四个玩法的字段和默认值必须与原版一致");
+    assert.deepEqual(Object.keys(config.DEFAULT_SETTINGS), ["shake", "dice", "slot", "lightning"]);
     assert.deepEqual(config.DEFAULT_OUTPUT_SETTINGS, originalOutput, "A/B 输出模式和比例默认值必须与原版一致");
     assert.deepEqual(
         Object.fromEntries(Object.entries(config.SETTING_GROUPS).map(([game, groups]) => [
@@ -423,6 +424,9 @@ function testGameSettingsExperienceMatchesOriginal() {
     ["a", "b", "ab"].forEach((mode) => {
         assert.ok(html.includes(`data-test-channel="${mode}"`), `低强度试电必须保留原版的 ${mode.toUpperCase()} 独立入口`);
     });
+    assert.ok(mainSource.includes("function showGameList"), "返回玩法列表必须由一个统一视图清理入口完成");
+    assert.ok(mainSource.includes("elements.settingsFields.replaceChildren()"), "返回列表必须销毁上一款游戏的动态设置控件");
+    assert.ok(!mainSource.includes("elements.gameListView.hidden = !selectedGame"), "运行页结束后不得按旧选中状态残留设置页");
 }
 
 function testRuntimeRuleParity() {
@@ -440,11 +444,7 @@ function testRuntimeRuleParity() {
         5,
         "夹缝模式太靠近中心也必须算出界"
     );
-    assert.deepEqual(
-        runtime.getAngleState(24, { targetOffset: 10, tolerance: 4, rampDegrees: 20 }),
-        { offset: 24, err: 10, dangerRatio: 0.5 },
-        "保持角度必须使用目标偏移、允许误差和拉满角度"
-    );
+    assert.equal(Object.hasOwn(runtime, "getAngleState"), false, "已下架玩法不得继续保留运行入口");
     assert.equal(runtime.interpolateStrength(20, 80, 0.5), 50);
     assert.equal(runtime.rollOpponentDie("easy", () => 0), 1);
     assert.equal(runtime.rollOpponentDie("hard", () => 0), 2);
@@ -453,9 +453,10 @@ function testRuntimeRuleParity() {
     ["safeAngle", "rampAngle", "baseStrength", "shockStrength", "lightStrength", "fullAfter"].forEach((oldKey) => {
         assert.ok(!mainSource.includes(`cfg.${oldKey}`), `运行时不得继续读取已删除的旧参数 ${oldKey}`);
     });
-    ["strengthMin", "strengthMax", "targetOffset", "triggerMs", "shakeSensitivity", "opponentDifficulty", "manualRoll", "spinMs", "restMs", "autoSpin", "pressureAfterPunish"].forEach((key) => {
+    ["strengthMin", "strengthMax", "shakeSensitivity", "opponentDifficulty", "manualRoll", "spinMs", "restMs", "autoSpin", "pressureAfterPunish"].forEach((key) => {
         assert.ok(mainSource.includes(`.${key}`), `运行时必须实际使用原版参数 ${key}`);
     });
+    assert.ok(!mainSource.includes('gameName === "angle"'), "Lite 主程序不得再路由到已下架玩法");
 }
 
 async function run() {

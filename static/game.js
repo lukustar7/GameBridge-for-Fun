@@ -31,7 +31,7 @@ let selectedGame = null;
 let activeGame = null;
 let activeSelectionTab = "play";
 
-// 统一保存五套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
+// 统一保存四套游戏配置，避免一个游戏的强度和玩法参数串到另一个游戏。
 const SETTINGS_STORAGE_KEY = "game_bridge_for_fun_settings_v3";
 const WAVEFORM_STORAGE_KEY = "game_bridge_for_fun_waveform_v1";
 const GLOBAL_OUTPUT_STORAGE_KEY = "game_bridge_for_fun_global_output_v1";
@@ -75,14 +75,6 @@ const DEFAULT_SETTINGS = {
         gapInner: 12,
         sensitivity: 55,
         forgiveMs: 600
-    },
-    angle: {
-        strengthMin: 15,
-        strengthMax: 70,
-        targetOffset: 0,
-        tolerance: 8,
-        triggerMs: 800,
-        rampDegrees: 28
     },
     dice: {
         strength: 20,
@@ -168,17 +160,6 @@ const GAME_META = {
         toleranceLabel: (cfg) => cfg.mode === "gap" ? `夹缝 ${cfg.gapInner}% / ${cfg.safeRadius}%` : `半径 ${cfg.safeRadius}%`,
         triggerLabel: (cfg) => `${cfg.forgiveMs}ms 后触发 | 回到安全区立即停止`
     },
-    angle: {
-        title: "保持角度",
-        subtitle: "调目标角度、允许误差和偏多久才开始电。",
-        help: "按开始时的握法当基准。偏离目标角度太久才会电，短暂晃一下不会马上触发。",
-        primaryLabel: "开始强度",
-        secondaryLabel: "最高强度",
-        primaryValue: (cfg) => cfg.strengthMin,
-        secondaryValue: (cfg) => cfg.strengthMax,
-        toleranceLabel: (cfg) => `目标 ${cfg.targetOffset}° ± ${cfg.tolerance}°`,
-        triggerLabel: (cfg) => `${cfg.triggerMs}ms 后触发 | 回到目标范围立即停止`
-    },
     dice: {
         title: "摇骰子对决",
         subtitle: "输几点就电几下；任意一方豹子时，点数乘倍率就是次数。",
@@ -218,10 +199,6 @@ const GAME_META = {
 // 这样既不复制任何控件，也不会让全局波形和通道重新混回单个游戏里。
 const SETTINGS_CATEGORY_LAYOUT = Object.freeze({
     shake: [
-        { label: "基础", groupIndexes: [0] },
-        { label: "节奏", groupIndexes: [1] }
-    ],
-    angle: [
         { label: "基础", groupIndexes: [0] },
         { label: "节奏", groupIndexes: [1] }
     ],
@@ -325,8 +302,7 @@ let lastWarningVibrateAt = 0;
 // 校准值只保存当前会话。玩家每次开始游戏时也会自动用当前姿态兜底校准。
 const calibration = {
     shakeBeta: 0,
-    shakeGamma: 0,
-    angleBeta: 0
+    shakeGamma: 0
 };
 
 // 手抖挑战状态。
@@ -336,9 +312,6 @@ let ballVx = 0;
 let ballVy = 0;
 let shakeOutSince = null;
 const ballRadius = 8;
-
-// 保持角度状态。
-let angleBadSince = null;
 
 // 摇骰子状态。
 let audioCtx = null;
@@ -1125,7 +1098,7 @@ function bindSensors() {
 }
 
 function waitForSensorReadiness(gameName, timeoutMs = 1400) {
-    const requiresOrientation = gameName === "shake" || gameName === "angle";
+    const requiresOrientation = gameName === "shake";
     const requiresMotion = gameName === "dice";
     if ((requiresOrientation && hasFreshOrientation()) || (requiresMotion && hasFreshMotion())) {
         return Promise.resolve(true);
@@ -1160,7 +1133,7 @@ function hasFreshMotion() {
 function resetRequiredSensorState(gameName) {
     // 每次开始或校准都要求拿到新的传感器回包，避免用旧状态误判“传感器可用”。
     sensorStopRequestedForStaleData = false;
-    if (gameName === "shake" || gameName === "angle") {
+    if (gameName === "shake") {
         orientationReady = false;
         lastOrientationAt = 0;
     }
@@ -1814,7 +1787,7 @@ function buildSettingsCategoryTabs(gameName) {
 function updateSettingsActionVisibility(gameName) {
     const calibrateButton = $("settings-calibrate-button");
     if (!calibrateButton) return;
-    const shouldShowCalibration = gameName === "shake" || gameName === "angle";
+    const shouldShowCalibration = gameName === "shake";
     calibrateButton.hidden = !shouldShowCalibration;
     $("screen-settings")?.querySelector(".settings-actions")?.classList.toggle(
         "two-actions",
@@ -1834,13 +1807,6 @@ function populateSettingsForm(gameName) {
         setRangeValue("shake-sensitivity", cfg.sensitivity);
         setRangeValue("shake-forgive-ms", cfg.forgiveMs);
         updateShakeModeVisibility();
-    } else if (gameName === "angle") {
-        setRangeValue("angle-strength-min", cfg.strengthMin);
-        setRangeValue("angle-strength-max", cfg.strengthMax);
-        setRangeValue("angle-target-offset", cfg.targetOffset);
-        setRangeValue("angle-tolerance", cfg.tolerance);
-        setRangeValue("angle-trigger-ms", cfg.triggerMs);
-        setRangeValue("angle-ramp-degrees", cfg.rampDegrees);
     } else if (gameName === "dice") {
         setRangeValue("dice-strength", cfg.strength);
         setRangeValue("dice-single-seconds", cfg.singleSeconds);
@@ -1976,7 +1942,7 @@ function updateSettingValue(id, shouldSave = true) {
 }
 
 function calibrateSelectedGame() {
-    if (selectedGame === "shake" || selectedGame === "angle") {
+    if (selectedGame === "shake") {
         calibrateCurrentPose(selectedGame);
     }
 }
@@ -2064,19 +2030,6 @@ function collectSettingsFromForm(gameName) {
         };
     }
 
-    if (gameName === "angle") {
-        const minStrength = clamp(readNumber("angle-strength-min", 15), 0, 200);
-        const maxStrength = clamp(readNumber("angle-strength-max", 70), 0, 200);
-        return {
-            strengthMin: Math.min(minStrength, maxStrength),
-            strengthMax: Math.max(minStrength, maxStrength),
-            targetOffset: clamp(readNumber("angle-target-offset", 0), -45, 45),
-            tolerance: clamp(readNumber("angle-tolerance", 8), 2, 30),
-            triggerMs: clamp(readNumber("angle-trigger-ms", 800), 100, 2500),
-            rampDegrees: clamp(readNumber("angle-ramp-degrees", 28), 5, 60)
-        };
-    }
-
     if (gameName === "dice") {
         return {
             strength: clamp(readNumber("dice-strength", 20), 0, 200),
@@ -2140,7 +2093,7 @@ function collectSettingsFromForm(gameName) {
 }
 
 async function calibrateCurrentPose(gameName) {
-    if (gameName !== "shake" && gameName !== "angle") return;
+    if (gameName !== "shake") return;
     if (sensorActionInProgress) {
         setText("settings-message", "感应器请求正在处理中，请稍等。");
         return;
@@ -2165,12 +2118,8 @@ async function calibrateCurrentPose(gameName) {
 
         // 等待权限期间如果用户已经离开当前设置页，不再把迟到结果写进另一款游戏。
         if (selectedGame !== gameName) return;
-        if (gameName === "shake") {
-            calibration.shakeBeta = phoneBeta;
-            calibration.shakeGamma = phoneGamma;
-        } else {
-            calibration.angleBeta = phoneBeta;
-        }
+        calibration.shakeBeta = phoneBeta;
+        calibration.shakeGamma = phoneGamma;
 
         setText("settings-message", "已使用当前握持姿态作为基准");
     } finally {
@@ -2199,7 +2148,7 @@ async function startConfiguredGame() {
     try {
         saveSelectedSettings(true);
         // 手动骰子不消费摇晃数据，不应为了一个关闭的可选功能索要传感器权限。
-        const needsSensors = gameName === "shake" || gameName === "angle" ||
+        const needsSensors = gameName === "shake" ||
             (gameName === "dice" && !gameSettings.dice.manualRoll);
         if (needsSensors) {
             resetRequiredSensorState(gameName);
@@ -2212,7 +2161,7 @@ async function startConfiguredGame() {
 
             bindSensors();
             const ready = await waitForSensorReadiness(gameName);
-            if (!ready && (gameName === "shake" || gameName === "angle")) {
+            if (!ready && gameName === "shake") {
                 setText("settings-message", getSensorNotReadyMessage(gameName));
                 return;
             }
@@ -2253,14 +2202,11 @@ async function startConfiguredGame() {
         gameStartedAt = Date.now();
         nextPulseAllowedAt = 0;
         shakeOutSince = null;
-        angleBadSince = null;
 
         // 每次开始时自动用当前姿态兜底校准，避免玩家刚进入就因为初始握法被误罚。
         if (activeGame === "shake") {
             calibration.shakeBeta = phoneBeta;
             calibration.shakeGamma = phoneGamma;
-        } else if (activeGame === "angle") {
-            calibration.angleBeta = phoneBeta;
         }
 
         setupPlayScreen(activeGame);
@@ -2284,7 +2230,7 @@ function setupPlayScreen(gameName) {
     setText("summary-output", formatOutputLabel(globalOutputSettings));
     setText("summary-waveform", formatWaveformLabel(selectedWaveform));
 
-    $("game-viewport").style.display = gameName === "shake" || gameName === "angle" ? "block" : "none";
+    $("game-viewport").style.display = gameName === "shake" ? "block" : "none";
     $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
     $("slot-viewport").style.display = gameName === "slot" ? "block" : "none";
     $("lightning-viewport").style.display = gameName === "lightning" ? "block" : "none";
@@ -2294,9 +2240,6 @@ function setupPlayScreen(gameName) {
     if (gameName === "shake") {
         setGamePhase("ready", "保持弹珠停留在安全区内");
         initShakeGame();
-    } else if (gameName === "angle") {
-        setGamePhase("ready", "保持当前姿态附近的目标角度");
-        initAngleGame();
     } else if (gameName === "dice") {
         setGamePhase("ready", motionReady ? "摇晃手机开始对决" : "未收到摇晃感应，可先手动摇号");
         initDiceGame();
@@ -2405,7 +2348,6 @@ function canPunish(requiresOrientation = true) {
         // 页面仍在线但原生传感器或浏览器权限流已经停更时，WebSocket 心跳还会继续。
         // 因此这里必须单独发一次停止命令，并清掉旧的出界计时，不能让最后一帧坏姿态无限续罚。
         shakeOutSince = null;
-        angleBadSince = null;
         if (!sensorStopRequestedForStaleData) {
             sensorStopRequestedForStaleData = true;
             sendGameMessage({ type: "stop_shock" });
@@ -2706,146 +2648,7 @@ function checkShakePunish() {
     sendPulse(strength, 120, SENSOR_CONTROL_FRAME_REST_MS);
 }
 
-// --- 8. 游戏 2：保持角度 ---
-
-function initAngleGame() {
-    prepareCanvas();
-    angleBadSince = null;
-    runAngleLoop();
-    gameLoopTimer = setInterval(checkAnglePunish, 100);
-}
-
-function getCurrentAngleOffset() {
-    return clamp(phoneBeta - calibration.angleBeta, -90, 90);
-}
-
-function getAngleState(cfg) {
-    const offset = getCurrentAngleOffset();
-    const rawErr = Math.abs(offset - cfg.targetOffset) - cfg.tolerance;
-    return {
-        offset,
-        err: Math.max(0, rawErr),
-        dangerRatio: clamp(Math.max(0, rawErr) / cfg.rampDegrees, 0, 1)
-    };
-}
-
-function runAngleLoop() {
-    if (activeGame !== "angle") return;
-
-    const cfg = gameSettings.angle;
-    const dpr = window.devicePixelRatio || 1;
-    const width = canvas.width / dpr;
-    const height = canvas.height / dpr;
-    const centerY = height / 2;
-    const pad = 26;
-    const gaugeWidth = width - pad * 2;
-    const targetX = pad + ((cfg.targetOffset + 90) / 180) * gaugeWidth;
-    const tolerancePx = (cfg.tolerance / 180) * gaugeWidth;
-    const angleState = getAngleState(cfg);
-    const currentX = pad + ((angleState.offset + 90) / 180) * gaugeWidth;
-    const dangerColor = angleState.err > 0 ? "#ff3333" : "#ffffff";
-
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, width, height);
-
-    if (angleState.err > 0) {
-        ctx.fillStyle = `rgba(255, 51, 51, ${0.05 + angleState.dangerRatio * 0.18})`;
-        ctx.fillRect(0, 0, width, height);
-    }
-
-    ctx.strokeStyle = "#151515";
-    ctx.lineWidth = 1;
-    for (let x = pad; x <= width - pad; x += Math.max(24, gaugeWidth / 8)) {
-        ctx.beginPath();
-        ctx.moveTo(x, centerY - 74);
-        ctx.lineTo(x, centerY + 74);
-        ctx.stroke();
-    }
-
-    ctx.strokeStyle = "#333333";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pad, centerY);
-    ctx.lineTo(width - pad, centerY);
-    ctx.stroke();
-
-    ctx.strokeStyle = angleState.err > 0 ? "#fb923c" : "#22c55e";
-    ctx.lineWidth = 8;
-    ctx.lineCap = "round";
-    ctx.shadowBlur = angleState.err > 0 ? 12 : 8;
-    ctx.shadowColor = angleState.err > 0 ? "rgba(251, 146, 60, 0.42)" : "rgba(34, 197, 94, 0.36)";
-    ctx.beginPath();
-    ctx.moveTo(targetX - tolerancePx, centerY);
-    ctx.lineTo(targetX + tolerancePx, centerY);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.lineCap = "butt";
-
-    ctx.strokeStyle = "#888888";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(targetX, centerY - 42);
-    ctx.lineTo(targetX, centerY + 42);
-    ctx.stroke();
-
-    ctx.strokeStyle = dangerColor;
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = angleState.err > 0 ? 18 : 8;
-    ctx.shadowColor = angleState.err > 0 ? "rgba(255, 51, 51, 0.68)" : "rgba(255, 255, 255, 0.36)";
-    ctx.beginPath();
-    ctx.moveTo(currentX, centerY - 60);
-    ctx.lineTo(currentX, centerY + 60);
-    ctx.stroke();
-
-    ctx.fillStyle = dangerColor;
-    ctx.beginPath();
-    ctx.arc(currentX, centerY, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = "#777777";
-    ctx.font = "12px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(`目标 ${cfg.targetOffset}°`, targetX, centerY + 92);
-    ctx.fillStyle = angleState.err > 0 ? "#ff3333" : "#ffffff";
-    ctx.fillText(`当前 ${Math.round(angleState.offset)}°`, currentX, centerY - 82);
-
-    animationFrameId = requestAnimationFrame(runAngleLoop);
-}
-
-function checkAnglePunish() {
-    if (activeGame !== "angle" || !canPunish(true)) return;
-
-    const cfg = gameSettings.angle;
-    const angleState = getAngleState(cfg);
-
-    if (angleState.err <= 0) {
-        angleBadSince = null;
-        setGamePhase("ready", "角度稳定");
-        return;
-    }
-
-    if (angleBadSince === null) {
-        angleBadSince = Date.now();
-        setGamePhase("checking", "角度偏离，等待持续判定");
-        return;
-    }
-
-    const elapsed = Date.now() - angleBadSince;
-    if (elapsed < cfg.triggerMs) {
-        const remain = Math.ceil((cfg.triggerMs - elapsed) / 100) / 10;
-        setGamePhase("checking", `角度偏离，约 ${remain.toFixed(1)}s 后触发`);
-        vibrateWarning();
-        return;
-    }
-
-    const ratio = angleState.dangerRatio;
-    const strength = cfg.strengthMin + (cfg.strengthMax - cfg.strengthMin) * ratio;
-    setGamePhase("output", `持续偏离，当前强度 ${Math.round(strength)}`);
-    sendPulse(strength, 120, SENSOR_CONTROL_FRAME_REST_MS);
-}
-
-// --- 9. 游戏 3：摇骰子对决 ---
+// --- 8. 游戏 2：摇骰子对决 ---
 
 function setDiceFace(id, value, isRolling = false) {
     const node = $(id);
@@ -3127,7 +2930,7 @@ function runNextDicePunish(generation) {
     }, totalDuration);
 }
 
-// --- 10. 游戏 4：极速角子机 ---
+// --- 9. 游戏 3：极速角子机 ---
 
 function beginSlotOutputCycle(duration, restMs, onComplete) {
     // 输出和输出后的休息必须使用两个清晰阶段，不能再共用一个“冷却截止时间”。
@@ -3472,7 +3275,7 @@ function getSlotPressureColor(value) {
     return "#22c55e";
 }
 
-// --- 11. 游戏 5：雷电极速 ---
+// --- 10. 游戏 4：雷电极速 ---
 
 function initLightningGame() {
     if (!locationTrackingActive) {
@@ -3784,7 +3587,6 @@ function enhanceControlAccessibility() {
 window.onload = () => {
     populateGlobalOutputForm();
     populateSettingsForm("shake");
-    populateSettingsForm("angle");
     populateSettingsForm("dice");
     populateSettingsForm("slot");
     populateSettingsForm("lightning");

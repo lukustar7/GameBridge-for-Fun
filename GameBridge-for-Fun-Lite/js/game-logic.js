@@ -530,9 +530,6 @@
         if (id === "lightning-start-speed" || id === "lightning-full-speed") {
             return `${safeValue} km/h`;
         }
-        if (["angle-target-offset", "angle-tolerance", "angle-ramp-degrees"].includes(id)) {
-            return `${safeValue}°`;
-        }
         return String(safeValue);
     }
 

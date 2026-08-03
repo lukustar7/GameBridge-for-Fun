@@ -29,14 +29,6 @@
             sensitivity: 55,
             forgiveMs: 600
         }),
-        angle: Object.freeze({
-            strengthMin: 15,
-            strengthMax: 70,
-            targetOffset: 0,
-            tolerance: 8,
-            triggerMs: 800,
-            rampDegrees: 28
-        }),
         dice: Object.freeze({
             strength: 20,
             singleSeconds: 2.0,
@@ -90,10 +82,6 @@
             title: "手抖挑战",
             description: "让弹珠留在安全区内；持续出界后按距离逐步增加强度。"
         }),
-        angle: Object.freeze({
-            title: "保持角度",
-            description: "以校准姿态为基准；持续偏离目标角度后按偏差增加强度。"
-        }),
         dice: Object.freeze({
             title: "摇骰子对决",
             description: "双方各摇三颗骰子；输几点输出几下，豹子按点数乘倍率结算。"
@@ -120,18 +108,6 @@
             Object.freeze({ title: "高级节奏", fields: Object.freeze([
                 Object.freeze({ key: "sensitivity", label: "倾斜灵敏度", type: "range", min: 20, max: 100, step: 1, unit: "", help: "越高时，相同倾斜会让弹珠移动得更快。" }),
                 Object.freeze({ key: "forgiveMs", label: "出界多久才电", type: "range", min: 0, max: 2000, step: 100, unit: " ms", help: "离开安全区后先等待一段时间，避免瞬间晃动误触发。" })
-            ]) })
-        ]),
-        angle: Object.freeze([
-            Object.freeze({ title: "基础玩法", fields: Object.freeze([
-                Object.freeze({ key: "strengthMin", label: "开始电的强度", type: "range", min: 0, max: 200, step: 1, unit: "", help: "持续偏离并刚开始输出时使用的强度。" }),
-                Object.freeze({ key: "strengthMax", label: "最强电到多少", type: "range", min: 0, max: 200, step: 1, unit: "", help: "偏离越大，强度越接近这里。" }),
-                Object.freeze({ key: "targetOffset", label: "目标偏移角度", type: "range", min: -45, max: 45, step: 1, unit: "°", help: "以校准姿态为零点，设置实际需要保持的角度。" }),
-                Object.freeze({ key: "tolerance", label: "允许误差", type: "range", min: 2, max: 30, step: 1, unit: "°", help: "目标角度左右可接受的范围，越小越严格。" })
-            ]) }),
-            Object.freeze({ title: "高级节奏", fields: Object.freeze([
-                Object.freeze({ key: "triggerMs", label: "偏多久才电", type: "range", min: 100, max: 2500, step: 100, unit: " ms", help: "超过允许误差后继续等待，避免一瞬间晃动就触发。" }),
-                Object.freeze({ key: "rampDegrees", label: "偏多少算拉满", type: "range", min: 5, max: 60, step: 1, unit: "°", help: "超出允许误差后，再偏这些角度会升到最高强度。" })
             ]) })
         ]),
         dice: Object.freeze([
@@ -204,7 +180,6 @@
 
     const SETTING_CATEGORIES = Object.freeze({
         shake: Object.freeze([{ label: "基础", groups: [0] }, { label: "节奏", groups: [1] }]),
-        angle: Object.freeze([{ label: "基础", groups: [0] }, { label: "节奏", groups: [1] }]),
         dice: Object.freeze([{ label: "基础", groups: [0] }, { label: "规则", groups: [1] }]),
         slot: Object.freeze([{ label: "基础", groups: [0, 1] }, { label: "节奏", groups: [2] }, { label: "规则", groups: [3, 4] }]),
         lightning: Object.freeze([{ label: "基础", groups: [0] }, { label: "行驶", groups: [1] }, { label: "堵车", groups: [2] }])
@@ -234,7 +209,7 @@
             });
         });
 
-        ["shake", "angle", "slot"].forEach((gameName) => {
+        ["shake", "slot"].forEach((gameName) => {
             const cfg = normalized[gameName];
             if (cfg.strengthMin > cfg.strengthMax) {
                 [cfg.strengthMin, cfg.strengthMax] = [cfg.strengthMax, cfg.strengthMin];

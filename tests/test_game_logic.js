@@ -548,12 +548,8 @@ test("雷电极速定位超过三秒未更新时停止且不会误入堵车", ()
     assert.equal(result.state.lowSince, null);
 });
 
-test("设置数值只给真正的角度字段添加度数单位", () => {
-    assert.equal(logic.formatSettingLabel("angle-strength-min", 15), "15");
-    assert.equal(logic.formatSettingLabel("angle-strength-max", 70), "70");
-    assert.equal(logic.formatSettingLabel("angle-target-offset", -12), "-12°");
-    assert.equal(logic.formatSettingLabel("angle-tolerance", 8), "8°");
-    assert.equal(logic.formatSettingLabel("angle-ramp-degrees", 28), "28°");
+test("设置数值只给仍在使用的字段添加对应单位", () => {
+    assert.equal(logic.formatSettingLabel("shake-strength-min", 15), "15");
     assert.equal(logic.formatSettingLabel("slot-shock-seconds", 2), "2.0s");
     assert.equal(logic.formatSettingLabel("slot-miss-gain", 24), "24%");
 });
