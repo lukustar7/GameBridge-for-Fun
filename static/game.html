@@ -1308,6 +1308,11 @@
                                 <p class="field-help">例如 A 请求强度 40、比例 50%，B 请求强度就是 20；设备限幅仍会再次降低实际输出。</p>
                             </div>
                         </div>
+                        <div class="tech-row">
+                            <span>当前玩法强度硬上限</span>
+                            <strong id="global-effective-strength-limit">等待 App 回传</strong>
+                        </div>
+                        <p class="field-help">由设备 App 的 A/B 限幅、当前通道和 B 比例共同计算；所有玩法设置与实际输出都不能超过它。</p>
                     </div>
                     <button id="global-output-confirm-button" type="button" class="full-width" onclick="confirmGlobalOutputSettings()" hidden>确认全局输出</button>
                     <p id="global-output-message" class="sub-text global-output-message" role="status" aria-live="polite">波形和通道会应用到所有玩法。</p>

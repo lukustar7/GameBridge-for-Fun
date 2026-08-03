@@ -546,6 +546,67 @@
         return false;
     }
 
+    function getEffectiveBaseStrengthLimit(mode, limitA, limitB, bStrengthMode, bStrengthPercent) {
+        // 游戏只设置一份“基础强度”。B 为比例模式时，需要先把 B 的硬件上限反推成基础强度上限。
+        if (!["a", "b", "ab"].includes(mode)) return 0;
+        const safeA = Math.floor(clamp(limitA, 0, 200));
+        const safeB = Math.floor(clamp(limitB, 0, 200));
+        let bBaseLimit = safeB;
+        if (mode !== "a") {
+            if (!["same", "percent"].includes(bStrengthMode)) return 0;
+            if (bStrengthMode === "percent") {
+                const percent = clamp(bStrengthPercent, 10, 100);
+                bBaseLimit = Math.min(200, Math.floor((safeB * 100) / percent));
+            }
+        }
+        if (mode === "a") return safeA;
+        if (mode === "b") return bBaseLimit;
+        return Math.min(safeA, bBaseLimit);
+    }
+
+    function clampGameStrengthSettings(settings, maximumStrength) {
+        const limit = Math.floor(clamp(maximumStrength, 0, 200));
+        const result = {};
+        Object.entries(settings && typeof settings === "object" ? settings : {}).forEach(([gameName, game]) => {
+            result[gameName] = game && typeof game === "object" && !Array.isArray(game)
+                ? { ...game }
+                : game;
+        });
+
+        const fields = {
+            shake: ["strengthMin", "strengthMax"],
+            dice: ["strength"],
+            slot: ["strengthMin", "strengthMax"],
+            lightning: ["startStrength", "maxStrength", "jamStrength"]
+        };
+        Object.entries(fields).forEach(([gameName, names]) => {
+            const game = result[gameName];
+            if (!game || typeof game !== "object") return;
+            names.forEach((name) => {
+                if (Object.hasOwn(game, name)) {
+                    game[name] = Math.round(clamp(game[name], 0, limit));
+                }
+            });
+        });
+
+        ["shake", "slot"].forEach((gameName) => {
+            const game = result[gameName];
+            if (game && game.strengthMin > game.strengthMax) {
+                game.strengthMin = game.strengthMax;
+            }
+        });
+        const lightning = result.lightning;
+        if (lightning) {
+            if (lightning.startStrength > lightning.maxStrength) {
+                lightning.startStrength = lightning.maxStrength;
+            }
+            if (lightning.jamStrength > lightning.maxStrength) {
+                lightning.jamStrength = lightning.maxStrength;
+            }
+        }
+        return result;
+    }
+
     function getSlotOdds(winRate) {
         if (winRate === "loose") return { small: 0.42, jackpot: 0.14 };
         if (winRate === "brutal") return { small: 0.22, jackpot: 0.06 };
@@ -681,9 +742,11 @@
         estimateDiceQueueSeconds,
         evaluateDiceRound,
         formatSettingLabel,
+        getEffectiveBaseStrengthLimit,
         getSlotOdds,
         getTripleFace,
         hasSafeOutputLimits,
+        clampGameStrengthSettings,
         isTimestampFresh,
         advanceLightningState,
         applyStandaloneShockDurationFloor,

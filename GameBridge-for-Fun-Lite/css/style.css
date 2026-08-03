@@ -529,6 +529,27 @@ input[type="range"] {
     background: rgb(4 10 19 / 0.46);
 }
 
+.lock-state-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.lock-badge {
+    padding: 4px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.lock-badge[data-state="locked"] {
+    border-color: rgb(91 225 255 / 0.48);
+    color: var(--cyan);
+    background: rgb(91 225 255 / 0.08);
+}
+
 .check-row {
     display: flex;
     align-items: flex-start;

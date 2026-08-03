@@ -166,6 +166,16 @@ class InterfaceStructureTests(unittest.TestCase):
         self.assertIn("正式输出已暂停", self.game_text)
         self.assertIn("确认全局输出", self.game_text)
 
+    def test_game_strength_is_clamped_to_app_reported_limits(self):
+        """第一版必须显示 App 限幅，并在页面发送前再次截断游戏请求。"""
+
+        self.assertIn('id="global-effective-strength-limit"', self.game_text)
+        self.assertIn("getEffectiveBaseStrengthLimit", self.game_script_text)
+        self.assertIn("clampGameStrengthSettings", self.game_script_text)
+        send_start = self.game_script_text.index("function sendConfiguredShock")
+        send_end = self.game_script_text.index("function formatOutputLabel", send_start)
+        self.assertIn("getCurrentEffectiveStrengthLimit", self.game_script_text[send_start:send_end])
+
     def test_standalone_game_shocks_start_at_one_second(self):
         """用户能感知为一次惩罚的输出和安全试电不得再短于 1 秒。"""
 

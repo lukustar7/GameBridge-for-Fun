@@ -143,6 +143,7 @@ const {
     estimateDiceQueueSeconds,
     evaluateDiceRound,
     formatSettingLabel,
+    getEffectiveBaseStrengthLimit,
     hasSafeOutputLimits,
     isTimestampFresh,
     calculateLightningStrength,
@@ -150,6 +151,7 @@ const {
     applyStandaloneShockDurationFloor,
     migrateLegacyOutputSettings,
     normalizeLightningSettings,
+    clampGameStrengthSettings,
     resolveStoredGlobalOutputSettings,
     restoreSettings
 } = window.GameBridgeForFunLogic;
@@ -748,6 +750,47 @@ function isOutputModeReady(mode) {
     return hasSafeOutputLimits(mode, latestTechState.limit_a, latestTechState.limit_b);
 }
 
+function getCurrentEffectiveStrengthLimit() {
+    if (!latestTechState || !latestDeviceConnected) return 0;
+    return getEffectiveBaseStrengthLimit(
+        getConfiguredOutputMode(),
+        latestTechState.limit_a,
+        latestTechState.limit_b,
+        globalOutputSettings.bStrengthMode,
+        globalOutputSettings.bStrengthPercent
+    );
+}
+
+function refreshGameStrengthLimit() {
+    const effectiveLimit = getCurrentEffectiveStrengthLimit();
+    setText(
+        "global-effective-strength-limit",
+        effectiveLimit > 0 ? `最高 ${effectiveLimit}` : "等待有效限幅"
+    );
+
+    const inputIds = [
+        "shake-strength-min", "shake-strength-max", "dice-strength",
+        "slot-strength-min", "slot-strength-max", "lightning-start-strength",
+        "lightning-max-strength", "lightning-jam-strength"
+    ];
+    inputIds.forEach((id) => {
+        const input = $(id);
+        if (!input) return;
+        if (!input.dataset.ruleMax) input.dataset.ruleMax = input.max;
+        const ruleMaximum = Number(input.dataset.ruleMax) || 200;
+        input.max = String(effectiveLimit > 0 ? Math.min(ruleMaximum, effectiveLimit) : ruleMaximum);
+    });
+
+    if (effectiveLimit <= 0) return;
+    const limited = clampGameStrengthSettings(gameSettings, effectiveLimit);
+    if (JSON.stringify(limited) !== JSON.stringify(gameSettings)) {
+        gameSettings = limited;
+        persistSettings();
+        if (selectedGame) populateSettingsForm(selectedGame);
+        setText("settings-message", `部分强度已按设备 App 当前上限 ${effectiveLimit} 自动降低。`);
+    }
+}
+
 function getOutputBlockReason() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return "后台未连接";
     if (!latestDeviceConnected) return latestTechState?.device_status_message || "郊狼硬件未就绪";
@@ -789,6 +832,7 @@ function updateTechStatus(data) {
     setText("tech-limit-a", formatHardwareReading(data.limit_a, deviceConnected));
     setText("tech-limit-b", formatHardwareReading(data.limit_b, deviceConnected));
     setText("tech-battery", formatBatteryLevel(data.battery_level));
+    refreshGameStrengthLimit();
     refreshGlobalSafetyStatus();
 }
 
@@ -1967,6 +2011,7 @@ function collectGlobalOutputSettings() {
 function saveGlobalOutputSettings(silent = false) {
     globalOutputSettings = collectGlobalOutputSettings();
     persistGlobalOutputSettings();
+    refreshGameStrengthLimit();
     refreshGlobalOutputPresentation();
     refreshGlobalSafetyStatus();
 
@@ -1982,6 +2027,7 @@ function confirmGlobalOutputSettings() {
     globalOutputSettings = collectGlobalOutputSettings();
     globalOutputRequiresConfirmation = false;
     persistGlobalOutputSettings();
+    refreshGameStrengthLimit();
     refreshGlobalOutputPresentation();
     refreshGlobalSafetyStatus();
     setText("global-output-message", "全局输出通道已确认，所有玩法立即共用。");
@@ -1991,7 +2037,10 @@ function saveSelectedSettings(silent = false) {
     if (!selectedGame) return;
 
     const cfg = collectSettingsFromForm(selectedGame);
-    gameSettings[selectedGame] = cfg;
+    const effectiveLimit = getCurrentEffectiveStrengthLimit();
+    gameSettings[selectedGame] = effectiveLimit > 0
+        ? clampGameStrengthSettings({ [selectedGame]: cfg }, effectiveLimit)[selectedGame]
+        : cfg;
     persistSettings();
     refreshGlobalSafetyStatus();
 
@@ -2378,7 +2427,8 @@ function sendPulse(strength, duration = 100, restMs = 250) {
     const safeRestMs = clamp(Math.round(restMs), 200, 3000);
     if (now < nextPulseAllowedAt) return;
 
-    const safeStrength = clamp(Math.round(strength), 0, 200);
+    const effectiveLimit = getCurrentEffectiveStrengthLimit();
+    const safeStrength = clamp(Math.round(strength), 0, effectiveLimit);
     if (safeStrength <= 0) return;
 
     nextPulseAllowedAt = now + safeDuration + safeRestMs;
@@ -2401,7 +2451,8 @@ function getOutputPayload() {
 }
 
 function sendConfiguredShock(strength, duration, metadata = {}) {
-    const safeStrength = clamp(Math.round(strength), 0, 200);
+    const effectiveLimit = getCurrentEffectiveStrengthLimit();
+    const safeStrength = clamp(Math.round(strength), 0, effectiveLimit);
     if (safeStrength <= 0) return false;
     // 发送前再次确认硬件就绪状态，防止 App 已扫码但蓝牙设备离线时空发。
     if (!latestDeviceConnected || !isConfiguredOutputReady()) return false;
@@ -3474,11 +3525,14 @@ function sendLightningOutput(phase, strength, durationSeconds, restSeconds) {
     const sampleAgeMs = latestLocationSample
         ? Math.max(0, now - Number(latestLocationSample.timestamp))
         : Number.POSITIVE_INFINITY;
+    const effectiveLimit = getCurrentEffectiveStrengthLimit();
+    const safeStrength = clamp(Math.round(strength), 0, effectiveLimit);
+    if (safeStrength <= 0) return false;
     const sent = sendGameMessage({
         type: "lightning_shock_trigger",
         requestId,
         phase,
-        strength: Math.round(strength),
+        strength: safeStrength,
         duration: Math.round(durationSeconds * 1000),
         restMs: Math.round(restSeconds * 1000),
         sessionId: lightningSessionId,

@@ -59,7 +59,10 @@
         limitBValue: byId("limit-b-value"),
         outputSummary: byId("output-summary"),
         outputConfirmCheckbox: byId("output-confirm-checkbox"),
+        outputConfirmRow: byId("output-confirm-row"),
         confirmOutput: byId("confirm-output"),
+        editOutput: byId("edit-output"),
+        outputLockBadge: byId("output-lock-badge"),
         confirmationStatus: byId("confirmation-status"),
         testOutputs: Array.from(document.querySelectorAll("[data-test-channel]")),
         gameListView: byId("game-list-view"),
@@ -163,7 +166,35 @@
     function loadGameSettings() {
         const normalized = gameConfig.normalizeSettings(readStoredObject().games);
         normalized.lightning = rules.normalizeLightningSettings(normalized.lightning, DEFAULT_SETTINGS.lightning);
-        return rules.applyStandaloneShockDurationFloor(normalized);
+        const restored = rules.applyStandaloneShockDurationFloor(normalized);
+        return rules.clampGameStrengthSettings(restored, getEffectiveStrengthLimit());
+    }
+
+    function getEffectiveStrengthLimit() {
+        return rules.getEffectiveBaseStrengthLimit(
+            globalSettings.outputMode,
+            globalSettings.limitA,
+            globalSettings.limitB,
+            globalSettings.bStrengthMode,
+            globalSettings.bStrengthPercent
+        );
+    }
+
+    function enforceGameStrengthLimit() {
+        const limited = rules.clampGameStrengthSettings(gameSettings, getEffectiveStrengthLimit());
+        const changed = JSON.stringify(limited) !== JSON.stringify(gameSettings);
+        gameSettings = limited;
+        return changed;
+    }
+
+    function isStrengthSetting(gameName, key) {
+        const fields = {
+            shake: ["strengthMin", "strengthMax"],
+            dice: ["strength"],
+            slot: ["strengthMin", "strengthMax"],
+            lightning: ["startStrength", "maxStrength", "jamStrength"]
+        };
+        return fields[gameName]?.includes(key) || false;
     }
 
     function saveSettings() {
@@ -391,10 +422,34 @@
         globalSettings.confirmed = false;
         elements.outputConfirmCheckbox.checked = false;
         elements.confirmationStatus.textContent = message || "设置已变化，需要重新确认。";
+        setOutputLockPresentation();
         if (persist !== false) {
             saveSettings();
         }
         updateReadyState();
+    }
+
+    function getOutputSettingControls() {
+        return [
+            ...document.querySelectorAll("input[name='output-channel']"),
+            elements.bStrengthMode,
+            elements.bStrengthPercent,
+            elements.waveformSelect,
+            elements.limitA,
+            elements.limitB
+        ].filter(Boolean);
+    }
+
+    function setOutputLockPresentation() {
+        const locked = globalSettings.confirmed;
+        getOutputSettingControls().forEach((control) => {
+            control.disabled = locked;
+        });
+        elements.outputConfirmRow.hidden = locked;
+        elements.confirmOutput.hidden = locked;
+        elements.editOutput.hidden = !locked;
+        elements.outputLockBadge.dataset.state = locked ? "locked" : "unlocked";
+        elements.outputLockBadge.textContent = locked ? "已保存 / 已锁定" : "未锁定";
     }
 
     function readyForOutput() {
@@ -475,7 +530,9 @@
             input = document.createElement("input");
             input.type = "range";
             input.min = String(field.min);
-            input.max = String(field.max);
+            input.max = String(isStrengthSetting(gameName, field.key)
+                ? Math.min(field.max, getEffectiveStrengthLimit())
+                : field.max);
             input.step = String(field.step);
             input.value = String(gameSettings[gameName][field.key]);
             input.dataset.unit = field.unit;
@@ -591,6 +648,7 @@
 
     function renderGameSettings(gameName) {
         selectedGame = gameName;
+        enforceGameStrengthLimit();
         elements.settingsTitle.textContent = GAME_META[gameName].title;
         elements.settingsDescription.textContent = GAME_META[gameName].description;
         elements.settingsFields.replaceChildren();
@@ -624,6 +682,7 @@
         }
         gameSettings = gameConfig.normalizeSettings(gameSettings);
         gameSettings.lightning = rules.normalizeLightningSettings(gameSettings.lightning, DEFAULT_SETTINGS.lightning);
+        enforceGameStrengthLimit();
         syncVisibleSettingControls();
         refreshConditionalSettingFields();
         saveSettings();
@@ -1478,6 +1537,7 @@
             channel.checked = true;
         }
         configureOutput();
+        setOutputLockPresentation();
     }
 
     function bindEvents() {
@@ -1542,8 +1602,21 @@
                 return;
             }
             globalSettings.confirmed = true;
-            elements.confirmationStatus.textContent = "当前连接、通道和上限已确认。";
+            enforceGameStrengthLimit();
+            saveSettings();
+            elements.confirmationStatus.textContent = `已保存并锁定；玩法请求强度不会超过 ${getEffectiveStrengthLimit()}。`;
             configureOutput();
+            setOutputLockPresentation();
+            updateReadyState();
+        });
+        elements.editOutput.addEventListener("click", async () => {
+            await output.emergencyStop("修改全局输出设置");
+            globalSettings.confirmed = false;
+            elements.outputConfirmCheckbox.checked = false;
+            elements.confirmationStatus.textContent = "设置已解锁。修改后请重新保存并锁定。";
+            saveSettings();
+            setOutputLockPresentation();
+            getOutputSettingControls()[0]?.focus();
             updateReadyState();
         });
         elements.testOutputs.forEach((button) => button.addEventListener("click", async () => {
@@ -1588,6 +1661,7 @@
         elements.restoreGameDefaults.addEventListener("click", () => {
             if (!selectedGame) return;
             gameSettings[selectedGame] = { ...DEFAULT_SETTINGS[selectedGame] };
+            enforceGameStrengthLimit();
             saveSettings();
             renderGameSettings(selectedGame);
             elements.settingsMessage.textContent = "已恢复当前玩法的原版默认设置。";

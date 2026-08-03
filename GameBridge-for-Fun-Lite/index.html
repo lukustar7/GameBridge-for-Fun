@@ -131,12 +131,17 @@
                         </div>
 
                         <div class="confirmation-box">
-                            <label class="check-row">
+                            <div class="lock-state-line">
+                                <strong>输出设置状态</strong>
+                                <span id="output-lock-badge" class="lock-badge" data-state="unlocked">未锁定</span>
+                            </div>
+                            <label id="output-confirm-row" class="check-row">
                                 <input id="output-confirm-checkbox" type="checkbox">
                                 <span>我已核对当前网页 A/B 安全上限和实际接线，并确认可以立即停止设备。</span>
                             </label>
-                            <button id="confirm-output" class="secondary-button" type="button">确认当前输出设置</button>
-                            <p id="confirmation-status" class="field-help">连接或修改设置后需要重新确认。</p>
+                            <button id="confirm-output" class="secondary-button" type="button">保存并锁定</button>
+                            <button id="edit-output" class="secondary-button" type="button" hidden>修改</button>
+                            <p id="confirmation-status" class="field-help" role="status" aria-live="polite">连接或修改设置后需要重新确认。</p>
                         </div>
                     </div>
                 </details>

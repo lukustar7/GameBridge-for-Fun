@@ -93,6 +93,35 @@ test("损坏或未确认的全局输出设置必须暂停正式输出", () => {
     assert.deepEqual(damaged.settings, DEFAULT_GLOBAL_OUTPUT);
 });
 
+test("所选通道的有效游戏强度上限会考虑 B 通道比例", () => {
+    assert.equal(logic.getEffectiveBaseStrengthLimit("a", 35, 20, "percent", 50), 35);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 28, "same", 50), 28);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 20, "percent", 50), 40);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 20, "percent", 50), 35);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 0, "same", 50), 0);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("unknown", 35, 20, "same", 50), 0);
+});
+
+test("所有保留玩法的强度设置都会被首页安全限额截断且不修改原对象", () => {
+    const source = {
+        shake: { strengthMin: 36, strengthMax: 90, safeRadius: 20 },
+        dice: { strength: 80, singleSeconds: 2 },
+        slot: { strengthMin: 45, strengthMax: 100, shockSeconds: 3 },
+        lightning: { startStrength: 40, maxStrength: 90, jamStrength: 70 }
+    };
+
+    const limited = logic.clampGameStrengthSettings(source, 35);
+
+    assert.deepEqual(limited, {
+        shake: { strengthMin: 35, strengthMax: 35, safeRadius: 20 },
+        dice: { strength: 35, singleSeconds: 2 },
+        slot: { strengthMin: 35, strengthMax: 35, shockSeconds: 3 },
+        lightning: { startStrength: 35, maxStrength: 35, jamStrength: 35 }
+    });
+    assert.equal(source.shake.strengthMin, 36);
+    assert.equal(source.lightning.maxStrength, 90);
+});
+
 test("旧版四个游戏通道一致时自动迁移为一份全局设置", () => {
     const legacyOutput = {
         outputMode: "ab",

@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const liteRoot = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(liteRoot, "..");
 const protocol = require(path.join(liteRoot, "js/coyote-protocol.js"));
+const gameLogic = require(path.join(liteRoot, "js/game-logic.js"));
 const waveforms = require(path.join(liteRoot, "js/waveforms.js"));
 const outputApi = require(path.join(liteRoot, "js/output-controller.js"));
 const driverApi = require(path.join(liteRoot, "js/ble-driver.js"));
@@ -53,6 +54,16 @@ function testProtocolEncoding() {
         protocol.channelStrengths(80, "b", 200, 200, "same", 10),
         { a: 0, b: 80 },
         "B 同强度模式不得错误套用比例"
+    );
+    assert.deepEqual(
+        protocol.channelStrengths(36, "a", 35, 35, "same", 100),
+        { a: 35, b: 0 },
+        "首页上限 35 必须在最终硬件出口截断游戏请求 36"
+    );
+    assert.equal(
+        gameLogic.getEffectiveBaseStrengthLimit("b", 35, 20, "percent", 50),
+        40,
+        "B 比例模式必须把硬件上限换算成游戏可设置的基础强度"
     );
 }
 
@@ -391,6 +402,10 @@ function testGlobalOutputControlsMatchOriginal() {
     assert.ok(html.includes('id="b-strength-percent"'), "Lite 必须提供原版的 B 通道比例滑块");
     assert.ok(html.indexOf("./js/game-config.js") < html.indexOf("./js/main.js"), "玩法契约必须先于主程序加载");
     assert.ok(mainSource.includes("window.LiteGameConfig"), "主程序必须使用通过对照测试的独立玩法契约");
+    assert.ok(html.includes('id="output-lock-badge"'), "Lite 保存后必须显示可读的锁定状态");
+    assert.ok(html.includes('id="edit-output"'), "Lite 锁定后必须提供明确的修改入口");
+    assert.ok(mainSource.includes("setOutputLockPresentation"), "Lite 必须统一切换输出控件的锁定状态");
+    assert.ok(mainSource.includes("clampGameStrengthSettings"), "Lite 游戏设置必须在页面层受首页安全上限约束");
 }
 
 function testGameSettingsExperienceMatchesOriginal() {
