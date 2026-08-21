@@ -7,10 +7,11 @@
     <link rel="stylesheet" href="style.css?v=20260727-ui-tabs">
     <style>
         body {
-            /* 选择页和设置页内容较长，需要允许纵向滚动；真正的游玩区再单独锁触摸。 */
             touch-action: pan-y;
             -webkit-user-select: none;
             user-select: none;
+            background: var(--bg);
+            color: var(--text);
         }
 
         .flex-row {
@@ -24,50 +25,65 @@
         .settings-stack {
             display: flex;
             flex-direction: column;
-            gap: 15px;
-            margin-bottom: 25px;
+            gap: 12px;
+            margin-bottom: 20px;
         }
 
         .game-card {
             width: 100%;
             min-height: 0;
             display: grid;
-            grid-template-columns: 52px minmax(0, 1fr);
+            grid-template-columns: 48px minmax(0, 1fr) auto;
             align-items: center;
             gap: 14px;
             padding: 16px;
             border: 1px solid var(--border);
-            border-radius: var(--radius-medium);
+            border-radius: var(--radius-large);
             color: var(--text);
-            background: linear-gradient(145deg, rgba(18, 28, 49, 0.94), rgba(10, 16, 29, 0.92));
+            background: var(--surface);
+            box-shadow: var(--shadow);
             cursor: pointer;
             text-align: left;
+            transition: all 140ms ease;
+            margin-bottom: 10px;
+        }
+
+        .game-card:hover {
+            border-color: #BFDBFE;
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+
+        .game-card:active {
+            transform: scale(0.98);
         }
 
         .game-card-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-auto-rows: 1fr;
+            gap: 12px;
         }
 
         .game-card-icon {
             display: grid;
-            width: 52px;
-            height: 52px;
+            width: 48px;
+            height: 48px;
             place-items: center;
-            border: 1px solid rgba(96, 165, 250, 0.28);
-            border-radius: 15px;
-            color: var(--accent);
-            background: rgba(56, 189, 248, 0.08);
+            border-radius: var(--radius-medium);
+            color: var(--primary);
+            background: var(--primary-light);
+            border: 1px solid #BFDBFE;
         }
 
         .game-card-icon svg {
-            width: 30px;
-            height: 30px;
+            width: 26px;
+            height: 26px;
             fill: none;
             stroke: currentColor;
             stroke-linecap: round;
             stroke-linejoin: round;
-            stroke-width: 1.8;
+            stroke-width: 2;
         }
 
         .game-card-copy {
@@ -77,28 +93,24 @@
         .game-card-copy .sub-text {
             display: -webkit-box;
             overflow: hidden;
-            margin: 6px 0 0;
+            margin: 4px 0 0;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 2;
-        }
-
-        .game-card:hover,
-        .game-card:active {
-            border-color: var(--border-strong);
-            background: linear-gradient(145deg, rgba(24, 41, 70, 0.96), rgba(11, 20, 36, 0.94));
+            color: var(--text-secondary);
+            font-size: 0.82rem;
         }
 
         .game-card-heading {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
+            gap: 8px;
         }
 
         .game-card-index {
-            color: var(--accent);
+            color: var(--primary);
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 0.76rem;
+            font-size: 0.78rem;
             font-weight: 800;
         }
 
@@ -109,70 +121,71 @@
         }
 
         .selection-title {
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             color: var(--text);
-            font-size: 1.25rem;
-            letter-spacing: -0.01em;
-            text-transform: none;
+            font-size: 1.15rem;
+            font-weight: 700;
         }
 
         .mobile-status-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
-            margin: 16px 0 12px;
+            margin: 12px 0 6px;
         }
 
         .mobile-status-card {
-            padding: 12px;
+            padding: 10px 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-small);
-            background: rgba(3, 7, 15, 0.54);
+            background: var(--bg-soft);
         }
 
         .mobile-status-card span {
             display: block;
             color: var(--text-muted);
             font-size: 0.72rem;
+            font-weight: 600;
         }
 
         .mobile-status-card strong {
             display: block;
-            margin-top: 3px;
+            margin-top: 2px;
             color: var(--warning);
-            font-size: 0.94rem;
+            font-size: 0.88rem;
+            font-weight: 700;
         }
 
         .mobile-status-card strong.connected {
             color: var(--success);
         }
 
+        /* 手机端置顶吸顶安全控制条 */
         .global-safety-bar {
             position: sticky;
             top: 8px;
-            z-index: 30;
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            z-index: 40;
+            display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 9px 10px 9px 14px;
-            margin-bottom: 16px;
-            border: 1px solid rgba(251, 113, 133, 0.52);
-            border-radius: var(--radius-medium);
-            background: rgba(7, 10, 18, 0.94);
-            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
-            backdrop-filter: blur(18px);
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 12px;
+            margin-bottom: 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-full);
+            background: var(--surface);
+            box-shadow: var(--shadow-md);
         }
 
         .global-safety-bar.ready {
-            border-color: rgba(74, 222, 128, 0.45);
+            border-color: #A7F3D0;
         }
 
         .global-safety-state {
             display: flex;
             min-width: 0;
             align-items: center;
-            gap: 9px;
+            gap: 8px;
             color: var(--text-secondary);
             font-size: 0.82rem;
             font-weight: 650;
@@ -180,55 +193,69 @@
 
         .global-safety-state .status-dot {
             flex: 0 0 auto;
+            width: 8px;
+            height: 8px;
+            border-radius: var(--radius-full);
             background: var(--danger);
-            box-shadow: 0 0 12px rgba(251, 113, 133, 0.48);
         }
 
         .global-safety-bar.ready .status-dot {
             background: var(--success);
-            box-shadow: 0 0 12px rgba(74, 222, 128, 0.52);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
         }
 
-        .global-safety-bar .danger-button {
-            min-height: 40px;
-            padding: 8px 12px;
-            white-space: nowrap;
+        .global-safety-bar .danger-button,
+        .global-safety-bar .emergency-stop-btn {
+            min-height: 36px;
+            padding: 6px 14px;
+            border-radius: var(--radius-full);
+            color: #FFFFFF !important;
+            background: var(--danger-strong) !important;
+            font-weight: 800;
+            font-size: 0.86rem;
+            letter-spacing: 0.04em;
+            border: 0;
         }
 
         .readiness-result {
-            min-height: 21px;
-            margin-top: 10px;
+            min-height: 20px;
+            margin-top: 8px;
         }
 
         .mobile-section-tabs,
         .settings-category-tabs {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 6px;
-            padding: 6px;
-            margin-bottom: 16px;
+            gap: 4px;
+            padding: 4px;
+            margin-bottom: 14px;
             border: 1px solid var(--border);
             border-radius: var(--radius-medium);
-            background: rgba(7, 10, 18, 0.88);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
         }
 
         .mobile-section-tabs button,
         .settings-category-tabs button {
             min-width: 0;
-            min-height: 44px;
-            padding: 8px 9px;
-            border-color: transparent;
-            color: var(--text-muted);
+            min-height: 38px;
+            padding: 6px 8px;
+            border-radius: var(--radius-small);
+            border: 0;
+            color: var(--text-secondary);
             background: transparent;
             font-size: 0.84rem;
+            font-weight: 600;
+            text-align: center;
+            cursor: pointer;
+            transition: all 140ms ease;
         }
 
         .mobile-section-tabs button[aria-selected="true"],
         .settings-category-tabs button[aria-selected="true"] {
-            border-color: rgba(103, 232, 249, 0.38);
-            color: var(--text);
-            background: rgba(59, 130, 246, 0.18);
-            box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.10);
+            color: var(--primary);
+            background: var(--primary-light);
+            box-shadow: var(--shadow-sm);
         }
 
         .selection-tab-panel {
@@ -237,22 +264,23 @@
 
         .selection-setup-intro {
             padding: 14px;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-medium);
-            background: rgba(12, 19, 34, 0.80);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
         }
 
         .test-disclosure {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         #capability-center {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         .global-output-disclosure {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         .global-output-disclosure > summary {
@@ -261,25 +289,14 @@
             justify-content: space-between;
             gap: 12px;
             list-style: none;
+            padding: 12px 14px;
+            font-weight: 650;
+            color: var(--text);
+            cursor: pointer;
         }
 
         .global-output-disclosure > summary::-webkit-details-marker {
             display: none;
-        }
-
-        .global-output-disclosure > summary::after {
-            content: "";
-            flex: 0 0 auto;
-            width: 8px;
-            height: 8px;
-            border-right: 2px solid var(--accent);
-            border-bottom: 2px solid var(--accent);
-            transform: rotate(45deg);
-            transition: transform 150ms ease;
-        }
-
-        .global-output-disclosure[open] > summary::after {
-            transform: rotate(225deg);
         }
 
         .global-output-disclosure > summary small {
@@ -287,11 +304,20 @@
             color: var(--text-muted);
             font-weight: 500;
             text-align: right;
+            font-size: 0.8rem;
+        }
+
+        .global-output-disclosure > summary::after {
+            content: "";
+        }
+
+        .game-card-copy .sub-text {
+            margin-top: auto;
         }
 
         .global-output-message {
-            min-height: 21px;
-            margin-top: 10px;
+            min-height: 20px;
+            margin-top: 8px;
         }
 
         .capability-grid {
@@ -299,36 +325,35 @@
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 10px;
             margin-bottom: 12px;
-            grid-auto-rows: 1fr;
         }
 
         .capability-card {
             display: flex;
             min-width: 0;
             flex-direction: column;
-            gap: 9px;
-            padding: 13px;
+            gap: 8px;
+            padding: 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-small);
-            background: rgba(3, 7, 15, 0.54);
+            background: var(--bg-soft);
         }
 
         .capability-card-heading {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 10px;
+            gap: 8px;
         }
 
         .capability-card-heading strong {
             color: var(--text);
-            font-size: 0.9rem;
+            font-size: 0.88rem;
         }
 
         .capability-state {
             color: var(--warning);
             font-size: 0.74rem;
-            font-weight: 720;
+            font-weight: 700;
         }
 
         .capability-state.ready {
@@ -341,17 +366,18 @@
 
         .capability-card p {
             flex: 1;
-            min-height: 42px;
+            min-height: 38px;
             margin: 0;
-            color: var(--text-muted);
-            font-size: 0.78rem;
-            line-height: 1.42;
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            line-height: 1.4;
         }
 
         .capability-card button {
             width: 100%;
-            min-height: 40px;
+            min-height: 36px;
             margin-top: auto;
+            font-size: 0.82rem;
         }
 
         .capability-actions {
@@ -365,38 +391,34 @@
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 12px;
-            padding: 13px 15px;
-            margin-bottom: 14px;
+            gap: 10px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-medium);
-            background: rgba(3, 7, 15, 0.48);
+            background: var(--bg-soft);
         }
 
         .settings-category-tabs {
             grid-template-columns: repeat(var(--settings-tab-count, 2), minmax(0, 1fr));
-            margin-bottom: 14px;
-            scroll-margin-top: 82px;
-        }
-
-        .settings-global-output span,
-        .settings-global-output strong {
-            display: block;
+            margin-bottom: 12px;
+            scroll-margin-top: 70px;
         }
 
         .settings-global-output span {
             color: var(--text-muted);
-            font-size: 0.82rem;
+            font-size: 0.8rem;
         }
 
         .settings-global-output strong {
-            margin-top: 3px;
-            color: var(--text-secondary);
-            font-size: 0.92rem;
+            margin-top: 2px;
+            color: var(--text);
+            font-size: 0.9rem;
         }
 
         .test-disclosure-help {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
+            font-size: 0.82rem;
         }
 
         .test-action-grid {
@@ -406,7 +428,9 @@
         }
 
         .back-btn {
-            margin-bottom: 20px;
+            margin-bottom: 14px;
+            min-height: 38px;
+            font-size: 0.86rem;
         }
 
         .screen {
@@ -442,11 +466,12 @@
         }
 
         .settings-group {
-            margin-bottom: 14px;
+            margin-bottom: 12px;
             overflow: hidden;
             border: 1px solid var(--border);
             border-radius: var(--radius-medium);
-            background: rgba(3, 7, 15, 0.48);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
         }
 
         .settings-group.common-settings {
@@ -457,32 +482,18 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 14px;
-            min-height: 56px;
-            padding: 13px 15px;
+            gap: 12px;
+            min-height: 50px;
+            padding: 12px 14px;
             color: var(--text);
             cursor: pointer;
-            font-weight: 720;
+            font-weight: 650;
+            font-size: 0.92rem;
             list-style: none;
         }
 
         .settings-group > summary::-webkit-details-marker {
             display: none;
-        }
-
-        .settings-group > summary::after {
-            content: "";
-            flex: 0 0 auto;
-            width: 8px;
-            height: 8px;
-            border-right: 2px solid var(--accent);
-            border-bottom: 2px solid var(--accent);
-            transform: rotate(45deg);
-            transition: transform 150ms ease;
-        }
-
-        .settings-group[open] > summary::after {
-            transform: rotate(225deg);
         }
 
         .settings-group > summary small {
@@ -494,8 +505,8 @@
         }
 
         .settings-group-content {
-            padding: 0 15px 15px;
-            border-top: 1px solid rgba(148, 163, 184, 0.11);
+            padding: 0 14px 14px;
+            border-top: 1px solid var(--border-subtle);
         }
 
         .settings-group:not([open]) > .settings-group-content {
@@ -503,12 +514,8 @@
         }
 
         .settings-group .settings-stack {
-            padding-top: 15px;
+            padding-top: 12px;
             margin-bottom: 0;
-        }
-
-        #screen-settings input[type="range"] {
-            height: 44px;
         }
 
         .settings-stack-flush {
@@ -521,13 +528,12 @@
             grid-template-columns: auto auto minmax(120px, 1fr);
             gap: 8px;
             width: 100%;
-            padding: 9px;
-            margin-bottom: 14px;
-            border: 1px solid var(--border-strong);
+            padding: 8px;
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
             border-radius: var(--radius-medium);
-            background: rgba(7, 10, 18, 0.94);
-            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
-            backdrop-filter: blur(18px);
+            background: var(--surface);
+            box-shadow: var(--shadow);
         }
 
         .settings-actions.two-actions {
@@ -540,36 +546,42 @@
 
         .play-navigation {
             display: flex;
-            margin-bottom: 16px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 14px;
         }
 
         .play-parameter-summary {
             align-self: start;
             padding: 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-large);
+            box-shadow: var(--shadow);
         }
 
         .play-parameter-summary > summary {
-            min-height: 54px;
-            padding: 16px 18px;
-            color: var(--text-secondary);
+            min-height: 48px;
+            padding: 12px 16px;
+            color: var(--text);
             cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 720;
-            letter-spacing: 0.06em;
+            font-size: 0.88rem;
+            font-weight: 650;
         }
 
         .play-parameter-content {
-            padding: 0 18px 18px;
+            padding: 0 16px 16px;
         }
 
         .inline-warning {
-            padding: 12px 14px;
-            margin-bottom: 14px;
-            border: 1px solid rgba(251, 191, 36, 0.46);
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border: 1px solid #FCD34D;
             border-radius: var(--radius-small);
-            color: #fef3c7;
-            background: rgba(120, 53, 15, 0.28);
-            font-size: 0.86rem;
+            color: #92400E;
+            background: var(--warning-light);
+            font-size: 0.84rem;
         }
 
         [data-screen-heading]:focus {
@@ -577,71 +589,74 @@
         }
 
         .inline-note {
-            min-height: 22px;
+            min-height: 20px;
             color: var(--text-muted);
-            font-size: 0.85rem;
-            margin-top: 12px;
+            font-size: 0.82rem;
+            margin-top: 10px;
         }
 
         .notice-panel {
             border: 1px solid var(--border);
-            padding: 17px;
-            background: linear-gradient(155deg, rgba(18, 28, 49, 0.92), rgba(10, 16, 29, 0.91));
+            border-radius: var(--radius-large);
+            padding: 16px;
+            background: var(--surface);
+            box-shadow: var(--shadow);
         }
 
         .info-list {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-            padding-left: 18px;
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+            padding-left: 16px;
         }
 
         .info-list li {
-            margin: 6px 0;
+            margin: 5px 0;
         }
 
         .tech-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            column-gap: 16px;
+            column-gap: 14px;
         }
 
         .tech-row {
             display: flex;
             justify-content: space-between;
-            gap: 12px;
-            padding: 7px 0;
-            border-bottom: 1px solid rgba(148, 163, 184, 0.11);
-            color: var(--text-muted);
-            font-size: 0.82rem;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-size: 0.8rem;
         }
 
         .tech-row span:last-child {
             color: var(--text);
-            font-family: monospace;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-weight: 600;
             text-align: right;
         }
 
         .field-help {
             color: var(--text-muted);
-            font-size: 0.84rem;
-            line-height: 1.45;
-            margin-top: 5px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            margin-top: 4px;
         }
 
         .game-help {
             color: var(--text-secondary);
-            font-size: 0.9rem;
-            margin-bottom: 15px;
+            font-size: 0.88rem;
+            margin-bottom: 12px;
         }
 
         .switch-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 14px;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            margin: 15px 0;
+            gap: 12px;
+            color: var(--text);
+            font-size: 0.88rem;
+            margin: 12px 0;
         }
 
         .switch-row input {
@@ -650,75 +665,70 @@
 
         .common-settings {
             border: 1px solid var(--border);
-            padding: 16px;
-            margin-bottom: 20px;
-            background: rgba(3, 7, 15, 0.48);
+            padding: 14px;
+            margin-bottom: 16px;
+            background: var(--surface);
+            border-radius: var(--radius-medium);
         }
 
+        /* 骰子对决样式 */
         .dice-area {
             display: grid;
-            gap: 14px;
-            margin: 30px 0;
+            gap: 12px;
+            margin: 20px 0;
         }
 
         .dice-row {
             display: grid;
-            grid-template-columns: 42px repeat(3, minmax(0, 70px));
+            grid-template-columns: 42px repeat(3, minmax(0, 68px));
             justify-content: center;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
         .dice-row-label {
-            color: #888888;
+            color: var(--text-secondary);
             font-size: 0.85rem;
+            font-weight: 700;
             text-align: right;
         }
 
         .dice-box {
-            width: 70px;
-            height: 70px;
-            border: 1px solid #ffffff;
-            border-radius: 8px;
+            width: 68px;
+            height: 68px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-medium);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 2.2rem;
-            font-family: monospace;
+            font-size: 1.8rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-weight: 800;
-            background: linear-gradient(145deg, #f9f9f9, #d8d8d8);
-            color: #050505;
-            box-shadow: inset -4px -4px 10px rgba(0, 0, 0, 0.22), inset 3px 3px 8px rgba(255, 255, 255, 0.65);
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: var(--shadow-md);
             position: relative;
             overflow: hidden;
-            transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease, background 140ms ease;
+            transition: all 140ms ease;
         }
 
         .dice-row.opponent .dice-box {
-            border-color: #555555;
-            background: linear-gradient(145deg, #202020, #050505);
-            color: #eeeeee;
-            box-shadow: inset -4px -4px 10px rgba(255, 255, 255, 0.05), inset 3px 3px 8px rgba(255, 255, 255, 0.08);
+            border-color: #94A3B8;
+            background: #F1F5F9;
+            color: #1E293B;
         }
 
         .dice-box.empty {
-            background: #030303;
-            color: #666666;
-            border-color: #333333;
+            background: var(--bg-soft);
+            color: var(--text-muted);
+            border-color: var(--border);
             box-shadow: none;
         }
 
         .dice-box.pending {
-            background: #080808;
-            color: #ffffff;
-            border-color: #ff3333;
-            box-shadow: 0 0 18px rgba(255, 51, 51, 0.35);
+            border-color: var(--danger);
+            box-shadow: 0 0 14px rgba(239, 68, 68, 0.3);
             animation: dice-jitter 120ms infinite alternate;
-        }
-
-        .dice-box.pending .dice-pip {
-            background-color: #ffffff;
-            box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
         }
 
         .dice-face-grid {
@@ -732,12 +742,11 @@
         }
 
         .dice-pip {
-            width: 10px;
-            height: 10px;
+            width: 9px;
+            height: 9px;
             border-radius: 999px;
-            background-color: #070707;
+            background-color: #0F172A;
             opacity: 0;
-            box-shadow: 0 1px 1px rgba(255, 255, 255, 0.25);
         }
 
         .dice-pip.active {
@@ -745,8 +754,7 @@
         }
 
         .dice-row.opponent .dice-pip {
-            background-color: #eeeeee;
-            box-shadow: 0 0 7px rgba(255, 255, 255, 0.32);
+            background-color: #334155;
         }
 
         .sr-only {
@@ -762,18 +770,15 @@
         }
 
         @keyframes dice-jitter {
-            from {
-                transform: translate(-1px, 1px) rotate(-2deg);
-            }
-            to {
-                transform: translate(1px, -1px) rotate(2deg);
-            }
+            from { transform: translate(-1px, 1px) rotate(-2deg); }
+            to { transform: translate(1px, -1px) rotate(2deg); }
         }
 
+        /* 极速角子机样式 */
         .slot-machine {
             display: grid;
-            gap: 18px;
-            padding: 8px 0 2px;
+            gap: 16px;
+            padding: 6px 0;
         }
 
         .slot-reels {
@@ -784,103 +789,98 @@
 
         .slot-reel {
             aspect-ratio: 1;
-            min-height: 84px;
-            border: 1px solid #ffffff;
+            min-height: 80px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-large);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: clamp(2.2rem, 16vw, 4.2rem);
-            background-color: #030303;
+            font-size: clamp(2.2rem, 14vw, 3.8rem);
+            background: var(--surface);
+            box-shadow: var(--shadow);
             line-height: 1;
-            transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+            transition: all 120ms ease;
         }
 
         .slot-reel.spinning {
-            border-color: #ff3333;
+            border-color: var(--danger);
             transform: translateY(-2px);
-            box-shadow: 0 0 16px rgba(255, 51, 51, 0.26);
+            box-shadow: 0 0 14px rgba(239, 68, 68, 0.25);
             animation: slot-spin-pulse 140ms infinite alternate;
         }
 
         .slot-reel.result-miss {
-            border-color: #ff3333;
-            box-shadow: 0 0 18px rgba(255, 51, 51, 0.34);
+            border-color: var(--danger);
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.3);
         }
 
         .slot-reel.result-small {
-            border-color: #22c55e;
-            box-shadow: 0 0 16px rgba(34, 197, 94, 0.25);
+            border-color: var(--success);
+            box-shadow: 0 0 14px rgba(16, 185, 129, 0.25);
         }
 
         .slot-reel.result-jackpot,
         .slot-reel.result-seven {
-            border-color: #facc15;
-            background-color: #080704;
-            box-shadow: 0 0 22px rgba(250, 204, 21, 0.38);
+            border-color: var(--warning);
+            background: var(--warning-light);
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.35);
             transform: scale(1.02);
         }
 
         @keyframes slot-spin-pulse {
-            from {
-                transform: translateY(-2px) scale(1);
-            }
-            to {
-                transform: translateY(1px) scale(1.03);
-            }
+            from { transform: translateY(-2px) scale(1); }
+            to { transform: translateY(1px) scale(1.02); }
         }
 
         .slot-danger-header {
             display: flex;
             justify-content: space-between;
-            color: #ffffff;
-            font-size: 0.9rem;
-            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            font-weight: 650;
+            margin-bottom: 6px;
         }
 
         .slot-danger-track {
-            height: 18px;
-            border: 1px solid #333333;
-            background-color: #050505;
+            height: 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-full);
+            background-color: var(--bg-soft);
             overflow: hidden;
             position: relative;
-            transition: border-color 180ms ease, box-shadow 180ms ease;
         }
 
         .slot-danger-track.hot {
-            border-color: #fb923c;
-            box-shadow: 0 0 12px rgba(251, 146, 60, 0.22);
+            border-color: #F59E0B;
         }
 
         .slot-danger-track.critical {
-            border-color: #ff3333;
-            box-shadow: 0 0 18px rgba(255, 51, 51, 0.38);
+            border-color: #EF4444;
         }
 
         .slot-danger-fill {
             width: 0%;
             height: 100%;
-            background-color: #22c55e;
+            border-radius: var(--radius-full);
+            background-color: var(--success);
             transition: width 180ms ease, background-color 180ms ease;
         }
 
         .slot-danger-fill.critical {
+            background-color: var(--danger);
             animation: pressure-pulse 420ms infinite alternate;
         }
 
         @keyframes pressure-pulse {
-            from {
-                filter: brightness(1);
-            }
-            to {
-                filter: brightness(1.45);
-            }
+            from { filter: brightness(1); }
+            to { filter: brightness(1.3); }
         }
 
         .slot-result-line {
-            min-height: 46px;
-            color: #888888;
-            font-size: 0.95rem;
-            line-height: 1.5;
+            min-height: 42px;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            line-height: 1.45;
             text-align: center;
         }
 
@@ -890,33 +890,36 @@
             gap: 10px;
         }
 
+        /* 雷电极速仪表样式 */
         .lightning-dashboard {
             display: grid;
-            gap: 14px;
-            padding: 6px 0;
+            gap: 12px;
+            padding: 4px 0;
         }
 
         .lightning-speed-panel {
-            padding: 20px;
-            border: 1px solid var(--border-strong);
-            border-radius: var(--radius-medium);
-            background: radial-gradient(circle at top, rgba(59, 130, 246, 0.18), rgba(3, 7, 15, 0.72));
+            padding: 18px;
+            border: 1px solid #BFDBFE;
+            border-radius: var(--radius-large);
+            background: linear-gradient(180deg, #EFF6FF 0%, #FFFFFF 100%);
+            box-shadow: var(--shadow);
             text-align: center;
         }
 
         .lightning-speed-value {
-            color: var(--text);
+            color: var(--primary);
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: clamp(2.8rem, 16vw, 5rem);
+            font-size: clamp(2.6rem, 15vw, 4.4rem);
             font-weight: 800;
             line-height: 1;
         }
 
         .lightning-speed-unit {
-            margin-top: 7px;
+            margin-top: 6px;
             color: var(--text-muted);
             font-size: 0.78rem;
-            letter-spacing: 0.08em;
+            font-weight: 700;
+            letter-spacing: 0.06em;
         }
 
         .lightning-state-grid {
@@ -926,75 +929,76 @@
         }
 
         .lightning-state-card {
-            padding: 13px;
+            padding: 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-small);
-            background: rgba(3, 7, 15, 0.54);
-        }
-
-        .lightning-state-card span,
-        .lightning-state-card strong {
-            display: block;
+            background: var(--bg-soft);
         }
 
         .lightning-state-card span {
             color: var(--text-muted);
             font-size: 0.72rem;
+            font-weight: 600;
+            display: block;
         }
 
         .lightning-state-card strong {
-            margin-top: 4px;
+            margin-top: 3px;
             color: var(--text);
-            font-size: 0.94rem;
+            font-size: 0.92rem;
+            display: block;
         }
 
         .safety-dialog {
             position: fixed;
             inset: 0;
-            width: min(calc(100% - 28px), 620px);
-            max-height: min(88vh, 760px);
+            width: min(calc(100% - 24px), 580px);
+            max-height: min(88vh, 720px);
             margin: auto;
             overflow: auto;
             padding: 0;
-            border: 1px solid var(--border-strong);
+            border: 1px solid var(--border);
             border-radius: var(--radius-large);
             color: var(--text);
-            background: #0b1220;
-            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+            background: var(--surface);
+            box-shadow: var(--shadow-lg);
         }
 
         #game-status {
             width: fit-content;
             max-width: 100%;
-            padding: 7px 11px;
+            padding: 6px 12px;
             border: 1px solid var(--border);
-            border-radius: 999px;
+            border-radius: var(--radius-full);
             color: var(--text-secondary);
-            background: rgba(15, 23, 42, 0.76);
+            background: var(--bg-soft);
+            font-size: 0.84rem;
+            font-weight: 600;
         }
 
         #game-status[data-phase="output"] {
-            border-color: rgba(251, 146, 60, 0.55);
-            color: #fed7aa;
-            background: rgba(124, 45, 18, 0.32);
+            border-color: #FECDD3;
+            color: #9F1239;
+            background: var(--danger-light);
         }
 
         #game-status[data-phase="rest"],
         #game-status[data-phase="interval"] {
-            border-color: rgba(96, 165, 250, 0.45);
-            color: #bfdbfe;
+            border-color: #BFDBFE;
+            color: var(--primary);
+            background: var(--primary-light);
         }
 
         #game-status[data-phase="paused"],
         #game-status[data-phase="blocked"] {
-            border-color: rgba(248, 113, 113, 0.52);
-            color: #fecaca;
-            background: rgba(127, 29, 29, 0.26);
+            border-color: #FECDD3;
+            color: #9F1239;
+            background: var(--danger-light);
         }
 
         .safety-dialog::backdrop {
-            background: rgba(0, 0, 0, 0.78);
-            backdrop-filter: blur(5px);
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(4px);
         }
 
         .safety-dialog-content {
@@ -1002,14 +1006,14 @@
         }
 
         .safety-dialog h2 {
-            margin-bottom: 8px;
-            font-size: 1.3rem;
+            margin-bottom: 6px;
+            font-size: 1.2rem;
         }
 
         .safety-check-list {
             display: grid;
-            gap: 10px;
-            margin: 18px 0;
+            gap: 8px;
+            margin: 14px 0;
         }
 
         .safety-check-row {
@@ -1017,12 +1021,13 @@
             grid-template-columns: auto minmax(0, 1fr);
             align-items: start;
             gap: 10px;
-            padding: 11px 12px;
+            padding: 10px 12px;
             border: 1px solid var(--border);
             border-radius: var(--radius-small);
             color: var(--text-secondary);
-            font-size: 0.86rem;
+            font-size: 0.84rem;
             line-height: 1.45;
+            background: var(--bg-soft);
         }
 
         .safety-check-row input {
@@ -1032,8 +1037,8 @@
 
         .safety-dialog-actions {
             display: grid;
-            grid-template-columns: auto minmax(150px, 1fr);
-            gap: 9px;
+            grid-template-columns: auto minmax(140px, 1fr);
+            gap: 8px;
         }
 
         @media (max-width: 700px) {
@@ -1044,30 +1049,22 @@
 
         @media (max-width: 420px) {
             .mobile-app-header {
-                padding: 14px 16px;
-                margin-bottom: 12px;
+                padding: 12px 14px;
+                margin-bottom: 10px;
             }
 
             .mobile-app-header h1 {
-                font-size: 1.35rem;
-            }
-
-            .flex-row {
-                align-items: center;
+                font-size: 1.25rem;
             }
 
             .global-safety-bar {
                 top: 6px;
-                margin-bottom: 14px;
-            }
-
-            .global-safety-state {
-                font-size: 0.78rem;
+                margin-bottom: 12px;
             }
 
             .game-select-container {
                 gap: 10px;
-                margin-bottom: 16px;
+                margin-bottom: 14px;
             }
 
             .settings-group > summary {
@@ -1079,54 +1076,33 @@
 
             .settings-group > summary small {
                 margin-left: 0;
-                padding-right: 24px;
+                padding-right: 20px;
                 text-align: left;
-            }
-
-            .settings-group > summary::after {
-                position: absolute;
-                right: 30px;
             }
 
             .settings-actions {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
-            .settings-actions.two-actions .primary-button {
-                grid-column: auto;
-            }
-
-            .tech-grid {
-                grid-template-columns: 1fr;
-            }
-
+            .tech-grid,
             .capability-grid,
             .capability-actions,
             .lightning-state-grid {
                 grid-template-columns: 1fr;
             }
 
-            .dice-area {
-                gap: 12px;
-            }
-
             .dice-row {
-                grid-template-columns: 34px repeat(3, minmax(0, 58px));
-                gap: 8px;
+                grid-template-columns: 32px repeat(3, minmax(0, 56px));
+                gap: 6px;
             }
 
             .dice-box {
-                width: 58px;
-                height: 58px;
-            }
-
-            .dice-pip {
-                width: 8px;
-                height: 8px;
+                width: 56px;
+                height: 56px;
             }
 
             .slot-reel {
-                min-height: 68px;
+                min-height: 64px;
             }
         }
 
@@ -1140,7 +1116,7 @@
         }
 
         html.native-host .container {
-            padding-top: 12px;
+            padding-top: 10px;
         }
     </style>
 </head>
@@ -1149,7 +1125,7 @@
         <header class="flex-row app-header mobile-app-header">
             <div>
                 <p class="eyebrow">Mobile Game Controller</p>
-                <h1>GameBridge for Fun</h1>
+                <h1>GameBridge</h1>
             </div>
             <span id="ping-badge" class="header-status" role="status" aria-live="polite">连接中</span>
         </header>
@@ -1158,20 +1134,20 @@
         <div id="global-safety-bar" class="global-safety-bar blocked" role="region" aria-label="输出安全控制">
             <div class="global-safety-state">
                 <span class="status-dot" aria-hidden="true"></span>
-                <span id="global-safety-status" role="status" aria-live="polite">正在连接电脑服务</span>
+                <span id="global-safety-status" role="status" aria-live="polite">未连接</span>
             </div>
-            <button type="button" class="danger-button" onclick="stopMobileOutput()">停止 A/B 输出</button>
+            <button type="button" class="emergency-stop-btn" onclick="stopMobileOutput()">STOP</button>
         </div>
 
         <!-- 游戏选择页只负责选择玩法，不直接启动，避免玩家没调好参数就开始受罚。 -->
         <div id="screen-select" class="screen active">
-            <section class="notice-panel" style="margin-bottom: 16px;">
+            <section class="notice-panel" style="margin-bottom: 12px;">
                 <h2 id="selection-title" class="selection-title" tabindex="-1" data-screen-heading>选择玩法</h2>
                 <p id="selection-context-text" class="sub-text">先选玩法；连接、权限和输出方式统一放在“全局设置”。</p>
                 <div class="mobile-status-grid">
                     <div class="mobile-status-card">
                         <span>郊狼设备</span>
-                        <strong id="tech-app-status">等待 App 扫码</strong>
+                        <strong id="tech-app-status">未连接</strong>
                     </div>
                     <div class="mobile-status-card">
                         <span>游戏端</span>
@@ -1180,12 +1156,40 @@
                 </div>
             </section>
 
+            <!-- 全局通道与波形快捷状态条 -->
+            <div class="global-banner" onclick="switchSelectionTab('setup')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; margin-bottom: 12px; background: var(--primary-light); border: 1px solid #BFDBFE; border-radius: var(--radius-medium);">
+                <span style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">⚙️ 通道与波形：<span id="quick-banner-summary">游戏默认 · 只用 A</span></span>
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--primary);">设置 &gt;</span>
+            </div>
+
             <!-- 选择页按任务拆分，默认直接展示玩法，避免准备工具把游戏入口挤出首屏。 -->
             <nav id="selection-tabs" class="mobile-section-tabs" role="tablist" aria-label="玩法首页页面">
                 <button id="selection-tab-setup" type="button" role="tab" data-tab-value="setup" aria-controls="selection-panel-setup" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('setup')">全局设置</button>
                 <button id="selection-tab-play" type="button" role="tab" data-tab-value="play" aria-controls="selection-panel-play" aria-selected="true" tabindex="0" onclick="switchSelectionTab('play')">选择玩法</button>
                 <button id="selection-tab-info" type="button" role="tab" data-tab-value="info" aria-controls="selection-panel-info" aria-selected="false" tabindex="-1" onclick="switchSelectionTab('info')">说明与排障</button>
             </nav>
+
+            <!-- 默认页只展示玩法入口，用户打开手机后不再先滚过权限和试电工具。 -->
+            <section id="selection-panel-play" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-play">
+            <div class="game-select-container game-card-grid">
+                <button type="button" class="game-card" onclick="openGameSettings('shake')">
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span><span class="sub-text">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span></span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('dice')">
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><circle cx="8" cy="8" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="16" cy="16" r="1"></circle></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">摇骰子对决</span><span class="game-card-index">02</span></span><span class="sub-text">你和对手比总点数，输几点就输出几下，豹子按倍率结算</span></span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('slot')">
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M9 5v14M15 5v14M6 12h.01M12 12h.01M18 12h.01"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">03</span></span><span class="sub-text">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span></span>
+                </button>
+                <button type="button" class="game-card" onclick="openGameSettings('lightning')">
+                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m13 2-7 11h6l-1 9 7-12h-6z"></path></svg></span>
+                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">雷电极速</span><span class="game-card-index">04</span></span><span class="sub-text">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span></span>
+                </button>
+            </div>
+            </section>
 
             <section id="selection-panel-setup" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-setup" hidden>
             <div class="selection-setup-intro">
@@ -1304,7 +1308,13 @@
                                     <span>B 强度比例</span>
                                     <span id="val-global-b-strength-percent">50%</span>
                                 </div>
-                                <input type="range" id="global-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('global-b-strength-percent')">
+                                <div class="stepper-slider-wrap">
+                                    <button type="button" class="stepper-btn" onclick="stepSetting('global-b-strength-percent', -5)">-</button>
+                                    <div class="slider-track-relative">
+                                        <input type="range" id="global-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('global-b-strength-percent')">
+                                    </div>
+                                    <button type="button" class="stepper-btn" onclick="stepSetting('global-b-strength-percent', 5)">+</button>
+                                </div>
                                 <p class="field-help">例如 A 请求强度 40、比例 50%，B 请求强度就是 20；设备限幅仍会再次降低实际输出。</p>
                             </div>
                         </div>
@@ -1330,28 +1340,6 @@
                     </div>
                 </div>
             </details>
-            </section>
-
-            <!-- 默认页只展示玩法入口，用户打开手机后不再先滚过权限和试电工具。 -->
-            <section id="selection-panel-play" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-play">
-            <div class="game-select-container game-card-grid">
-                <button type="button" class="game-card" onclick="openGameSettings('shake')">
-                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></span>
-                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">手抖挑战</span><span class="game-card-index">01</span></span><span class="sub-text">倾斜手机控制弹珠，离开安全区后按偏离程度递增惩罚</span></span>
-                </button>
-                <button type="button" class="game-card" onclick="openGameSettings('dice')">
-                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><circle cx="8" cy="8" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="16" cy="16" r="1"></circle></svg></span>
-                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">摇骰子对决</span><span class="game-card-index">02</span></span><span class="sub-text">你和对手比总点数，输几点就输出几下，豹子按倍率结算</span></span>
-                </button>
-                <button type="button" class="game-card" onclick="openGameSettings('slot')">
-                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M9 5v14M15 5v14M6 12h.01M12 12h.01M18 12h.01"></path></svg></span>
-                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">极速角子机</span><span class="game-card-index">03</span></span><span class="sub-text">三个图标同时开奖，全不同时推高压力，满格触发惩罚</span></span>
-                </button>
-                <button type="button" class="game-card" onclick="openGameSettings('lightning')">
-                    <span class="game-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m13 2-7 11h6l-1 9 7-12h-6z"></path></svg></span>
-                    <span class="game-card-copy"><span class="game-card-heading"><span class="game-card-title">雷电极速</span><span class="game-card-index">04</span></span><span class="sub-text">根据移动速度自动调节强度，低速、超速和定位异常都会停止或切换规则</span></span>
-                </button>
-            </div>
             </section>
 
             <section id="selection-panel-info" class="selection-tab-panel" role="tabpanel" aria-labelledby="selection-tab-info" hidden>
@@ -1393,10 +1381,10 @@
 
         <!-- 独立设置页：每个游戏一套参数，保存后进入游玩页。 -->
         <div id="screen-settings" class="screen" hidden>
-            <button class="back-btn" onclick="showSelectScreen()">返回玩法</button>
+            <button class="back-btn" onclick="showSelectScreen()">&lt; 返回玩法</button>
             <div class="panel">
                 <h2 id="settings-title" tabindex="-1" data-screen-heading>游戏设置</h2>
-                <p id="settings-subtitle" class="sub-text" style="margin-bottom: 20px;">-</p>
+                <p id="settings-subtitle" class="sub-text" style="margin-bottom: 16px;">-</p>
 
                 <div class="settings-global-output" role="group" aria-label="当前全局输出">
                     <div>
@@ -1437,7 +1425,13 @@
                                 <span>开始电的强度</span>
                                 <span id="val-shake-strength-min">20</span>
                             </div>
-                            <input type="range" id="shake-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('shake-strength-min')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-strength-min', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('shake-strength-min')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-strength-min', 1)">+</button>
+                            </div>
                             <p class="field-help">刚刚出界并触发时用这个强度。数值越高，开始就越明显。</p>
                         </div>
 
@@ -1446,7 +1440,13 @@
                                 <span>最强电到多少</span>
                                 <span id="val-shake-strength-max">60</span>
                             </div>
-                            <input type="range" id="shake-strength-max" min="0" max="200" value="60" oninput="updateSettingValue('shake-strength-max')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-strength-max', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-strength-max" min="0" max="200" value="60" oninput="updateSettingValue('shake-strength-max')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-strength-max', 1)">+</button>
+                            </div>
                             <p class="field-help">弹珠离安全区越远，强度越接近这里；后端仍会按设备上限保护。</p>
                         </div>
 
@@ -1455,7 +1455,13 @@
                                 <span>安全区半径</span>
                                 <span id="val-shake-safe-radius">26%</span>
                             </div>
-                            <input type="range" id="shake-safe-radius" min="12" max="45" value="26" oninput="updateSettingValue('shake-safe-radius')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-safe-radius', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-safe-radius" min="12" max="45" value="26" oninput="updateSettingValue('shake-safe-radius')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-safe-radius', 1)">+</button>
+                            </div>
                             <p class="field-help">安全半径模式下越大越容易；夹缝模式下它代表外圈边界。</p>
                         </div>
 
@@ -1464,7 +1470,13 @@
                                 <span>夹缝内圈半径</span>
                                 <span id="val-shake-gap-inner">12%</span>
                             </div>
-                            <input type="range" id="shake-gap-inner" min="6" max="28" value="12" oninput="updateSettingValue('shake-gap-inner')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-gap-inner', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-gap-inner" min="6" max="28" value="12" oninput="updateSettingValue('shake-gap-inner')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-gap-inner', 1)">+</button>
+                            </div>
                             <p class="field-help">仅夹缝生存模式使用，弹珠太靠中心也会被判定为离开目标区域。</p>
                         </div>
 
@@ -1485,7 +1497,13 @@
                                 <span>倾斜灵敏度</span>
                                 <span id="val-shake-sensitivity">55</span>
                             </div>
-                            <input type="range" id="shake-sensitivity" min="20" max="100" value="55" oninput="updateSettingValue('shake-sensitivity')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-sensitivity', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-sensitivity" min="20" max="100" value="55" oninput="updateSettingValue('shake-sensitivity')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-sensitivity', 1)">+</button>
+                            </div>
                             <p class="field-help">数值越高，手机同样的倾斜会让弹珠移动得越快，难度也越高。</p>
                         </div>
 
@@ -1494,7 +1512,13 @@
                                 <span>出界多久才电</span>
                                 <span id="val-shake-forgive-ms">600ms</span>
                             </div>
-                            <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-forgive-ms', -100)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="shake-forgive-ms" min="0" max="2000" step="100" value="600" oninput="updateSettingValue('shake-forgive-ms')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('shake-forgive-ms', 100)">+</button>
+                            </div>
                             <p class="field-help">离开安全区后先等多久。给手抖和手机误差留一点反应时间。</p>
                         </div>
 
@@ -1516,7 +1540,13 @@
                                 <span>每下强度</span>
                                 <span id="val-dice-strength">20</span>
                             </div>
-                            <input type="range" id="dice-strength" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-strength', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-strength" min="0" max="200" value="20" oninput="updateSettingValue('dice-strength')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-strength', 1)">+</button>
+                            </div>
                             <p class="field-help">每一次电击使用的强度。比如设 20，输 5 点就是 20 强度电 5 下。</p>
                         </div>
 
@@ -1525,7 +1555,13 @@
                                 <span>每下多久</span>
                                 <span id="val-dice-single-seconds">2.0s</span>
                             </div>
-                            <input type="range" id="dice-single-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-single-seconds', -0.5)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-single-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('dice-single-seconds')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-single-seconds', 0.5)">+</button>
+                            </div>
                             <p class="field-help">每一下 1–30 秒。单局累计真实输出最多 300 秒，休息间隔不计入。</p>
                         </div>
 
@@ -1546,7 +1582,13 @@
                                 <span>每下间隔</span>
                                 <span id="val-dice-gap-seconds">0.5s</span>
                             </div>
-                            <input type="range" id="dice-gap-seconds" min="0.2" max="3.0" step="0.1" value="0.5" oninput="updateSettingValue('dice-gap-seconds')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-gap-seconds', -0.1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-gap-seconds" min="0.2" max="3.0" step="0.1" value="0.5" oninput="updateSettingValue('dice-gap-seconds')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-gap-seconds', 0.1)">+</button>
+                            </div>
                             <p class="field-help">每一下结束后休息多久再执行下一下。页面会按它估算本局最长时间。</p>
                         </div>
 
@@ -1555,7 +1597,13 @@
                                 <span>豹子倍率</span>
                                 <span id="val-dice-leopard-multiplier">3</span>
                             </div>
-                            <input type="range" id="dice-leopard-multiplier" min="1" max="6" value="3" oninput="updateSettingValue('dice-leopard-multiplier')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-leopard-multiplier', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-leopard-multiplier" min="1" max="6" value="3" oninput="updateSettingValue('dice-leopard-multiplier')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-leopard-multiplier', 1)">+</button>
+                            </div>
                             <p class="field-help">你或对手任意一方摇出三个一样时使用。比如三个 5，倍率 3，就是 5 × 3 = 15 下。</p>
                         </div>
 
@@ -1564,7 +1612,13 @@
                                 <span>单局最多电几下</span>
                                 <span id="val-dice-max-punish-count">30</span>
                             </div>
-                            <input type="range" id="dice-max-punish-count" min="1" max="36" value="30" oninput="updateSettingValue('dice-max-punish-count')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-max-punish-count', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-max-punish-count" min="1" max="36" value="30" oninput="updateSettingValue('dice-max-punish-count')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-max-punish-count', 1)">+</button>
+                            </div>
                             <p class="field-help">当前规则最高是 6 点豹子 × 6 倍＝36 下；还会同时遵守 300 秒累计输出上限。</p>
                         </div>
 
@@ -1573,7 +1627,13 @@
                                 <span>摇晃灵敏度</span>
                                 <span id="val-dice-shake-sensitivity">15</span>
                             </div>
-                            <input type="range" id="dice-shake-sensitivity" min="8" max="35" value="15" oninput="updateSettingValue('dice-shake-sensitivity')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-shake-sensitivity', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="dice-shake-sensitivity" min="8" max="35" value="15" oninput="updateSettingValue('dice-shake-sensitivity')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('dice-shake-sensitivity', 1)">+</button>
+                            </div>
                             <p class="field-help">数值越低越容易识别为摇骰子；数值越高，需要更明显的晃动才结算。</p>
                         </div>
 
@@ -1612,7 +1672,13 @@
                                 <span>满槽惩罚强度</span>
                                 <span id="val-slot-strength-max">85</span>
                             </div>
-                            <input type="range" id="slot-strength-max" min="0" max="200" value="85" oninput="updateSettingValue('slot-strength-max')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-strength-max', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-strength-max" min="0" max="200" value="85" oninput="updateSettingValue('slot-strength-max')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-strength-max', 1)">+</button>
+                            </div>
                             <p class="field-help">压力达到 100% 或选择立即惩罚时使用。这里是用户设定值（0–200），不会自动变成 200；实际输出还会按 B 通道比例和 App 的 A/B 限幅降低。</p>
                         </div>
 
@@ -1621,7 +1687,13 @@
                                 <span>满槽惩罚多久</span>
                                 <span id="val-slot-shock-seconds">2.0s</span>
                             </div>
-                            <input type="range" id="slot-shock-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-shock-seconds', -0.5)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-shock-seconds" min="1.0" max="30.0" step="0.5" value="2.0" oninput="updateSettingValue('slot-shock-seconds')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-shock-seconds', 0.5)">+</button>
+                            </div>
                             <p class="field-help">满槽惩罚单次 1–30 秒；输出和随后的休息会分别显示当前状态。</p>
                         </div>
 
@@ -1659,7 +1731,13 @@
                                 <span>没中奖轻电强度</span>
                                 <span id="val-slot-strength-min">20</span>
                             </div>
-                            <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-strength-min', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-strength-min" min="0" max="200" value="20" oninput="updateSettingValue('slot-strength-min')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-strength-min', 1)">+</button>
+                            </div>
                             <p class="field-help">只有打开“没中奖轻电”后才会使用；实际输出仍受 App 的通道限幅。</p>
                         </div>
 
@@ -1668,7 +1746,13 @@
                                 <span>轻电多久</span>
                                 <span id="val-slot-light-shock-seconds">1.0s</span>
                             </div>
-                            <input type="range" id="slot-light-shock-seconds" min="1.0" max="2.0" step="0.1" value="1.0" oninput="updateSettingValue('slot-light-shock-seconds')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-light-shock-seconds', -0.1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-light-shock-seconds" min="1.0" max="2.0" step="0.1" value="1.0" oninput="updateSettingValue('slot-light-shock-seconds')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-light-shock-seconds', 0.1)">+</button>
+                            </div>
                             <p class="field-help">每次没中奖轻电最低 1 秒。上一下还没结束时，不会叠新的轻电。</p>
                         </div>
 
@@ -1689,7 +1773,13 @@
                                 <span>电完休息</span>
                                 <span id="val-slot-rest-ms">800ms</span>
                             </div>
-                            <input type="range" id="slot-rest-ms" min="300" max="3000" step="100" value="800" oninput="updateSettingValue('slot-rest-ms')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-rest-ms', -100)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-rest-ms" min="300" max="3000" step="100" value="800" oninput="updateSettingValue('slot-rest-ms')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-rest-ms', 100)">+</button>
+                            </div>
                             <p class="field-help">本局触发轻电或满槽电后，下一局至少等待多久再开始；自动连转也会遵守。</p>
                         </div>
 
@@ -1698,7 +1788,13 @@
                                 <span>转多久开奖</span>
                                 <span id="val-slot-spin-ms">700ms</span>
                             </div>
-                            <input type="range" id="slot-spin-ms" min="450" max="1400" step="50" value="700" oninput="updateSettingValue('slot-spin-ms')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-spin-ms', -50)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-spin-ms" min="450" max="1400" step="50" value="700" oninput="updateSettingValue('slot-spin-ms')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-spin-ms', 50)">+</button>
+                            </div>
                             <p class="field-help">每次按下开转后多久开奖；数值越低节奏越快，紧张感也越强。</p>
                         </div>
 
@@ -1715,7 +1811,13 @@
                                 <span>自动连转间隔</span>
                                 <span id="val-slot-auto-interval-ms">650ms</span>
                             </div>
-                            <input type="range" id="slot-auto-interval-ms" min="300" max="1800" step="50" value="650" oninput="updateSettingValue('slot-auto-interval-ms')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-auto-interval-ms', -50)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-auto-interval-ms" min="300" max="1800" step="50" value="650" oninput="updateSettingValue('slot-auto-interval-ms')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-auto-interval-ms', 50)">+</button>
+                            </div>
                             <p class="field-help">自动连转时两次开奖之间等待多久；如果刚刚电过，会和“电完休息”取更慢的那个。</p>
                         </div>
 
@@ -1736,7 +1838,13 @@
                                 <span>没中奖涨多少压力</span>
                                 <span id="val-slot-miss-gain">24%</span>
                             </div>
-                            <input type="range" id="slot-miss-gain" min="8" max="45" value="24" oninput="updateSettingValue('slot-miss-gain')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-miss-gain', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-miss-gain" min="8" max="45" value="24" oninput="updateSettingValue('slot-miss-gain')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-miss-gain', 1)">+</button>
+                            </div>
                             <p class="field-help">三个图案全不同时增加多少压力；越高越容易快速满格。</p>
                         </div>
 
@@ -1745,7 +1853,13 @@
                                 <span>连续没中奖加码</span>
                                 <span id="val-slot-streak-bonus">6%</span>
                             </div>
-                            <input type="range" id="slot-streak-bonus" min="0" max="15" value="6" oninput="updateSettingValue('slot-streak-bonus')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-streak-bonus', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-streak-bonus" min="0" max="15" value="6" oninput="updateSettingValue('slot-streak-bonus')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-streak-bonus', 1)">+</button>
+                            </div>
                             <p class="field-help">连续全不同后，每多空一轮额外增加的压力，用来制造越输越危险的节奏。</p>
                         </div>
 
@@ -1754,7 +1868,13 @@
                                 <span>小奖降多少压力</span>
                                 <span id="val-slot-small-win-drop">14%</span>
                             </div>
-                            <input type="range" id="slot-small-win-drop" min="0" max="35" value="14" oninput="updateSettingValue('slot-small-win-drop')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-small-win-drop', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-small-win-drop" min="0" max="35" value="14" oninput="updateSettingValue('slot-small-win-drop')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-small-win-drop', 1)">+</button>
+                            </div>
                             <p class="field-help">两个相同图案时减少多少压力；调低会让小奖更像喘口气，而不是直接安全。</p>
                         </div>
 
@@ -1763,7 +1883,13 @@
                                 <span>大奖降多少压力</span>
                                 <span id="val-slot-jackpot-drop">70%</span>
                             </div>
-                            <input type="range" id="slot-jackpot-drop" min="20" max="100" value="70" oninput="updateSettingValue('slot-jackpot-drop')">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-jackpot-drop', -5)">-</button>
+                                <div class="slider-track-relative">
+                                    <input type="range" id="slot-jackpot-drop" min="20" max="100" value="70" oninput="updateSettingValue('slot-jackpot-drop')">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="stepSetting('slot-jackpot-drop', 5)">+</button>
+                            </div>
                             <p class="field-help">三个相同图案时减少多少压力；设为 100 基本等于大奖清空压力。</p>
                         </div>
 
@@ -1816,7 +1942,13 @@
                                         <span>起始强度</span>
                                         <span id="val-lightning-start-strength">20</span>
                                     </div>
-                                    <input type="range" id="lightning-start-strength" min="0" max="100" value="20" oninput="updateSettingValue('lightning-start-strength')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-start-strength', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-start-strength" min="0" max="100" value="20" oninput="updateSettingValue('lightning-start-strength')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-start-strength', 1)">+</button>
+                                    </div>
                                     <p class="field-help">达到启动速度时使用。实际输出仍受全局通道设置和设备 App 限幅。</p>
                                 </div>
 
@@ -1825,7 +1957,13 @@
                                         <span>最高强度</span>
                                         <span id="val-lightning-max-strength">80</span>
                                     </div>
-                                    <input type="range" id="lightning-max-strength" min="0" max="100" value="80" oninput="updateSettingValue('lightning-max-strength')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-max-strength', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-max-strength" min="0" max="100" value="80" oninput="updateSettingValue('lightning-max-strength')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-max-strength', 1)">+</button>
+                                    </div>
                                     <p class="field-help">达到满强度速度后使用；55 km/h 起进入保护区，达到 60 km/h 会立即停止。</p>
                                 </div>
 
@@ -1834,7 +1972,13 @@
                                         <span>满强度速度</span>
                                         <span id="val-lightning-full-speed">50 km/h</span>
                                     </div>
-                                    <input type="range" id="lightning-full-speed" min="15" max="55" value="50" oninput="updateSettingValue('lightning-full-speed')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-full-speed', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-full-speed" min="15" max="55" value="50" oninput="updateSettingValue('lightning-full-speed')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-full-speed', 1)">+</button>
+                                    </div>
                                     <p class="field-help">从启动速度到这里线性增加强度；必须至少比启动速度高 10 km/h。</p>
                                 </div>
 
@@ -1854,7 +1998,13 @@
                                         <span>启动速度</span>
                                         <span id="val-lightning-start-speed">10 km/h</span>
                                     </div>
-                                    <input type="range" id="lightning-start-speed" min="5" max="20" value="10" oninput="updateSettingValue('lightning-start-speed')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-start-speed', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-start-speed" min="5" max="20" value="10" oninput="updateSettingValue('lightning-start-speed')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-start-speed', 1)">+</button>
+                                    </div>
                                     <p class="field-help">可以从任意速度进入；当前速度达到这里并稳定 2 秒后启动，不要求从静止起步。</p>
                                 </div>
 
@@ -1863,7 +2013,13 @@
                                         <span>每轮连续输出</span>
                                         <span id="val-lightning-continuous-seconds">8.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-continuous-seconds" min="3" max="30" step="1" value="8" oninput="updateSettingValue('lightning-continuous-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-continuous-seconds', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-continuous-seconds" min="3" max="30" step="1" value="8" oninput="updateSettingValue('lightning-continuous-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-continuous-seconds', 1)">+</button>
+                                    </div>
                                     <p class="field-help">每轮 3–30 秒；期间持续检查速度、定位和页面连接，异常会提前中断。</p>
                                 </div>
 
@@ -1872,7 +2028,13 @@
                                         <span>每轮强制休息</span>
                                         <span id="val-lightning-driving-rest-seconds">3.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-driving-rest-seconds" min="3" max="30" step="1" value="3" oninput="updateSettingValue('lightning-driving-rest-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-driving-rest-seconds', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-driving-rest-seconds" min="3" max="30" step="1" value="3" oninput="updateSettingValue('lightning-driving-rest-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-driving-rest-seconds', 1)">+</button>
+                                    </div>
                                     <p class="field-help">一轮结束后等待 3–30 秒；堵车切回行驶时也会完整遵守。</p>
                                 </div>
 
@@ -1881,7 +2043,13 @@
                                         <span>超速恢复等待</span>
                                         <span id="val-lightning-overspeed-recovery-seconds">10.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-overspeed-recovery-seconds" min="0" max="10" step="1" value="10" oninput="updateSettingValue('lightning-overspeed-recovery-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-overspeed-recovery-seconds', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-overspeed-recovery-seconds" min="0" max="10" step="1" value="10" oninput="updateSettingValue('lightning-overspeed-recovery-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-overspeed-recovery-seconds', 1)">+</button>
+                                    </div>
                                     <p class="field-help">达到 60 km/h 会立即停止；设为 0 时，下一份低于 60 的有效速度即可恢复。</p>
                                 </div>
 
@@ -1890,7 +2058,13 @@
                                         <span>单局时长</span>
                                         <span id="val-lightning-session-minutes">10 分钟</span>
                                     </div>
-                                    <input type="range" id="lightning-session-minutes" min="1" max="30" step="1" value="10" oninput="updateSettingValue('lightning-session-minutes')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-session-minutes', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-session-minutes" min="1" max="30" step="1" value="10" oninput="updateSettingValue('lightning-session-minutes')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-session-minutes', 1)">+</button>
+                                    </div>
                                     <p class="field-help">到时立即停止输出，重新开始前必须再次确认移动安全。</p>
                                 </div>
                             </div>
@@ -1918,7 +2092,13 @@
                                         <span>堵车输出强度</span>
                                         <span id="val-lightning-jam-strength">30</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-strength" min="0" max="100" value="30" oninput="updateSettingValue('lightning-jam-strength')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-strength', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-strength" min="0" max="100" value="30" oninput="updateSettingValue('lightning-jam-strength')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-strength', 1)">+</button>
+                                    </div>
                                     <p class="field-help">不会超过当前玩法的最高强度和设备 App 限幅。</p>
                                 </div>
 
@@ -1927,7 +2107,13 @@
                                         <span>低速多久进入堵车</span>
                                         <span id="val-lightning-jam-entry-seconds">40.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-entry-seconds" min="20" max="120" step="5" value="40" oninput="updateSettingValue('lightning-jam-entry-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-entry-seconds', -5)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-entry-seconds" min="20" max="120" step="5" value="40" oninput="updateSettingValue('lightning-jam-entry-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-entry-seconds', 5)">+</button>
+                                    </div>
                                 </div>
 
                                 <div class="slider-container">
@@ -1935,7 +2121,13 @@
                                         <span>堵车单次输出</span>
                                         <span id="val-lightning-jam-shock-seconds">1.5s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-shock-seconds" min="1" max="20" step="0.5" value="1.5" oninput="updateSettingValue('lightning-jam-shock-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-shock-seconds', -0.5)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-shock-seconds" min="1" max="20" step="0.5" value="1.5" oninput="updateSettingValue('lightning-jam-shock-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-shock-seconds', 0.5)">+</button>
+                                    </div>
                                 </div>
 
                                 <div class="slider-container">
@@ -1943,7 +2135,13 @@
                                         <span>随机间隔下限</span>
                                         <span id="val-lightning-jam-gap-min-seconds">12.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-gap-min-seconds" min="10" max="60" step="1" value="12" oninput="updateSettingValue('lightning-jam-gap-min-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-gap-min-seconds', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-gap-min-seconds" min="10" max="60" step="1" value="12" oninput="updateSettingValue('lightning-jam-gap-min-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-gap-min-seconds', 1)">+</button>
+                                    </div>
                                 </div>
 
                                 <div class="slider-container">
@@ -1951,7 +2149,13 @@
                                         <span>随机间隔上限</span>
                                         <span id="val-lightning-jam-gap-max-seconds">25.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-gap-max-seconds" min="15" max="120" step="1" value="25" oninput="updateSettingValue('lightning-jam-gap-max-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-gap-max-seconds', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-gap-max-seconds" min="15" max="120" step="1" value="25" oninput="updateSettingValue('lightning-jam-gap-max-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-gap-max-seconds', 1)">+</button>
+                                    </div>
                                     <p class="field-help">每次输出后在上下限之间随机休息；上限始终至少比下限多 5 秒。</p>
                                 </div>
 
@@ -1960,7 +2164,13 @@
                                         <span>每轮最多次数</span>
                                         <span id="val-lightning-jam-batch-count">5</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-batch-count" min="1" max="10" step="1" value="5" oninput="updateSettingValue('lightning-jam-batch-count')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-batch-count', -1)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-batch-count" min="1" max="10" step="1" value="5" oninput="updateSettingValue('lightning-jam-batch-count')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-batch-count', 1)">+</button>
+                                    </div>
                                 </div>
 
                                 <div class="slider-container">
@@ -1968,7 +2178,13 @@
                                         <span>每轮结束休息</span>
                                         <span id="val-lightning-jam-batch-rest-seconds">60.0s</span>
                                     </div>
-                                    <input type="range" id="lightning-jam-batch-rest-seconds" min="30" max="180" step="5" value="60" oninput="updateSettingValue('lightning-jam-batch-rest-seconds')">
+                                    <div class="stepper-slider-wrap">
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-batch-rest-seconds', -5)">-</button>
+                                        <div class="slider-track-relative">
+                                            <input type="range" id="lightning-jam-batch-rest-seconds" min="30" max="180" step="5" value="60" oninput="updateSettingValue('lightning-jam-batch-rest-seconds')">
+                                        </div>
+                                        <button type="button" class="stepper-btn" onclick="stepSetting('lightning-jam-batch-rest-seconds', 5)">+</button>
+                                    </div>
                                     <p class="field-help">达到每轮次数后强制进入 30–180 秒的长休息。</p>
                                 </div>
                                 </div>
@@ -1984,7 +2200,8 @@
         <!-- 游玩页只展示当前玩法和必要控制，避免设置变更和惩罚判定混在一起。 -->
         <div id="screen-play" class="screen" hidden>
             <div class="play-navigation">
-                <button onclick="exitGame()">结束游戏并返回</button>
+                <button type="button" class="btn" onclick="exitGame()">&lt; 结束游戏并返回</button>
+                <button id="play-calibrate-btn" type="button" class="btn" onclick="calibrateCurrentPose('shake')" style="display: none;">🎯 设当前握持为中心</button>
             </div>
 
             <div id="wake-lock-warning" class="inline-warning" role="status" aria-live="assertive" hidden></div>

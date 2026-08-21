@@ -1,4 +1,4 @@
-/* 电脑端控制台交互逻辑 console.js */
+/* 电脑端控制台交互逻辑 console.js - 现代浅色仪表盘驱动 */
 
 let ws = null;
 let reconnectTimer = null;
@@ -23,7 +23,6 @@ let secureGameQR = null;
 let latestState = null;
 let renderedDeviceSignature = "";
 const renderedQrValues = new WeakMap();
-// 电脑端仍允许 1～30 手动微调，但默认值与手机端统一为真机可感知的 15。
 const DEFAULT_TEST_STRENGTH = 15;
 
 function setText(id, value) {
@@ -46,7 +45,7 @@ function setBackendStatus(mode, message) {
     setText("backend-status-text", message);
 }
 
-/** 复制当前运行生成的地址；失败时保留原文，方便用户手动选中复制。 */
+/** 复制当前运行生成的地址 */
 async function copyAddress(sourceId, resultId) {
     const source = document.getElementById(sourceId);
     const value = source?.innerText?.trim() || "";
@@ -57,10 +56,10 @@ async function copyAddress(sourceId, resultId) {
 
     try {
         await navigator.clipboard.writeText(value);
-        setText(resultId, "已复制，可以到手机或 APK 中粘贴。");
+        setText(resultId, "已复制，可粘贴至手机。");
     } catch (error) {
         console.warn("复制地址失败:", error);
-        setText(resultId, "浏览器拒绝自动复制，请手动选中上方地址复制。");
+        setText(resultId, "请手动选中上方文本复制。");
     }
 }
 
@@ -91,69 +90,31 @@ function initQRCodes() {
         throw new Error("QRCode library is not loaded");
     }
 
+    const qrConfig = {
+        width: 170,
+        height: 170,
+        typeNumber: 12,
+        colorDark: "#0F172A",
+        colorLight: "#FFFFFF",
+        correctLevel: QRCode.CorrectLevel.M
+    };
+
     const appBox = document.getElementById("app-qrcode");
     const gameBox = document.getElementById("game-qrcode");
     const apkBox = document.getElementById("apk-qrcode");
     const certBox = document.getElementById("cert-qrcode");
     const certCerBox = document.getElementById("cert-cer-qrcode");
     const secureGameBox = document.getElementById("secure-game-qrcode");
-    
-    appQR = new QRCode(appBox, {
-        width: 180,
-        height: 180,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
 
-    gameQR = new QRCode(gameBox, {
-        width: 180,
-        height: 180,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
-
-    apkQR = new QRCode(apkBox, {
-        width: 180,
-        height: 180,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
-
-    certQR = new QRCode(certBox, {
-        width: 150,
-        height: 150,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
-
-    certCerQR = new QRCode(certCerBox, {
-        width: 150,
-        height: 150,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
-
-    secureGameQR = new QRCode(secureGameBox, {
-        width: 180,
-        height: 180,
-        typeNumber: 12,
-        colorDark: "#07101f",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-    });
+    if (appBox) appQR = new QRCode(appBox, qrConfig);
+    if (gameBox) gameQR = new QRCode(gameBox, qrConfig);
+    if (apkBox) apkQR = new QRCode(apkBox, qrConfig);
+    if (certBox) certQR = new QRCode(certBox, { ...qrConfig, width: 140, height: 140 });
+    if (certCerBox) certCerQR = new QRCode(certCerBox, { ...qrConfig, width: 140, height: 140 });
+    if (secureGameBox) secureGameQR = new QRCode(secureGameBox, qrConfig);
 }
 
-// 自动探测并建立 WebSocket 连接
+// 建立 WebSocket 通信
 function connectWebSocket() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
         return;
@@ -163,29 +124,28 @@ function connectWebSocket() {
     const host = window.location.hostname || "127.0.0.1";
     const wsScheme = isSecurePage ? "wss" : "ws";
     const targetUrl = `${wsScheme}://${host}:${currentWsPort}/console`;
-    setConnectionHint(`正在连接后台通信: ${targetUrl}`);
-    
+    setConnectionHint(`正在连接后台: ${targetUrl}`);
+
     const socket = new WebSocket(targetUrl);
     ws = socket;
-    
+
     socket.onopen = () => {
         if (ws !== socket) return;
-        console.log(`控制台连接成功: ${targetUrl}`);
         triedPortsCount = 0;
-        setBackendStatus("online", "后台已连接");
-        setConnectionHint("后台通信已连接，正在等待二维码数据...");
+        setBackendStatus("online", "已连接");
+        setConnectionHint("通信已建立，等待数据...");
     };
-    
+
     socket.onmessage = (event) => {
         if (ws !== socket) return;
         let data = null;
         try {
             data = JSON.parse(event.data);
         } catch (error) {
-            console.warn("收到无法解析的后台消息:", error);
+            console.warn("无法解析后台消息:", error);
             return;
         }
-        
+
         if (data.type === "state_update") {
             updateUI(data);
         } else if (data.type === "game_latency") {
@@ -195,37 +155,32 @@ function connectWebSocket() {
         } else if (data.type === "stop_feedback") {
             setConsoleTestResult(data.message || "停止请求已处理", data.ok);
         } else if (data.type === "device_feedback") {
-            setText("device-selection-result", data.message || "设备选择请求已处理");
-        } else if (data.type === "button_feedback") {
-            console.log(`收到设备物理按键: ${data.button}`);
+            setText("device-selection-result", data.message || "设备选择已处理");
         }
     };
-    
+
     socket.onclose = (event) => {
-        // 旧连接的迟到回调不能覆盖新连接状态，更不能安排第二条并行重连链。
         if (ws !== socket) return;
         ws = null;
-        setBackendStatus("offline", "后台已离线");
+        setBackendStatus("offline", "未连接");
         if (event.code === 1008) {
-            setConnectionHint("控制台只允许在运行服务的这台电脑上打开，请使用终端显示的 127.0.0.1 地址。");
+            setConnectionHint("请在本地主机使用 127.0.0.1 打开。");
             return;
         }
 
-        setConnectionHint("后台通信离线：请确认 start.command 终端窗口仍在运行，然后刷新本页。");
+        setConnectionHint("后台通信离线，请确认服务已启动。");
 
         if ((isSecurePage && hasPinnedSecureWsPort) || (!isSecurePage && hasPinnedWsPort)) {
             reconnectTimer = setTimeout(connectWebSocket, 2000);
             return;
         }
 
-        // 如果未连上，自适应寻找下一个端口
         if (triedPortsCount < maxPortPortion) {
             triedPortsCount++;
             const startPort = isSecurePage ? 18444 : 18081;
             currentWsPort = startPort + (triedPortsCount % maxPortPortion);
             reconnectTimer = setTimeout(connectWebSocket, 100);
         } else {
-            // 已完全断开，每 2 秒尝试重连
             reconnectTimer = setTimeout(() => {
                 triedPortsCount = 0;
                 currentWsPort = isSecurePage ? 18444 : 18081;
@@ -233,9 +188,8 @@ function connectWebSocket() {
             }, 2000);
         }
     };
-    
+
     socket.onerror = () => {
-        // 必须关闭实际报错的连接；使用全局 ws 会误关掉已经替换成功的新连接。
         socket.close();
     };
 }
@@ -244,67 +198,78 @@ function connectWebSocket() {
 function updateUI(data) {
     latestState = data;
 
-    // 1. 更新连接状态
-    const statusSpan = document.getElementById("conn-status");
-    const unsafeDeviceState = Boolean(
-        data.overheat_a
-        || data.overheat_b
-        || data.muted_a
-        || data.muted_b
-        || [3, 4].includes(data.channel_status_a)
-        || [3, 4].includes(data.channel_status_b)
-    );
-    statusSpan.classList.remove("connected", "blocked");
-    if (data.device_connected) {
-        if (unsafeDeviceState) {
-            statusSpan.innerText = "安全保护中";
-            statusSpan.classList.add("blocked");
+    // 1. 顶栏极简状态胶囊与电量
+    const statusTextNode = document.getElementById("backend-status-text");
+    if (statusTextNode) {
+        if (data.device_connected) {
+            // 精简为短词：硬件 3.0 / 硬件 2.0 / 已连接
+            const rawModel = data.device_model || "";
+            if (rawModel.includes("3.0") || rawModel.includes("V3")) {
+                statusTextNode.innerText = "硬件 3.0";
+            } else if (rawModel.includes("2.0") || rawModel.includes("V2")) {
+                statusTextNode.innerText = "硬件 2.0";
+            } else {
+                statusTextNode.innerText = rawModel || "硬件已连接";
+            }
+        } else if (data.app_connected) {
+            statusTextNode.innerText = data.selection_required ? "请选设备" : "等待硬件";
         } else {
-            statusSpan.innerText = "设备已连接";
-            statusSpan.classList.add("connected");
+            statusTextNode.innerText = "未连接";
         }
-    } else if (data.app_connected) {
-        statusSpan.innerText = data.selection_required ? "需要选择设备" : "等待硬件连接";
-        if (data.selection_required || data.overheat_a || data.overheat_b) {
-            statusSpan.classList.add("blocked");
-        }
-    } else {
-        statusSpan.innerText = "等待 App 扫码";
     }
+
+    const battText = formatBatteryLevel(data.battery_level);
+    setText("battery-badge", `电量: ${battText}`);
+
     setText("device-status-detail", data.device_status_message || "等待设备状态同步。");
     renderDevicePicker(data);
 
-    // 2. 更新 App 扫码绑定二维码
+    // 2. SVG 仪表盘动画与数值渲染
+    const maxA = Number(data.limit_a) || 100;
+    const curA = Number(data.strength_a) || 0;
+    const maxB = Number(data.limit_b) || 100;
+    const curB = Number(data.strength_b) || 0;
+
+    setText("gauge-val-a", data.device_connected ? String(curA) : "0");
+    setText("gauge-max-a", `/ ${data.device_connected ? (data.limit_a ?? "--") : "--"}`);
+    const circleA = document.getElementById("gauge-circle-a");
+    if (circleA) {
+        const pctA = Math.max(0, Math.min(1, maxA > 0 ? (curA / maxA) : 0));
+        circleA.style.strokeDashoffset = String(251.2 * (1 - pctA));
+    }
+
+    setText("gauge-val-b", data.device_connected ? String(curB) : "0");
+    setText("gauge-max-b", `/ ${data.device_connected ? (data.limit_b ?? "--") : "--"}`);
+    const circleB = document.getElementById("gauge-circle-b");
+    if (circleB) {
+        const pctB = Math.max(0, Math.min(1, maxB > 0 ? (curB / maxB) : 0));
+        circleB.style.strokeDashoffset = String(251.2 * (1 - pctB));
+    }
+
+    // 3. App 扫码绑定二维码
     if (data.app_qrcode_url) {
         const appRendered = renderQRCode(appQR, data.app_qrcode_url, "App 绑定");
         setText(
             "app-url-text",
             appRendered
-                ? "V4 绑定二维码已生成；请使用 DG-LAB 4 App 的 Socket 控制扫码。"
-                : `二维码生成失败，绑定数据：${data.app_qrcode_url}`
+                ? "V4 协议就绪，请使用 App 的 Socket 控制扫码"
+                : `绑定数据：${data.app_qrcode_url}`
         );
     } else {
-        setText("app-url-text", "等待后台生成绑定二维码...");
+        setText("app-url-text", "等待生成绑定二维码...");
     }
 
-    // 3. 更新手机小游戏扫码和地址
+    // 4. 手机端二维码与地址生成
     const gameToken = encodeURIComponent(data.game_token || "");
     const gameUrl = `http://${data.local_ip}:${data.http_port}/static/game.html?ws=${data.web_ws_port}&token=${gameToken}`;
     setText("game-url-text", gameUrl);
-    const gameRendered = renderQRCode(gameQR, gameUrl, "游戏操纵端");
-    if (!gameRendered) {
-        setText("game-url-text", `二维码生成失败，可手动输入：${gameUrl}`);
-    }
+    renderQRCode(gameQR, gameUrl, "普通网页端");
 
-    // APK 读取同一个普通游戏地址，但由 Android 原生层提供传感器，因此无需 HTTPS 证书。
     const apkConnectUrl = `gamebridgeforfun://connect?url=${encodeURIComponent(gameUrl)}`;
     setText("apk-url-text", apkConnectUrl);
-    const apkRendered = renderQRCode(apkQR, apkConnectUrl, "Android APK 配对");
-    if (!apkRendered) {
-        setText("apk-url-text", `二维码生成失败，可复制到 APK：${gameUrl}`);
-    }
+    renderQRCode(apkQR, apkConnectUrl, "Android APK");
 
-    // 4. 手机证书安装与 HTTPS 游戏入口。根证书用 HTTP 下载，游戏用 HTTPS/WSS 运行。
+    // 5. 证书与 HTTPS 链接
     const certHost = data.local_ip || window.location.hostname || "127.0.0.1";
     const certifiedHost = data.certified_lan_ip || certHost;
     const profilePath = data.cert_profile_path || "/certs/gamebridge-for-fun-root-ca.mobileconfig";
@@ -321,57 +286,57 @@ function updateUI(data) {
     setText("cert-fingerprint", formatFingerprint(data.cert_sha256));
     setDownloadLink("cert-profile-link", profileUrl, "gamebridge-for-fun-root-ca.mobileconfig");
     setDownloadLink("cert-cer-link", cerUrl, "gamebridge-for-fun-root-ca.cer");
-    renderQRCode(certQR, profileUrl, "证书安装");
-    renderQRCode(certCerQR, cerUrl, "Android 证书安装");
+    renderQRCode(certQR, profileUrl, "iOS 证书");
+    renderQRCode(certCerQR, cerUrl, "Android 证书");
 
     if (data.https_enabled && data.https_port && data.secure_web_ws_port) {
         const secureGameUrl = `https://${certifiedHost}:${data.https_port}/static/game.html?ws=${data.secure_web_ws_port}&token=${gameToken}`;
         setText("secure-game-url-text", secureGameUrl);
-        setText("secure-game-hint", `手抖挑战请先安装手机证书，再使用 HTTPS 入口：${secureGameUrl}`);
-        renderQRCode(secureGameQR, secureGameUrl, "HTTPS 游戏操纵端");
+        renderQRCode(secureGameQR, secureGameUrl, "HTTPS 网页");
     } else {
-        setText("secure-game-url-text", "HTTPS 服务未启用：请确认 openssl 可用并重启服务。");
-        setText("secure-game-hint", "HTTPS 服务未启用；手抖挑战可能无法取得手机感应器权限。");
+        setText("secure-game-url-text", "HTTPS 服务未启用");
         clearQRCode(secureGameQR);
     }
 
-    // 5. 更新技术状态表格
+    // 6. 更新技术状态表格
     setText("stat-app-version", data.app_version || "-");
-    document.getElementById("stat-ip").innerText = data.local_ip;
-    document.getElementById("stat-http-port").innerText = data.http_port;
-    document.getElementById("stat-web-ws-port").innerText = data.web_ws_port;
-    document.getElementById("stat-https-port").innerText = data.https_enabled ? data.https_port : "未启用";
-    document.getElementById("stat-secure-web-ws-port").innerText = data.https_enabled ? data.secure_web_ws_port : "未启用";
-    document.getElementById("stat-cert-ip").innerText = certifiedHost;
-    document.getElementById("stat-root-expiry").innerText = formatCertificateExpiry(data.cert_root_not_after, data.cert_root_valid_days);
-    document.getElementById("stat-server-expiry").innerText = formatCertificateExpiry(data.cert_server_not_after, data.cert_server_valid_days);
-    document.getElementById("stat-app-ws-port").innerText = data.app_ws_port;
+    setText("stat-ip", data.local_ip || "-");
+    setText("stat-http-port", data.http_port || "-");
+    setText("stat-web-ws-port", data.web_ws_port || "-");
+    setText("stat-https-port", data.https_enabled ? data.https_port : "未启用");
+    setText("stat-secure-web-ws-port", data.https_enabled ? data.secure_web_ws_port : "未启用");
+    setText("stat-app-ws-port", data.app_ws_port || "-");
     setText("stat-bridge-protocol", data.bridge_protocol || "V4");
     setText("stat-device-model", data.device_model || "未连接");
     setText("stat-device-name", data.device_name || "未连接");
     setText("stat-device-connected", data.device_connected ? "已连接" : "未连接");
-    
-    // 延迟格式化显示 (冷峻标记)
-    const statAppLat = document.getElementById("stat-app-latency");
+
     const appLatency = Number(data.app_latency);
     if (Number.isFinite(appLatency) && appLatency >= 0) {
-        statAppLat.innerText = `${appLatency}ms`;
-        statAppLat.className = getLatencyClass(appLatency);
+        setText("stat-app-latency", `${appLatency}ms`);
+        setText("top-latency", `⚡ ${appLatency}ms`);
     } else {
-        statAppLat.innerText = "-";
-        statAppLat.className = "";
+        setText("stat-app-latency", "-");
+        setText("top-latency", "⚡ --");
     }
 
     updateGameLatency(data.game_latency);
-    document.getElementById("stat-game-connected").innerText = data.game_connected ? "已连接" : "未连接";
-    document.getElementById("stat-strength-a").innerText = formatHardwareReading(data.strength_a, data.device_connected);
-    document.getElementById("stat-strength-b").innerText = formatHardwareReading(data.strength_b, data.device_connected);
-    document.getElementById("stat-limit-a").innerText = formatHardwareReading(data.limit_a, data.device_connected);
-    document.getElementById("stat-limit-b").innerText = formatHardwareReading(data.limit_b, data.device_connected);
-    document.getElementById("stat-battery-level").innerText = formatBatteryLevel(data.battery_level);
+    setText("stat-limit-a", formatHardwareReading(data.limit_a, data.device_connected));
+    setText("stat-limit-b", formatHardwareReading(data.limit_b, data.device_connected));
+    setText("stat-battery-level", battText);
     setText("stat-safety-a", formatChannelSafety(data, "a"));
     setText("stat-safety-b", formatChannelSafety(data, "b"));
+}
 
+// 切换手机端接入视图 (APK / HTTPS / HTTP)
+function switchConnectTab(mode) {
+    const modes = ["apk", "https", "http"];
+    modes.forEach((m) => {
+        const btn = document.getElementById(`btn-mode-${m}`);
+        const view = document.getElementById(`connect-view-${m}`);
+        if (btn) btn.classList.toggle("active", m === mode);
+        if (view) view.style.display = (m === mode) ? "block" : "none";
+    });
 }
 
 function renderDevicePicker(data) {
@@ -381,12 +346,7 @@ function renderDevicePicker(data) {
 
     const devices = Array.isArray(data.compatible_devices) ? data.compatible_devices : [];
     const signature = JSON.stringify({
-        devices: devices.map((device) => ({
-            id: device.selection_id,
-            name: device.name,
-            model: device.model,
-            connected: device.connected
-        })),
+        devices: devices.map((d) => ({ id: d.selection_id, name: d.name, model: d.model, connected: d.connected })),
         selected: data.selected_device_id
     });
 
@@ -404,7 +364,7 @@ function renderDevicePicker(data) {
             for (const device of devices) {
                 const option = document.createElement("option");
                 option.value = device.selection_id;
-                option.textContent = `${device.model} · ${device.name}${device.connected ? " · 已连接" : " · 蓝牙未连接"}`;
+                option.textContent = `${device.model} · ${device.name}${device.connected ? " · 已就绪" : " · 蓝牙未连接"}`;
                 option.disabled = !device.connected;
                 select.appendChild(option);
             }
@@ -421,17 +381,17 @@ function renderDevicePicker(data) {
     confirmButton.disabled = !selectedDevice || !selectedDevice.connected;
 
     if (data.selection_required) {
-        setText("device-selection-result", "必须选择并确认一台已连接设备，确认前不会输出。");
+        setText("device-selection-result", "必须先选择并确认一台已连接设备。");
     } else if (data.device_connected && data.device_model) {
-        setText("device-selection-result", `当前控制：${data.device_model} · ${data.device_name || "未命名设备"}`);
+        setText("device-selection-result", `当前控制：${data.device_model} · ${data.device_name || "设备就绪"}`);
     } else if (data.app_connected) {
-        setText("device-selection-result", "请先在 DG-LAB 4 App 中完成硬件蓝牙连接。");
+        setText("device-selection-result", "请先在 App 中完成硬件蓝牙连接。");
     }
 }
 
 function selectDevice() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setText("device-selection-result", "后台通信未连接，不能选择设备。");
+        setText("device-selection-result", "通信未连接，无法选择设备。");
         return;
     }
     const selectionId = document.getElementById("device-select")?.value || "";
@@ -441,53 +401,92 @@ function selectDevice() {
     }
 
     ws.send(JSON.stringify({ type: "select_device", selectionId }));
-    setText("device-selection-result", "正在停止旧输出并确认新控制目标...");
+    setText("device-selection-result", "正在确认目标设备...");
+}
+
+// 步进调节函数
+function stepConsoleStrength(delta) {
+    const input1 = document.getElementById("console-test-strength");
+    const input2 = document.getElementById("tab2-test-strength");
+    const curVal = Number(input1?.value || input2?.value || DEFAULT_TEST_STRENGTH);
+    const nextVal = Math.max(1, Math.min(30, Math.round(curVal + delta)));
+    if (input1) input1.value = nextVal;
+    if (input2) input2.value = nextVal;
+    updateConsoleTestLabels();
+}
+
+function stepConsoleDuration(delta) {
+    const input1 = document.getElementById("console-test-duration");
+    const input2 = document.getElementById("tab2-test-duration");
+    const curVal = Number(input1?.value || input2?.value || 1.0);
+    const nextVal = Math.max(0.1, Math.min(1.0, Math.round((curVal + delta) * 10) / 10));
+    if (input1) input1.value = nextVal;
+    if (input2) input2.value = nextVal;
+    updateConsoleTestLabels();
+}
+
+function syncTestStrength(val) {
+    const input1 = document.getElementById("console-test-strength");
+    if (input1) input1.value = val;
+    updateConsoleTestLabels();
+}
+
+function syncTestDuration(val) {
+    const input1 = document.getElementById("console-test-duration");
+    if (input1) input1.value = val;
+    updateConsoleTestLabels();
 }
 
 function updateConsoleTestLabels() {
-    const strength = Number(document.getElementById("console-test-strength")?.value || 5);
-    const duration = Number(document.getElementById("console-test-duration")?.value || 1);
-    setText("val-console-test-strength", Number.isFinite(strength) ? Math.round(strength) : "5");
-    setText("val-console-test-duration", Number.isFinite(duration) ? `${duration.toFixed(1)}s` : "1.0s");
+    const strength = Number(document.getElementById("console-test-strength")?.value || DEFAULT_TEST_STRENGTH);
+    const duration = Number(document.getElementById("console-test-duration")?.value || 1.0);
+    const sStr = String(Number.isFinite(strength) ? Math.round(strength) : DEFAULT_TEST_STRENGTH);
+    const dStr = `${(Number.isFinite(duration) ? duration : 1.0).toFixed(1)}s`;
+
+    setText("val-console-test-strength", sStr);
+    setText("val-console-test-duration", dStr);
+    setText("tab2-val-strength", sStr);
+    setText("tab2-val-duration", dStr);
 }
 
 function setConsoleTestResult(message, ok = true) {
-    const node = document.getElementById("console-test-result");
-    if (!node) return;
-    node.innerText = message;
-    node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
+    const node1 = document.getElementById("console-test-result");
+    const node2 = document.getElementById("tab2-test-result");
+    [node1, node2].forEach((node) => {
+        if (node) {
+            node.innerText = message;
+            node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
+        }
+    });
 }
 
 function runConsoleSelfCheck() {
     if (!latestState) {
-        setConsoleTestResult("后台状态尚未同步，请稍等。", false);
+        setConsoleTestResult("后台状态同步中，请稍等。", false);
         return;
     }
 
     const checks = [
-        ws && ws.readyState === WebSocket.OPEN ? "控制台已连接" : "控制台未连接",
+        ws && ws.readyState === WebSocket.OPEN ? "通信正常" : "通信未连接",
         latestState.app_connected ? "App 已绑定" : "App 未绑定",
-        latestState.device_connected
-            ? `${latestState.device_model || "郊狼设备"}已连接`
-            : "郊狼硬件未就绪",
-        latestState.game_connected ? "手机游戏页已连接" : "手机游戏页未连接",
-        latestState.https_enabled ? "HTTPS 已启用" : "HTTPS 未启用",
+        latestState.device_connected ? `${latestState.device_model || "硬件"}就绪` : "硬件未连接",
+        latestState.game_connected ? "游戏端已连" : "游戏端未连",
         `A 限幅 ${formatHardwareReading(latestState.limit_a, latestState.device_connected)}`,
         `B 限幅 ${formatHardwareReading(latestState.limit_b, latestState.device_connected)}`
     ];
     const ok = Boolean(ws && ws.readyState === WebSocket.OPEN && latestState.device_connected);
-    setConsoleTestResult(`自检结果：${checks.join("；")}`, ok);
+    setConsoleTestResult(`自检：${checks.join("；")}`, ok);
 }
 
 function sendConsoleTestShock() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setConsoleTestResult("后台通信未连接，不能试电。", false);
+        setConsoleTestResult("通信未连接，无法试电。", false);
         return;
     }
 
     const outputMode = document.getElementById("console-test-output-mode")?.value || "a";
     if (!latestState?.device_connected) {
-        setConsoleTestResult(latestState?.device_status_message || "郊狼硬件尚未就绪，不能试电。", false);
+        setConsoleTestResult(latestState?.device_status_message || "硬件尚未就绪，无法试电。", false);
         return;
     }
 
@@ -495,20 +494,14 @@ function sendConsoleTestShock() {
     const limitB = Number(latestState.limit_b);
     const aReady = Number.isFinite(limitA) && limitA > 0;
     const bReady = Number.isFinite(limitB) && limitB > 0;
-    const selectedLimitReady = outputMode === "a"
-        ? aReady
-        : outputMode === "b"
-            ? bReady
-            : aReady && bReady;
+    const selectedLimitReady = outputMode === "a" ? aReady : outputMode === "b" ? bReady : (aReady && bReady);
     if (!selectedLimitReady) {
-        setConsoleTestResult("所选通道限幅尚未读取或已设为 0，不能试电。", false);
+        setConsoleTestResult("所选通道限幅未读取或为 0，不能试电。", false);
         return;
     }
 
-    const strength = Math.round(Number(
-        document.getElementById("console-test-strength")?.value || DEFAULT_TEST_STRENGTH
-    ));
-    const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 1);
+    const strength = Math.round(Number(document.getElementById("console-test-strength")?.value || DEFAULT_TEST_STRENGTH));
+    const durationSeconds = Number(document.getElementById("console-test-duration")?.value || 1.0);
     ws.send(JSON.stringify({
         type: "test_shock",
         outputMode,
@@ -517,58 +510,50 @@ function sendConsoleTestShock() {
         strength,
         duration: Math.round(durationSeconds * 1000)
     }));
-    setConsoleTestResult("已发送测试请求，等待后台确认。");
+    setConsoleTestResult("已发送试电请求，等待后台响应。");
 }
 
 function stopConsoleOutput() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setConsoleTestResult("后台通信未连接，不能发送停止请求。", false);
+        setConsoleTestResult("通信未连接，无法发送停止。", false);
         return;
     }
 
     ws.send(JSON.stringify({ type: "stop_shock" }));
-    setConsoleTestResult("已请求停止 A/B 输出。");
+    setConsoleTestResult("已发送急停，停止 A/B 输出。");
 }
 
 function updateGameLatency(rtt) {
-    const gameLatTd = document.getElementById("stat-game-latency");
     const latency = Number(rtt);
-    if (Number.isFinite(latency) && latency >= 0) {
-        gameLatTd.innerText = `${latency}ms`;
-        gameLatTd.className = getLatencyClass(latency);
-    } else {
-        gameLatTd.innerText = "-";
-        gameLatTd.className = "";
-    }
+    const latStr = (Number.isFinite(latency) && latency >= 0) ? `${latency}ms` : "-";
+    setText("stat-game-latency", latStr);
 }
 
 function formatBatteryLevel(level) {
     if (level === null || level === undefined || level === "") return "未接入";
     const value = Number(level);
-    if (!Number.isFinite(value)) return "未接入";
-    return `${Math.round(value)}%`;
+    return Number.isFinite(value) ? `${Math.round(value)}%` : "未接入";
 }
 
 function formatChannelSafety(data, channel) {
     if (!data.device_connected) return "未读取";
-    if (data[`overheat_${channel}`]) return "过热，输出已封锁";
-    if (data[`muted_${channel}`]) return "静音，输出已封锁";
+    if (data[`overheat_${channel}`]) return "过热保护";
+    if (data[`muted_${channel}`]) return "静音封锁";
 
     const status = Number(data[`channel_status_${channel}`]);
     const statusLabels = {
-        0: "可用，当前无有效输出",
+        0: "正常就绪",
         1: "未形成回路",
         2: "输出正常",
-        3: "设备报告输出异常",
-        4: "通道已屏蔽"
+        3: "输出异常",
+        4: "通道屏蔽"
     };
     return Number.isInteger(status) && Object.prototype.hasOwnProperty.call(statusLabels, status)
         ? statusLabels[status]
-        : "安全上限已读取";
+        : "安全上限就绪";
 }
 
 function formatHardwareReading(value, appConnected) {
-    // null 表示 App 尚未回传该字段；不能把它格式化成 0，否则用户会误判通道限幅已经生效。
     if (!appConnected || value === null || value === undefined || value === "") return "未读取";
     const number = Number(value);
     return Number.isFinite(number) ? String(Math.round(number)) : "未读取";
@@ -592,7 +577,7 @@ function formatCertificateExpiry(value, validDays) {
         minute: "2-digit",
         hour12: false
     });
-    return validDays ? `${formatted}（${validDays} 天策略）` : formatted;
+    return validDays ? `${formatted}（${validDays}天策略）` : formatted;
 }
 
 function setDownloadLink(id, href, filename) {
@@ -602,13 +587,7 @@ function setDownloadLink(id, href, filename) {
     node.setAttribute("download", filename);
 }
 
-function getLatencyClass(rtt) {
-    if (rtt <= 30) return "latency-excellent";
-    if (rtt <= 100) return "latency-normal";
-    return "latency-bad";
-}
-
-// Tab 状态由 data-tab 驱动，不再依赖按钮排列顺序，后续调整页面顺序不会切错内容。
+// 切换顶栏 Tab
 function switchTab(tabName) {
     const tabs = document.querySelectorAll(".tab");
     const contents = document.querySelectorAll(".tab-content");
@@ -627,7 +606,7 @@ function switchTab(tabName) {
 }
 
 function bindTabKeyboardNavigation() {
-    const tabs = Array.from(document.querySelectorAll(".tab[role='tab']"));
+    const tabs = Array.from(document.querySelectorAll(".tabs .tab[role='tab']"));
     tabs.forEach((tab, index) => {
         tab.addEventListener("keydown", (event) => {
             let targetIndex = null;
@@ -645,22 +624,17 @@ function bindTabKeyboardNavigation() {
     });
 }
 
-// 页面加载就绪后执行
+// 页面加载就绪
 window.addEventListener("DOMContentLoaded", () => {
-    setConnectionHint("控制台脚本已启动，正在连接后台...");
-    setBackendStatus("", "后台连接中");
+    setConnectionHint("控制台正在连接后台...");
+    setBackendStatus("", "未连接");
     updateConsoleTestLabels();
     bindTabKeyboardNavigation();
 
-    /*
-       二维码库只负责“画图”，不能决定后台是否连接。
-       如果二维码库在某个浏览器里加载失败，仍然先连 WebSocket，把手动地址显示出来。
-    */
     try {
         initQRCodes();
     } catch (error) {
         console.error("二维码库初始化失败:", error);
-        setText("app-url-text", "二维码库加载失败；连接后台后会显示可手动复制的绑定数据。");
     }
 
     connectWebSocket();

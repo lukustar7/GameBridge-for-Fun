@@ -366,6 +366,25 @@ function readNumber(id, fallback = 0) {
     return Number.isFinite(value) ? value : fallback;
 }
 
+function stepSetting(id, delta) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const step = Number(input.step) || 1;
+    const min = Number(input.min) || 0;
+    const max = Number(input.max) || 100;
+    let cur = Number(input.value);
+    let next = cur + delta;
+    next = Math.max(min, Math.min(max, next));
+    if (step < 1) {
+        next = Math.round(next * 10) / 10;
+    } else {
+        next = Math.round(next);
+    }
+    input.value = next;
+    updateSettingValue(id);
+}
+window.stepSetting = stepSetting;
+
 function setText(id, value) {
     const node = $(id);
     if (node && node.innerText !== String(value)) {
@@ -529,8 +548,8 @@ function connectWebSocket() {
         setConnectionClass("tech-game-status", true);
         $("ping-badge")?.classList.add("online");
         $("ping-badge")?.classList.remove("offline");
-        setText("ping-badge", "网速延迟: --ms");
-        updateGlobalSafetyStatus("后台已连接，等待郊狼设备", false);
+        setText("ping-badge", "--ms");
+        updateGlobalSafetyStatus("未连接", false);
 
         clearInterval(latencyTimer);
         latencyTimer = setInterval(() => {
@@ -556,7 +575,7 @@ function connectWebSocket() {
         if (data.type === "pong") {
             const rtt = Date.now() - data.time;
             latestGameLatency = rtt;
-            setText("ping-badge", `网速延迟: ${rtt}ms`);
+            setText("ping-badge", `${rtt}ms`);
             updateLocalGameLatency();
 
             sendGameMessage({
@@ -635,10 +654,10 @@ function connectWebSocket() {
         ws = null;
         clearInterval(latencyTimer);
         latestGameLatency = null;
-        setText("ping-badge", "网速延迟: 离线");
+        setText("ping-badge", "离线");
         setText("tech-game-status", "离线");
         setConnectionClass("tech-game-status", false);
-        updateGlobalSafetyStatus("后台通信已断开", false);
+        updateGlobalSafetyStatus("未连接", false);
         $("ping-badge")?.classList.remove("online");
         $("ping-badge")?.classList.add("offline");
         updateLocalGameLatency();
@@ -788,11 +807,18 @@ function updateTechStatus(data) {
     setText("tech-http-port", data.http_port || "-");
     setText("tech-web-ws-port", data.web_ws_port || currentWsPort || "-");
     setText("tech-app-ws-port", data.app_ws_port || "-");
-    setText("tech-app-status", deviceConnected
-        ? `${data.device_model || "郊狼"} 已连接`
-        : appConnected
-            ? "等待硬件"
-            : "等待 App 扫码");
+
+    const modelName = data.device_model || "";
+    let shortDeviceStatus = "未连接";
+    if (deviceConnected) {
+        if (modelName.includes("3.0") || modelName.includes("DG-LAB 3")) shortDeviceStatus = "硬件 3.0";
+        else if (modelName.includes("2.0") || modelName.includes("DG-LAB 2")) shortDeviceStatus = "硬件 2.0";
+        else shortDeviceStatus = modelName || "已连接";
+    } else if (appConnected) {
+        shortDeviceStatus = "等待硬件";
+    }
+
+    setText("tech-app-status", shortDeviceStatus);
     setText("tech-game-status", data.game_connected ? "已连接" : "未连接");
     setConnectionClass("tech-app-status", deviceConnected);
     setConnectionClass("tech-game-status", Boolean(data.game_connected));
@@ -821,27 +847,33 @@ function updateGlobalSafetyStatus(message, ready) {
 function refreshGlobalSafetyStatus() {
     // “已就绪”必须同时满足后台、硬件和当前所选通道限幅，不能只凭蓝牙在线就显示绿色。
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        updateGlobalSafetyStatus("后台通信已断开", false);
+        updateGlobalSafetyStatus("未连接", false);
         return;
     }
     if (!latestTechState || !latestDeviceConnected) {
-        updateGlobalSafetyStatus(latestTechState?.device_status_message || "等待郊狼设备", false);
+        updateGlobalSafetyStatus(latestTechState?.app_connected ? "等待硬件" : "未连接", false);
         return;
     }
 
     if (globalOutputRequiresConfirmation) {
-        updateGlobalSafetyStatus("请先确认全局输出通道", false);
+        updateGlobalSafetyStatus("请确认通道", false);
         return;
     }
 
     const mode = getConfiguredOutputMode();
     const modeLabel = mode === "ab" ? "A+B" : mode.toUpperCase();
     if (!isOutputModeReady(mode)) {
-        updateGlobalSafetyStatus(`${modeLabel} 通道限幅未读取或已设为 0`, false);
+        updateGlobalSafetyStatus(`通道 ${modeLabel} 限幅为 0`, false);
         return;
     }
 
-    updateGlobalSafetyStatus(`${latestTechState.device_model || "郊狼设备"} · ${modeLabel} 可输出`, true);
+    const modelName = latestTechState.device_model || "";
+    let shortName = "硬件";
+    if (modelName.includes("3.0") || modelName.includes("DG-LAB 3")) shortName = "硬件 3.0";
+    else if (modelName.includes("2.0") || modelName.includes("DG-LAB 2")) shortName = "硬件 2.0";
+    else if (modelName) shortName = modelName;
+
+    updateGlobalSafetyStatus(`${shortName} · 通道 ${modeLabel}`, true);
 }
 
 function setMobileTestResult(message, ok = true) {
@@ -1886,6 +1918,7 @@ function refreshGlobalOutputPresentation() {
     const summary = formatGlobalOutputSummary();
     setText("global-output-summary", summary);
     setText("settings-global-output-summary", summary);
+    setText("quick-banner-summary", summary);
 
     const warning = $("global-output-confirmation-warning");
     const confirmButton = $("global-output-confirm-button");
@@ -2116,12 +2149,13 @@ async function calibrateCurrentPose(gameName) {
             return;
         }
 
-        // 等待权限期间如果用户已经离开当前设置页，不再把迟到结果写进另一款游戏。
-        if (selectedGame !== gameName) return;
         calibration.shakeBeta = phoneBeta;
         calibration.shakeGamma = phoneGamma;
 
         setText("settings-message", "已使用当前握持姿态作为基准");
+        if (activeGame === "shake") {
+            setGamePhase("ready", "已校准当前握持姿态为中心");
+        }
     } finally {
         sensorActionInProgress = false;
     }
@@ -2234,6 +2268,11 @@ function setupPlayScreen(gameName) {
     $("dice-viewport").style.display = gameName === "dice" ? "block" : "none";
     $("slot-viewport").style.display = gameName === "slot" ? "block" : "none";
     $("lightning-viewport").style.display = gameName === "lightning" ? "block" : "none";
+
+    const playCalibrateBtn = $("play-calibrate-btn");
+    if (playCalibrateBtn) {
+        playCalibrateBtn.style.display = gameName === "shake" ? "inline-flex" : "none";
+    }
 
     stopRuntimeLoops();
 
@@ -2523,7 +2562,8 @@ function runShakeLoop() {
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
 
-    ctx.fillStyle = "#000000";
+    // 浅灰底色画布
+    ctx.fillStyle = "#F8FAFC";
     ctx.fillRect(0, 0, width, height);
 
     const relativeBeta = clamp(phoneBeta - calibration.shakeBeta, -45, 45);
@@ -2555,14 +2595,15 @@ function runShakeLoop() {
     }
 
     const zone = getShakeZoneState(cfg, width, height);
-    const dangerAlpha = 0.06 + zone.dangerRatio * 0.18;
+    const dangerAlpha = 0.08 + zone.dangerRatio * 0.22;
 
     if (zone.err > 0) {
-        ctx.fillStyle = `rgba(255, 51, 51, ${dangerAlpha})`;
+        ctx.fillStyle = `rgba(239, 68, 68, ${dangerAlpha})`;
         ctx.fillRect(0, 0, width, height);
     }
 
-    ctx.strokeStyle = "#151515";
+    // 现代网格线
+    ctx.strokeStyle = "#E2E8F0";
     ctx.lineWidth = 1;
     for (let x = 0; x <= width; x += 36) {
         ctx.beginPath();
@@ -2577,38 +2618,49 @@ function runShakeLoop() {
         ctx.stroke();
     }
 
-    ctx.strokeStyle = zone.err > 0 ? "#ff3333" : "#333333";
+    // 中心十字准星
+    ctx.strokeStyle = zone.err > 0 ? "rgba(239, 68, 68, 0.4)" : "#94A3B8";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(zone.centerX - 18, zone.centerY);
-    ctx.lineTo(zone.centerX + 18, zone.centerY);
-    ctx.moveTo(zone.centerX, zone.centerY - 18);
-    ctx.lineTo(zone.centerX, zone.centerY + 18);
+    ctx.moveTo(zone.centerX - 16, zone.centerY);
+    ctx.lineTo(zone.centerX + 16, zone.centerY);
+    ctx.moveTo(zone.centerX, zone.centerY - 16);
+    ctx.lineTo(zone.centerX, zone.centerY + 16);
     ctx.stroke();
 
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = zone.err > 0 ? 18 : 10;
-    ctx.shadowColor = zone.err > 0 ? "rgba(255, 51, 51, 0.65)" : "rgba(34, 197, 94, 0.35)";
-    ctx.strokeStyle = zone.err > 0 ? "#ff3333" : "#ffffff";
+    // 绘制安全区圆环
+    const isDanger = zone.err > 0;
+    ctx.fillStyle = isDanger ? "rgba(239, 68, 68, 0.08)" : "rgba(16, 185, 129, 0.08)";
+    ctx.strokeStyle = isDanger ? "#EF4444" : "#10B981";
+    ctx.lineWidth = 2.5;
+
     ctx.beginPath();
     if (cfg.mode === "radius") {
         ctx.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
     } else {
         ctx.arc(zone.centerX, zone.centerY, zone.inner, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
         ctx.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
+        ctx.stroke();
     }
-    ctx.stroke();
-    ctx.shadowBlur = 0;
 
-    ctx.fillStyle = zone.err > 0 ? "#ff3333" : "#ffffff";
-    ctx.shadowBlur = zone.err > 0 ? 18 : 10;
-    ctx.shadowColor = zone.err > 0 ? "rgba(255, 51, 51, 0.7)" : "rgba(255, 255, 255, 0.35)";
+    // 绘制 3D 质感蓝色/红色弹珠
+    ctx.shadowBlur = isDanger ? 12 : 8;
+    ctx.shadowColor = isDanger ? "rgba(239, 68, 68, 0.5)" : "rgba(37, 99, 235, 0.35)";
+    ctx.fillStyle = isDanger ? "#EF4444" : "#2563EB";
     ctx.beginPath();
     ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    // 弹珠高光点
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath();
+    ctx.arc(ballX - 2.5, ballY - 2.5, 2.2, 0, Math.PI * 2);
+    ctx.fill();
 
     animationFrameId = requestAnimationFrame(runShakeLoop);
 }

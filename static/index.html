@@ -4,24 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameBridge for Fun 控制台</title>
-    <link rel="stylesheet" href="style.css?v=20260727-ui-tabs">
+    <link rel="stylesheet" href="style.css?v=20260821-light-ui">
     <script src="qrcode.min.js?v=20260706-valid"></script>
 </head>
 <body>
     <div class="container">
+        <!-- 顶栏：产品标识、极简状态胶囊与 STOP 急停按钮 -->
         <header class="app-header">
             <div>
                 <p class="eyebrow">Local Bridge Console</p>
                 <h1>GameBridge for Fun 控制台</h1>
-                <p class="sub-text">设备绑定、手机入口和安全测试集中管理</p>
             </div>
-            <div id="backend-status" class="header-status" role="status" aria-live="polite">
-                <span class="status-dot" aria-hidden="true"></span>
-                <span id="backend-status-text">后台连接中</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div id="backend-status" class="header-status" role="status" aria-live="polite">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span id="backend-status-text">未连接</span>
+                    <span id="top-latency" style="color: var(--text-muted); font-size: 0.76rem; margin-left: 2px;">⚡ --</span>
+                </div>
+                <button type="button" class="emergency-stop-btn" onclick="stopConsoleOutput()">STOP</button>
             </div>
         </header>
 
-        <!-- 页签和停止按钮共同置顶，滚动技术长页时仍能立即停机或切换任务。 -->
+        <!-- 页签与急停吸顶栏 -->
         <div class="console-sticky-bar">
             <nav class="tabs" role="tablist" aria-label="控制台页面">
                 <button id="tab-button-monitor" type="button" role="tab" class="tab active" data-tab="monitor" aria-controls="tab-monitor" aria-selected="true" tabindex="0" onclick="switchTab('monitor')">状态监控</button>
@@ -29,89 +33,196 @@
                 <button id="tab-button-cert" type="button" role="tab" class="tab" data-tab="cert" aria-controls="tab-cert" aria-selected="false" tabindex="-1" onclick="switchTab('cert')">手机证书</button>
                 <button id="tab-button-settings" type="button" role="tab" class="tab" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">技术信息</button>
             </nav>
-            <button type="button" class="danger-button console-emergency-stop" onclick="stopConsoleOutput()">停止 A/B 输出</button>
+            <button type="button" class="console-emergency-stop" onclick="stopConsoleOutput()">STOP</button>
         </div>
 
-        <!-- 状态监控面版 -->
+        <!-- 1. 状态监控面板 (双栏现代仪表盘布局) -->
         <div id="tab-monitor" class="tab-content active" role="tabpanel" aria-labelledby="tab-button-monitor">
-            <div class="status-badge">
-                <div>
-                    <div class="status-label">设备控制链路</div>
-                    <span id="conn-status">等待 App 扫码</span>
-                    <p id="device-status-detail" class="sub-text" aria-live="polite">请先用 DG-LAB 4 App 扫描下方二维码。</p>
-                </div>
-                <p class="sub-text">App、郊狼硬件和游戏端全部就绪后再开始游戏。</p>
-            </div>
+            <div class="console-split-layout">
+                <!-- 左侧主控区 (62%) -->
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <!-- 硬件状态看板 -->
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h2>硬件状态</h2>
+                            <span id="battery-badge" class="panel-badge">电量: 未接入</span>
+                        </div>
+                        <p id="device-status-detail" class="sub-text" style="margin-bottom: 12px;">请先使用 DG-LAB 4 App 扫描右侧二维码完成绑定。</p>
 
-            <div class="grid">
-                <!-- App 绑定二维码区 -->
-                <div class="panel">
-                    <div class="panel-heading">
-                        <h2>1. 绑定 DG-LAB 4 App</h2>
-                        <span class="panel-badge">V4</span>
+                        <!-- A/B 通道 SVG 圆弧表盘 -->
+                        <div class="gauges-grid">
+                            <div class="gauge-card">
+                                <h3>通道 A 实时强度</h3>
+                                <div class="gauge-svg-wrap">
+                                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                                        <circle class="gauge-bg-circle" cx="50" cy="50" r="40"></circle>
+                                        <circle id="gauge-circle-a" class="gauge-meter-a" cx="50" cy="50" r="40"></circle>
+                                    </svg>
+                                    <div class="gauge-value-overlay">
+                                        <span id="gauge-val-a" class="gauge-val-text">0</span>
+                                        <span id="gauge-max-a" class="gauge-max-text">/ --</span>
+                                    </div>
+                                </div>
+                                <p class="sub-text" style="font-size: 0.76rem;">硬件限幅上限</p>
+                            </div>
+                            <div class="gauge-card">
+                                <h3>通道 B 实时强度</h3>
+                                <div class="gauge-svg-wrap">
+                                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                                        <circle class="gauge-bg-circle" cx="50" cy="50" r="40"></circle>
+                                        <circle id="gauge-circle-b" class="gauge-meter-b" cx="50" cy="50" r="40"></circle>
+                                    </svg>
+                                    <div class="gauge-value-overlay">
+                                        <span id="gauge-val-b" class="gauge-val-text">0</span>
+                                        <span id="gauge-max-b" class="gauge-max-text">/ --</span>
+                                    </div>
+                                </div>
+                                <p class="sub-text" style="font-size: 0.76rem;">硬件限幅上限</p>
+                            </div>
+                        </div>
+
+                        <!-- 设备选择器 -->
+                        <div class="device-selection">
+                            <label for="device-select">控制目标设备</label>
+                            <div style="display: flex; gap: 8px;">
+                                <select id="device-select" disabled style="flex: 1;">
+                                    <option value="">等待 App 上报设备...</option>
+                                </select>
+                                <button id="confirm-device-button" type="button" class="btn" onclick="selectDevice()" disabled>确认选择</button>
+                            </div>
+                            <p id="device-selection-result" class="sub-text" aria-live="polite">单台已连接设备将自动选中。</p>
+                        </div>
                     </div>
-                    <p class="sub-text">使用 App 的 Socket 控制扫码。本通道同时支持郊狼 2.0 和 3.0。</p>
-                    <div class="qr-box">
-                        <div id="app-qrcode"></div>
-                    </div>
-                    <p id="app-url-text" class="sub-text" aria-live="polite">等待后台生成绑定二维码...</p>
-                    <div class="device-selection">
-                        <label for="device-select">控制目标</label>
-                        <select id="device-select" disabled>
-                            <option value="">等待 App 上报设备...</option>
-                        </select>
-                        <button id="confirm-device-button" type="button" onclick="selectDevice()" disabled>确认控制目标</button>
-                        <p id="device-selection-result" class="sub-text" aria-live="polite">只有一台已连接设备时会自动选择。</p>
+
+                    <!-- 即时安全试电台 -->
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h2>即时安全试电</h2>
+                            <span class="panel-badge">安全上限保护</span>
+                        </div>
+                        <p class="sub-text" style="margin-bottom: 14px;">在正式开始游戏前，可通过单次低强度试电验证接线通道与感知。</p>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 14px;">
+                            <div>
+                                <label class="slider-label" style="margin-bottom: 6px;">测试通道</label>
+                                <select id="console-test-output-mode">
+                                    <option value="a">只测 A</option>
+                                    <option value="b">只测 B</option>
+                                    <option value="ab">A+B 同时</option>
+                                </select>
+                            </div>
+
+                            <!-- 强度带步进加减按钮 -->
+                            <div class="slider-container" style="margin: 0;">
+                                <div class="slider-label">
+                                    <span>测试强度</span>
+                                    <span id="val-console-test-strength">15</span>
+                                </div>
+                                <div class="stepper-slider-wrap">
+                                    <button type="button" class="stepper-btn" onclick="stepConsoleStrength(-1)">-</button>
+                                    <div class="slider-track-relative">
+                                        <input type="range" id="console-test-strength" min="1" max="30" value="15" oninput="updateConsoleTestLabels()">
+                                    </div>
+                                    <button type="button" class="stepper-btn" onclick="stepConsoleStrength(1)">+</button>
+                                </div>
+                            </div>
+
+                            <!-- 时长带步进加减按钮 -->
+                            <div class="slider-container" style="margin: 0;">
+                                <div class="slider-label">
+                                    <span>测试时长</span>
+                                    <span id="val-console-test-duration">1.0s</span>
+                                </div>
+                                <div class="stepper-slider-wrap">
+                                    <button type="button" class="stepper-btn" onclick="stepConsoleDuration(-0.1)">-</button>
+                                    <div class="slider-track-relative">
+                                        <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="1.0" oninput="updateConsoleTestLabels()">
+                                    </div>
+                                    <button type="button" class="stepper-btn" onclick="stepConsoleDuration(0.1)">+</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="button-row" style="margin-bottom: 8px;">
+                            <button type="button" class="btn" style="flex: 1;" onclick="runConsoleSelfCheck()">连接自检</button>
+                            <button type="button" class="primary-button" style="flex: 1;" onclick="sendConsoleTestShock()">发送安全试电</button>
+                            <button type="button" class="danger-button" style="flex: 1;" onclick="stopConsoleOutput()">停止输出</button>
+                        </div>
+                        <p id="console-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
                     </div>
                 </div>
 
-                <!-- Android APK 是 Android 15+ 用户的主入口，不需要安装网页根证书。 -->
-                <div class="panel panel-featured">
-                    <div class="panel-heading">
-                        <h2>2. 连接 Android APK</h2>
-                        <span class="panel-badge">推荐</span>
+                <!-- 右侧分步连接中心 (38%) -->
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <!-- 步骤 1：绑定 DG-LAB App -->
+                    <div class="panel">
+                        <div class="panel-heading">
+                            <h2>1. 绑定 DG-LAB App</h2>
+                            <span class="panel-badge">V4 协议</span>
+                        </div>
+                        <p class="sub-text">打开手机 DG-LAB 4 App 的 Socket 控制扫描此码：</p>
+                        <div class="qr-box">
+                            <div id="app-qrcode"></div>
+                        </div>
+                        <p id="app-url-text" class="sub-text" style="font-size: 0.78rem; text-align: center;">等待生成绑定二维码...</p>
                     </div>
-                    <p class="sub-text">安装 APK 后用手机系统相机扫描；APK 与电脑必须处于同一局域网。</p>
-                    <div class="qr-box">
-                        <div id="apk-qrcode"></div>
-                    </div>
-                    <p id="apk-url-text" class="address-text">等待本地服务获取 IP...</p>
-                    <div class="compact-actions">
-                        <button type="button" class="primary-button" onclick="copyAddress('apk-url-text', 'apk-copy-result')">复制 APK 配对地址</button>
-                    </div>
-                    <p id="apk-copy-result" class="sub-text" aria-live="polite"></p>
-                    <p class="sub-text">每次重启电脑服务后，配对地址都会更新，需要重新扫码。</p>
-                </div>
 
-                <!-- 浏览器入口保留给 iPhone 与不安装 APK 的用户。 -->
-                <div class="panel">
-                    <div class="panel-heading">
-                        <h2>3. 浏览器备用入口</h2>
-                        <span class="panel-badge">可选</span>
+                    <!-- 步骤 2：连接手机游戏端 (分段切换器) -->
+                    <div class="panel panel-featured">
+                        <div class="panel-heading">
+                            <h2>2. 连接手机游戏端</h2>
+                        </div>
+                        <p class="sub-text" style="margin-bottom: 10px;">选择手机端接入方式，扫码即可开始游戏：</p>
+
+                        <!-- 分段选择器 -->
+                        <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 4px; padding: 4px; background: var(--bg-soft); border-radius: var(--radius-small); margin-bottom: 12px;">
+                            <button id="btn-mode-apk" type="button" class="tab active" style="min-height: 32px; font-size: 0.8rem; padding: 4px 6px;" onclick="switchConnectTab('apk')">Android APK (推荐)</button>
+                            <button id="btn-mode-https" type="button" class="tab" style="min-height: 32px; font-size: 0.8rem; padding: 4px 6px;" onclick="switchConnectTab('https')">手机 HTTPS</button>
+                            <button id="btn-mode-http" type="button" class="tab" style="min-height: 32px; font-size: 0.8rem; padding: 4px 6px;" onclick="switchConnectTab('http')">局域网 HTTP</button>
+                        </div>
+
+                        <!-- 动态二维码展示区 -->
+                        <div id="connect-view-apk">
+                            <div class="qr-box">
+                                <div id="apk-qrcode"></div>
+                            </div>
+                            <p id="apk-url-text" class="address-text" style="margin-bottom: 8px;">等待获取 IP...</p>
+                            <button type="button" class="primary-button full-width" onclick="copyAddress('apk-url-text', 'apk-copy-result')">复制 APK 配对地址</button>
+                            <p id="apk-copy-result" class="sub-text" style="font-size: 0.76rem; margin-top: 4px; text-align: center;"></p>
+                        </div>
+
+                        <div id="connect-view-https" style="display: none;">
+                            <div class="qr-box">
+                                <div id="secure-game-qrcode"></div>
+                            </div>
+                            <p id="secure-game-url-text" class="address-text" style="margin-bottom: 8px;">等待 HTTPS 服务...</p>
+                            <button type="button" class="primary-button full-width" onclick="copyAddress('secure-game-url-text', 'https-copy-result')">复制 HTTPS 地址</button>
+                            <p id="https-copy-result" class="sub-text" style="font-size: 0.76rem; margin-top: 4px; text-align: center;"></p>
+                            <p id="secure-game-hint" class="sub-text" style="font-size: 0.76rem; margin-top: 4px;">iPhone 玩家请先至“手机证书”页安装证书。</p>
+                        </div>
+
+                        <div id="connect-view-http" style="display: none;">
+                            <div class="qr-box">
+                                <div id="game-qrcode"></div>
+                            </div>
+                            <p id="game-url-text" class="address-text" style="margin-bottom: 8px;">等待获取 IP...</p>
+                            <button type="button" class="btn full-width" onclick="copyAddress('game-url-text', 'http-copy-result')">复制普通网页地址</button>
+                            <p id="http-copy-result" class="sub-text" style="font-size: 0.76rem; margin-top: 4px; text-align: center;"></p>
+                        </div>
                     </div>
-                    <p class="sub-text">手机浏览器可以直接打开；感应玩法应使用“手机证书”页的 HTTPS 入口。</p>
-                    <div class="qr-box">
-                        <div id="game-qrcode"></div>
-                    </div>
-                    <p id="game-url-text" class="address-text">等待本地服务获取 IP...</p>
-                    <div class="compact-actions">
-                        <button type="button" onclick="copyAddress('game-url-text', 'game-copy-result')">复制网页地址</button>
-                    </div>
-                    <p id="game-copy-result" class="sub-text" aria-live="polite"></p>
-                    <p id="secure-game-hint" class="sub-text">手抖挑战建议先到“手机证书”页安装证书后使用 HTTPS 入口。</p>
                 </div>
             </div>
         </div>
 
-        <!-- 独立安全测试页避免重要操作被三张二维码挤到首屏之外。 -->
+        <!-- 2. 安全测试独立面板 -->
         <div id="tab-test" class="tab-content" role="tabpanel" aria-labelledby="tab-button-test" hidden>
             <div class="panel console-test-panel">
-                <h2>连接与安全测试</h2>
-                <p class="sub-text" style="margin-bottom: 16px;">先做自检确认链路，再用默认强度 15、时长 1 秒试电。测试强度最高 30、时长最长 1 秒。</p>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                <h2>安全通道与链路测试</h2>
+                <p class="sub-text" style="margin-bottom: 16px;">自检确认链路正常后，可发送 15 强度 1 秒短脉冲试电。测试强度上限 30、时长上限 1 秒。</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 16px;">
                     <div>
                         <label class="slider-label" style="margin-bottom: 5px;">测试通道</label>
-                        <select id="console-test-output-mode">
+                        <select id="tab2-test-output-mode">
                             <option value="a">只测 A</option>
                             <option value="b">只测 B</option>
                             <option value="ab">A+B 同时</option>
@@ -120,16 +231,28 @@
                     <div class="slider-container" style="margin: 0;">
                         <div class="slider-label">
                             <span>测试强度</span>
-                            <span id="val-console-test-strength">15</span>
+                            <span id="tab2-val-strength">15</span>
                         </div>
-                        <input type="range" id="console-test-strength" min="1" max="30" value="15" oninput="updateConsoleTestLabels()">
+                        <div class="stepper-slider-wrap">
+                            <button type="button" class="stepper-btn" onclick="stepConsoleStrength(-1)">-</button>
+                            <div class="slider-track-relative">
+                                <input type="range" id="tab2-test-strength" min="1" max="30" value="15" oninput="syncTestStrength(this.value)">
+                            </div>
+                            <button type="button" class="stepper-btn" onclick="stepConsoleStrength(1)">+</button>
+                        </div>
                     </div>
                     <div class="slider-container" style="margin: 0;">
                         <div class="slider-label">
                             <span>测试时长</span>
-                            <span id="val-console-test-duration">1.0s</span>
+                            <span id="tab2-val-duration">1.0s</span>
                         </div>
-                        <input type="range" id="console-test-duration" min="0.1" max="1.0" step="0.1" value="1.0" oninput="updateConsoleTestLabels()">
+                        <div class="stepper-slider-wrap">
+                            <button type="button" class="stepper-btn" onclick="stepConsoleDuration(-0.1)">-</button>
+                            <div class="slider-track-relative">
+                                <input type="range" id="tab2-test-duration" min="0.1" max="1.0" step="0.1" value="1.0" oninput="syncTestDuration(this.value)">
+                            </div>
+                            <button type="button" class="stepper-btn" onclick="stepConsoleDuration(0.1)">+</button>
+                        </div>
                     </div>
                 </div>
                 <div class="button-row" style="margin-bottom: 12px;">
@@ -137,59 +260,51 @@
                     <button class="primary-button" style="flex: 1;" onclick="sendConsoleTestShock()">安全试电</button>
                     <button class="danger-button" style="flex: 1;" onclick="stopConsoleOutput()">停止输出</button>
                 </div>
-                <p id="console-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
+                <p id="tab2-test-result" class="sub-text" role="status" aria-live="polite">等待自检。</p>
             </div>
         </div>
 
-        <!-- 手机 HTTPS 证书安装引导 -->
+        <!-- 3. 手机 HTTPS 证书面板 -->
         <div id="tab-cert" class="tab-content" role="tabpanel" aria-labelledby="tab-button-cert" hidden>
-            <div class="grid">
+            <div class="console-split-layout">
                 <div class="panel">
-                    <h2>1. 安装本地根证书</h2>
-                    <p class="sub-text" style="margin-bottom: 12px;">手机只需要安装根证书。服务器证书由电脑按当前 IP 自动生成和轮换，不需要手动安装。</p>
-                    <p class="warning-text" style="margin-bottom: 16px;">完全信任根证书会扩大手机的 HTTPS 信任范围。仅在私人设备和可信局域网中安装；结束后建议关闭完全信任，长期不用时应删除描述文件。</p>
+                    <h2>安装本地根证书</h2>
+                    <p class="sub-text" style="margin-bottom: 12px;">手机只需要安装根证书。服务器证书由电脑根据当前局域网 IP 自动生成并轮换。</p>
+                    <p class="sub-text" style="color: var(--warning); margin-bottom: 14px;">仅在个人设备和可信家庭 Wi-Fi 中安装；长期不用时可在系统描述文件中删除。</p>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
                         <div>
-                            <p class="sub-text" style="margin-bottom: 8px;">iPhone 扫描描述文件：</p>
-                            <p id="cert-profile-url" style="font-family: monospace; font-size: 0.78rem; color: #888888; margin-bottom: 10px; word-break: break-all;">等待证书生成...</p>
-                            <div class="qr-box">
+                            <p class="sub-text" style="margin-bottom: 6px; font-weight: 600;">iPhone 扫描描述文件：</p>
+                            <p id="cert-profile-url" class="address-text" style="font-size: 0.72rem; margin-bottom: 8px;">等待证书...</p>
+                            <div class="qr-box" style="min-height: 160px;">
                                 <div id="cert-qrcode"></div>
                             </div>
                         </div>
                         <div>
-                            <p class="sub-text" style="margin-bottom: 8px;">Android 扫描 .cer 文件：</p>
-                            <p id="cert-cer-url" style="font-family: monospace; font-size: 0.78rem; color: #888888; margin-bottom: 10px; word-break: break-all;">等待证书生成...</p>
-                            <div class="qr-box">
+                            <p class="sub-text" style="margin-bottom: 6px; font-weight: 600;">Android 扫描 .cer 文件：</p>
+                            <p id="cert-cer-url" class="address-text" style="font-size: 0.72rem; margin-bottom: 8px;">等待证书...</p>
+                            <div class="qr-box" style="min-height: 160px;">
                                 <div id="cert-cer-qrcode"></div>
                             </div>
                         </div>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
-                        <a id="cert-profile-link" class="btn" href="#">iPhone 描述文件</a>
-                        <a id="cert-cer-link" class="btn" href="#">Android .cer</a>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <a id="cert-profile-link" class="btn" href="#">下载 iPhone 描述文件</a>
+                        <a id="cert-cer-link" class="btn" href="#">下载 Android .cer</a>
                     </div>
                 </div>
 
                 <div class="panel">
-                    <h2>2. 信任步骤</h2>
-                    <p class="sub-text" style="margin-bottom: 8px;">iPhone：</p>
-                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 16px;">
-                        <li>用 Safari 下载描述文件。</li>
-                        <li>进入“设置 > 通用 > VPN 与设备管理”安装描述文件。</li>
+                    <h2>信任步骤与证书状态</h2>
+                    <p class="sub-text" style="margin-bottom: 6px; font-weight: 600;">iPhone 信任流程：</p>
+                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 12px; font-size: 0.82rem;">
+                        <li>Safari 下载后，进入“设置 > 已下载描述文件”安装。</li>
                         <li>进入“设置 > 通用 > 关于本机 > 证书信任设置”。</li>
-                        <li>打开“GameBridge for Fun Local Root CA”的完全信任。</li>
-                    </ol>
-                    <p class="sub-text" style="margin-bottom: 8px;">Android：</p>
-                    <ol class="sub-text" style="padding-left: 20px; margin-bottom: 18px;">
-                        <li>下载 `.cer` 文件。</li>
-                        <li>在系统设置里搜索“CA 证书”或“从存储安装证书”。</li>
-                        <li>安装为 Wi-Fi/VPN 或 CA 证书；不同品牌入口名称可能不同。</li>
+                        <li>开启 GameBridge for Fun 根证书的完全信任。</li>
                     </ol>
 
-                    <h2>3. 当前证书状态</h2>
-                    <table class="stats-table" style="margin-bottom: 18px;">
+                    <table class="stats-table" style="margin-bottom: 14px;">
                         <tr>
                             <td>签发 IP</td>
                             <td id="cert-signed-ip">-</td>
@@ -207,24 +322,17 @@
                             <td id="cert-server-expiry">-</td>
                         </tr>
                     </table>
-                    <p class="sub-text" style="margin-bottom: 8px;">根证书 SHA-256 指纹：</p>
-                    <p id="cert-fingerprint" style="font-family: monospace; font-size: 0.8rem; color: #888888; word-break: break-all; margin-bottom: 18px;">-</p>
-
-                    <h2>4. HTTPS 游戏入口</h2>
-                    <p id="secure-game-url-text" style="font-family: monospace; font-size: 0.85rem; color: #888888; margin-bottom: 15px; word-break: break-all;">等待 HTTPS 服务...</p>
-                    <div class="qr-box">
-                        <div id="secure-game-qrcode"></div>
-                    </div>
+                    <p class="sub-text" style="font-size: 0.78rem;">根证书 SHA-256 指纹：</p>
+                    <p id="cert-fingerprint" class="address-text" style="font-size: 0.74rem;">-</p>
                 </div>
             </div>
         </div>
 
-        <!-- 参数设置面版 -->
+        <!-- 4. 技术信息面板 -->
         <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-button-settings" hidden>
-            <div class="grid">
-                <!-- 网络与证书、设备与输出分别成卡片，避免一张 24 行长表占满整页。 -->
+            <div class="console-split-layout">
                 <div class="panel">
-                    <h2>网络与证书</h2>
+                    <h2>网络与服务参数</h2>
                     <table class="stats-table">
                         <tr>
                             <td>程序版本</td>
@@ -251,18 +359,6 @@
                             <td id="stat-secure-web-ws-port">-</td>
                         </tr>
                         <tr>
-                            <td>证书签发 IP</td>
-                            <td id="stat-cert-ip">-</td>
-                        </tr>
-                        <tr>
-                            <td>根证书到期</td>
-                            <td id="stat-root-expiry">-</td>
-                        </tr>
-                        <tr>
-                            <td>服务器证书到期</td>
-                            <td id="stat-server-expiry">-</td>
-                        </tr>
-                        <tr>
                             <td>App 桥接 (WS) 端口</td>
                             <td id="stat-app-ws-port">-</td>
                         </tr>
@@ -274,7 +370,7 @@
                 </div>
 
                 <div class="panel">
-                    <h2>设备与输出</h2>
+                    <h2>硬件与输出遥测</h2>
                     <table class="stats-table">
                         <tr>
                             <td>郊狼硬件型号</td>
@@ -289,31 +385,19 @@
                             <td id="stat-device-connected">未连接</td>
                         </tr>
                         <tr>
-                            <td>电脑 ↔ 手机 App 延迟</td>
+                            <td>电脑 ↔ App 延迟</td>
                             <td id="stat-app-latency">-</td>
                         </tr>
                         <tr>
-                            <td>电脑 ↔ 手机浏览器延迟</td>
+                            <td>电脑 ↔ 游戏端延迟</td>
                             <td id="stat-game-latency">-</td>
                         </tr>
                         <tr>
-                            <td>手机游戏端连接</td>
-                            <td id="stat-game-connected">-</td>
-                        </tr>
-                        <tr>
-                            <td>硬件通道 A 强度</td>
-                            <td id="stat-strength-a">-</td>
-                        </tr>
-                        <tr>
-                            <td>硬件通道 B 强度</td>
-                            <td id="stat-strength-b">-</td>
-                        </tr>
-                        <tr>
-                            <td>通道 A 硬件限幅上限</td>
+                            <td>通道 A 硬件限幅</td>
                             <td id="stat-limit-a">-</td>
                         </tr>
                         <tr>
-                            <td>通道 B 硬件限幅上限</td>
+                            <td>通道 B 硬件限幅</td>
                             <td id="stat-limit-b">-</td>
                         </tr>
                         <tr>
@@ -330,23 +414,15 @@
                         </tr>
                     </table>
                 </div>
-
-                <!-- 旧版“保存端口”实际不支持热切换，改为只读说明，避免用户误以为设置已经生效。 -->
-                <div class="panel">
-                    <h2>连接说明</h2>
-                    <ul class="info-list" style="padding-left: 20px;">
-                        <li>端口由服务启动时统一分配；遇到占用会自动向后寻找可用端口。</li>
-                        <li>电脑服务重启后，以本页刚生成的二维码和地址为准，不使用旧截图。</li>
-                        <li>App 二维码使用 V4 通道；郊狼 2.0 与 3.0 会自动采用各自的波形格式。</li>
-                        <li>出现多台兼容设备时必须在“状态监控”中明确选择，服务不会自动控制列表第一台。</li>
-                        <li>Android APK 使用普通 HTTP/WS，但只接受私有局域网 IP 和带 token 的固定游戏地址。</li>
-                        <li>浏览器感应玩法使用 HTTPS/WSS；APK 原生读取感应器，不需要安装网页证书。</li>
-                    </ul>
-                </div>
             </div>
         </div>
     </div>
 
-    <script src="console.js?v=20260728-test-duration"></script>
+    <!-- 隐藏原 ID 锚点以保证向后完全兼容 -->
+    <div style="display: none;">
+        <span id="conn-status"></span>
+    </div>
+
+    <script src="console.js?v=20260821-light-ui"></script>
 </body>
 </html>
