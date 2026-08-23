@@ -603,6 +603,7 @@ input[type="range"]::-webkit-slider-thumb:active {
 .gauge-meter-a { stroke: var(--primary); }
 .gauge-meter-b { stroke: var(--accent); }
 
+.gauge-val-display,
 .gauge-value-overlay {
     position: absolute;
     inset: 0;
@@ -610,19 +611,39 @@ input[type="range"]::-webkit-slider-thumb:active {
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    pointer-events: none;
 }
 
+.gauge-number,
 .gauge-val-text {
     color: var(--text);
-    font-size: 1.45rem;
+    font-size: 1.65rem;
     font-weight: 800;
-    line-height: 1.1;
+    line-height: 1;
+    letter-spacing: -0.02em;
 }
 
+.gauge-label,
 .gauge-max-text {
     color: var(--text-muted);
-    font-size: 0.72rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-top: 3px;
+}
+
+.gauge-footer-limit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.gauge-footer-limit strong {
+    color: var(--text);
+    font-weight: 700;
 }
 
 /* 技术信息表格 */

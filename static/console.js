@@ -231,6 +231,7 @@ function updateUI(data) {
     const curB = Number(data.strength_b) || 0;
 
     setText("gauge-val-a", data.device_connected ? String(curA) : "0");
+    setText("gauge-limit-a", data.device_connected ? String(data.limit_a ?? "-") : "-");
     setText("gauge-max-a", `/ ${data.device_connected ? (data.limit_a ?? "--") : "--"}`);
     const circleA = document.getElementById("gauge-circle-a");
     if (circleA) {
@@ -239,6 +240,7 @@ function updateUI(data) {
     }
 
     setText("gauge-val-b", data.device_connected ? String(curB) : "0");
+    setText("gauge-limit-b", data.device_connected ? String(data.limit_b ?? "-") : "-");
     setText("gauge-max-b", `/ ${data.device_connected ? (data.limit_b ?? "--") : "--"}`);
     const circleB = document.getElementById("gauge-circle-b");
     if (circleB) {
