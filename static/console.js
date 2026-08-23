@@ -406,34 +406,18 @@ function selectDevice() {
 
 // 步进调节函数
 function stepConsoleStrength(delta) {
-    const input1 = document.getElementById("console-test-strength");
-    const input2 = document.getElementById("tab2-test-strength");
-    const curVal = Number(input1?.value || input2?.value || DEFAULT_TEST_STRENGTH);
+    const input = document.getElementById("console-test-strength");
+    const curVal = Number(input?.value || DEFAULT_TEST_STRENGTH);
     const nextVal = Math.max(1, Math.min(30, Math.round(curVal + delta)));
-    if (input1) input1.value = nextVal;
-    if (input2) input2.value = nextVal;
+    if (input) input.value = nextVal;
     updateConsoleTestLabels();
 }
 
 function stepConsoleDuration(delta) {
-    const input1 = document.getElementById("console-test-duration");
-    const input2 = document.getElementById("tab2-test-duration");
-    const curVal = Number(input1?.value || input2?.value || 1.0);
+    const input = document.getElementById("console-test-duration");
+    const curVal = Number(input?.value || 1.0);
     const nextVal = Math.max(0.1, Math.min(1.0, Math.round((curVal + delta) * 10) / 10));
-    if (input1) input1.value = nextVal;
-    if (input2) input2.value = nextVal;
-    updateConsoleTestLabels();
-}
-
-function syncTestStrength(val) {
-    const input1 = document.getElementById("console-test-strength");
-    if (input1) input1.value = val;
-    updateConsoleTestLabels();
-}
-
-function syncTestDuration(val) {
-    const input1 = document.getElementById("console-test-duration");
-    if (input1) input1.value = val;
+    if (input) input.value = nextVal;
     updateConsoleTestLabels();
 }
 
@@ -445,19 +429,14 @@ function updateConsoleTestLabels() {
 
     setText("val-console-test-strength", sStr);
     setText("val-console-test-duration", dStr);
-    setText("tab2-val-strength", sStr);
-    setText("tab2-val-duration", dStr);
 }
 
 function setConsoleTestResult(message, ok = true) {
-    const node1 = document.getElementById("console-test-result");
-    const node2 = document.getElementById("tab2-test-result");
-    [node1, node2].forEach((node) => {
-        if (node) {
-            node.innerText = message;
-            node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
-        }
-    });
+    const node = document.getElementById("console-test-result");
+    if (node) {
+        node.innerText = message;
+        node.style.color = ok ? "var(--text-secondary)" : "var(--danger)";
+    }
 }
 
 function runConsoleSelfCheck() {
