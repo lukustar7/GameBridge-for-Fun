@@ -810,6 +810,13 @@ canvas {
     font-size: 0.9rem;
 }
 
+.disclosure-panel summary small {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.8rem;
+    margin-left: 8px;
+}
+
 .disclosure-content {
     padding: 0 16px 16px;
 }
