@@ -87,6 +87,7 @@
         playMeter: byId("play-meter"),
         playMeterFill: document.querySelector("#play-meter span"),
         gameAction: byId("game-action"),
+        calibratePlayPose: byId("calibrate-play-pose"),
         endGame: byId("end-game"),
         safetyDialog: byId("lightning-safety-dialog"),
         safetyChecks: Array.from(document.querySelectorAll(".lightning-confirm")),
@@ -98,6 +99,18 @@
         resetSettings: byId("reset-settings"),
         offlineDetail: byId("offline-detail"),
         messageToast: byId("message-toast")
+    };
+
+    window.stepLiteRange = function (id, delta) {
+        const input = document.getElementById(id);
+        if (!input) return;
+        const min = Number(input.min) || 0;
+        const max = Number(input.max) || 200;
+        const cur = Number(input.value) || 0;
+        const next = Math.max(min, Math.min(max, Math.round((cur + delta) * 100) / 100));
+        input.value = String(next);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
     };
 
     let globalSettings = loadGlobalSettings();
@@ -524,7 +537,6 @@
         labelText.textContent = field.label;
         label.append(labelText);
 
-        let input;
         if (field.type === "select") {
             input = document.createElement("select");
             input.className = "select-control";
@@ -535,28 +547,72 @@
                 input.append(option);
             });
             input.value = gameSettings[gameName][field.key];
-        } else {
-            const outputValue = document.createElement("output");
-            outputValue.textContent = `${gameSettings[gameName][field.key]}${field.unit}`;
-            label.append(outputValue);
-            input = document.createElement("input");
-            input.type = "range";
-            input.min = String(field.min);
-            const effectiveLimit = getEffectiveStrengthLimit();
-            input.max = String(isStrengthSetting(gameName, field.key) && effectiveLimit > 0
-                ? Math.min(field.max, effectiveLimit)
-                : field.max);
-            input.step = String(field.step);
-            input.value = String(gameSettings[gameName][field.key]);
-            input.dataset.unit = field.unit;
-            input.addEventListener("input", () => {
-                outputValue.textContent = `${input.value}${field.unit}`;
-            });
+            input.dataset.settingKey = field.key;
+            label.htmlFor = `setting-${gameName}-${field.key}`;
+            input.id = `setting-${gameName}-${field.key}`;
+            wrapper.append(label, input, help);
+            return wrapper;
         }
+
+        const outputValue = document.createElement("output");
+        outputValue.textContent = `${gameSettings[gameName][field.key]}${field.unit}`;
+        label.append(outputValue);
+        input = document.createElement("input");
+        input.type = "range";
+        input.min = String(field.min);
+        const effectiveLimit = getEffectiveStrengthLimit();
+        input.max = String(isStrengthSetting(gameName, field.key) && effectiveLimit > 0
+            ? Math.min(field.max, effectiveLimit)
+            : field.max);
+        input.step = String(field.step);
+        input.value = String(gameSettings[gameName][field.key]);
+        input.dataset.unit = field.unit;
+        input.addEventListener("input", () => {
+            outputValue.textContent = `${input.value}${field.unit}`;
+        });
         input.dataset.settingKey = field.key;
         label.htmlFor = `setting-${gameName}-${field.key}`;
         input.id = `setting-${gameName}-${field.key}`;
-        wrapper.append(label, input, help);
+
+        const stepperWrap = document.createElement("div");
+        stepperWrap.className = "stepper-slider-wrap";
+
+        const btnMinus = document.createElement("button");
+        btnMinus.type = "button";
+        btnMinus.className = "stepper-btn";
+        btnMinus.textContent = "-";
+        btnMinus.addEventListener("click", () => {
+            const step = Number(field.step) || 1;
+            const min = Number(input.min);
+            const cur = Number(input.value);
+            const next = Math.max(min, Math.round((cur - step) * 100) / 100);
+            input.value = String(next);
+            outputValue.textContent = `${next}${field.unit}`;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        const trackWrap = document.createElement("div");
+        trackWrap.className = "slider-track-relative";
+        trackWrap.append(input);
+
+        const btnPlus = document.createElement("button");
+        btnPlus.type = "button";
+        btnPlus.className = "stepper-btn";
+        btnPlus.textContent = "+";
+        btnPlus.addEventListener("click", () => {
+            const step = Number(field.step) || 1;
+            const max = Number(input.max);
+            const cur = Number(input.value);
+            const next = Math.min(max, Math.round((cur + step) * 100) / 100);
+            input.value = String(next);
+            outputValue.textContent = `${next}${field.unit}`;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        stepperWrap.append(btnMinus, trackWrap, btnPlus);
+        wrapper.append(label, stepperWrap, help);
         return wrapper;
     }
 
@@ -977,6 +1033,22 @@
             }
         };
 
+        if (elements.calibratePlayPose) {
+            elements.calibratePlayPose.hidden = false;
+            const handleCalibratePlayPose = () => {
+                if (latestOrientation) {
+                    baseline = { ...latestOrientation };
+                    calibration[session.type] = { ...baseline };
+                    showMessage("已设当前握持姿态为中心", "success");
+                }
+            };
+            elements.calibratePlayPose.addEventListener("click", handleCalibratePlayPose);
+            session.cleanups.push(() => {
+                elements.calibratePlayPose.removeEventListener("click", handleCalibratePlayPose);
+                elements.calibratePlayPose.hidden = true;
+            });
+        }
+
         window.addEventListener("deviceorientation", handleOrientation, true);
         session.cleanups.push(() => window.removeEventListener("deviceorientation", handleOrientation, true));
         session.cleanups.push(() => {
@@ -985,9 +1057,9 @@
         });
 
         function drawBackground(dangerRatio) {
-            context.fillStyle = "#02070e";
+            context.fillStyle = "#F1F5F9";
             context.fillRect(0, 0, width, height);
-            context.strokeStyle = "#142235";
+            context.strokeStyle = "#E2E8F0";
             context.lineWidth = 1;
             for (let x = 0; x <= width; x += 36) {
                 context.beginPath();
@@ -1002,7 +1074,7 @@
                 context.stroke();
             }
             if (dangerRatio > 0) {
-                context.fillStyle = `rgba(255, 63, 74, ${0.05 + dangerRatio * 0.18})`;
+                context.fillStyle = `rgba(220, 38, 38, ${0.08 + dangerRatio * 0.22})`;
                 context.fillRect(0, 0, width, height);
             }
         }
@@ -1050,7 +1122,7 @@
             }
             const zone = gameRuntime.getShakeZoneState(ball, cfg, width, height);
             drawBackground(zone.dangerRatio);
-            context.strokeStyle = zone.err > 0 ? "#ff3f4a" : "#59d7ff";
+            context.strokeStyle = zone.err > 0 ? "#DC2626" : "#10B981";
             context.lineWidth = 3;
             context.beginPath();
             if (cfg.mode === "gap") {
@@ -1060,10 +1132,17 @@
             }
             context.arc(zone.centerX, zone.centerY, zone.outer, 0, Math.PI * 2);
             context.stroke();
-            context.fillStyle = zone.err > 0 ? "#ff3f4a" : "#ffffff";
+            context.fillStyle = zone.err > 0 ? "#DC2626" : "#2563EB";
             context.beginPath();
             context.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
             context.fill();
+
+            // 3D 立体高光
+            context.fillStyle = "rgba(255, 255, 255, 0.75)";
+            context.beginPath();
+            context.arc(ball.x - ball.radius * 0.35, ball.y - ball.radius * 0.35, ball.radius * 0.35, 0, Math.PI * 2);
+            context.fill();
+
             const status = applyDelayedOutput(
                 zone.err,
                 zone.dangerRatio,

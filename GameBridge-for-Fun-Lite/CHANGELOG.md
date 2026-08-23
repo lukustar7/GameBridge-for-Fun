@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- 全量滑块控件增配原生 `[-]` / `[+]` 实体微调按键（触控热区 $\ge 44\text{px}$），支持一键精确增减数值。
+- 手抖挑战实战运行页新增“🎯 设当前握持为中心”按钮，游玩中可随时一键重定陀螺仪中心。
+
+### Changed
+
+- 界面全面升级为 Modern Clean 浅色视觉体系，提供浅灰高对比背景、纯白圆角卡片、科技蔚蓝与纯红 STOP 急停按键。
+- 手抖挑战 Canvas 画布升级为浅色 3D 高质感渲染，配备翡翠绿安全圈与带立体高光的弹珠。
+
 ## [0.1.0-beta.2] - 2026-08-03
 
 ### Added

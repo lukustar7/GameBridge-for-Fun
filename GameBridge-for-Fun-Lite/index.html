@@ -19,7 +19,7 @@
                 <h1>GameBridge Lite</h1>
                 <p id="device-status" class="status-line" data-state="off">尚未连接设备</p>
             </div>
-            <button id="emergency-stop" class="danger-button" type="button">立即停止</button>
+            <button id="emergency-stop" class="danger-button" type="button">STOP</button>
         </header>
 
         <main>
@@ -113,7 +113,13 @@
                             <p class="field-help">与第一版一致：可以让 B 跟随 A，或按 A 的一定比例输出；两个通道仍分别受网页上限约束。</p>
                             <div id="b-strength-percent-block" class="range-block">
                                 <label for="b-strength-percent"><span>B 相对 A 的比例</span><output id="b-strength-percent-value" for="b-strength-percent">50%</output></label>
-                                <input id="b-strength-percent" type="range" min="10" max="100" step="5" value="50">
+                                <div class="stepper-slider-wrap">
+                                    <button type="button" class="stepper-btn" onclick="window.stepLiteRange('b-strength-percent', -5)">-</button>
+                                    <div class="slider-track-relative">
+                                        <input id="b-strength-percent" type="range" min="10" max="100" step="5" value="50">
+                                    </div>
+                                    <button type="button" class="stepper-btn" onclick="window.stepLiteRange('b-strength-percent', 5)">+</button>
+                                </div>
                             </div>
                         </div>
 
@@ -123,11 +129,23 @@
 
                         <div class="range-block">
                             <label for="limit-a"><span>A 通道网页上限</span><output id="limit-a-value" for="limit-a">30</output></label>
-                            <input id="limit-a" type="range" min="0" max="200" step="1" value="30">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-a', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input id="limit-a" type="range" min="0" max="200" step="1" value="30">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-a', 1)">+</button>
+                            </div>
                         </div>
                         <div class="range-block">
                             <label for="limit-b"><span>B 通道网页上限</span><output id="limit-b-value" for="limit-b">30</output></label>
-                            <input id="limit-b" type="range" min="0" max="200" step="1" value="30">
+                            <div class="stepper-slider-wrap">
+                                <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-b', -1)">-</button>
+                                <div class="slider-track-relative">
+                                    <input id="limit-b" type="range" min="0" max="200" step="1" value="30">
+                                </div>
+                                <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-b', 1)">+</button>
+                            </div>
                         </div>
 
                         <div class="confirmation-box">
@@ -243,6 +261,7 @@
                     <div id="play-meter" class="meter" hidden><span></span></div>
                 </div>
                 <button id="game-action" class="primary-button full-width" type="button" hidden>执行</button>
+                <button id="calibrate-play-pose" class="secondary-button full-width" type="button" hidden>🎯 设当前握持为中心</button>
                 <button id="end-game" class="secondary-button full-width" type="button">结束游戏并返回</button>
             </section>
         </main>
