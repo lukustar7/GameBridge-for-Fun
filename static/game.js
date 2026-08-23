@@ -1756,7 +1756,6 @@ function resetSettingsDisclosureState(gameName) {
     document.querySelectorAll("#screen-settings details.settings-group").forEach((group) => {
         const groupGame = group.dataset.game || "common";
         const shouldOpen = groupGame === gameName && group.dataset.defaultOpen === "true";
-        group.hidden = false;
         group.open = shouldOpen;
     });
 }
@@ -1987,7 +1986,9 @@ function resetSelectedSettings() {
     gameSettings[selectedGame] = { ...DEFAULT_SETTINGS[selectedGame] };
     persistSettings();
     populateSettingsForm(selectedGame);
-    resetSettingsDisclosureState(selectedGame);
+    const activeTab = $("settings-tabs")?.querySelector("[role='tab'][aria-selected='true']");
+    const categoryIndex = activeTab?.dataset.tabValue ? Number.parseInt(activeTab.dataset.tabValue, 10) : 0;
+    switchSettingsCategory(categoryIndex);
     refreshGlobalSafetyStatus();
     setText("settings-message", "已恢复当前玩法的默认设置");
 }
