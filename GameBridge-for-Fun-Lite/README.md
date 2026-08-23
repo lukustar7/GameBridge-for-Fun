@@ -1,6 +1,6 @@
 # GameBridge for Fun Lite
 
-当前版本：`0.1.0-beta.2`
+当前版本：`1.2.0`
 
 在线使用：[https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/](https://lukustar7.github.io/GameBridge-for-Fun/GameBridge-for-Fun-Lite/)
 

@@ -367,7 +367,7 @@ function testRequiredFiles() {
     assert.ok(!worker.includes("../"), "Lite 离线缓存不得访问父目录运行文件");
 
     const version = fs.readFileSync(path.join(liteRoot, "VERSION"), "utf8").trim();
-    assert.match(version, /^\d+\.\d+\.\d+-(alpha|beta)\.\d+$/);
+    assert.match(version, /^\d+\.\d+\.\d+(?:-(alpha|beta)\.\d+)?$/);
     assert.ok(html.includes(version), "页面版本必须与 VERSION 一致");
     assert.ok(worker.includes(version), "缓存版本必须与 VERSION 一致");
     assert.ok(fs.readFileSync(path.join(liteRoot, "README.md"), "utf8").includes(version), "Lite README 版本必须同步");

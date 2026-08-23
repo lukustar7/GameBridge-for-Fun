@@ -1,6 +1,6 @@
 # GameBridge for Fun Lite 使用说明
 
-当前版本：`0.1.0-beta.2`
+当前版本：`1.2.0`
 
 ## 可用设备
 

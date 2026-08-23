@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-08-23
 
 ### Added
 
@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- 正式发布 1.2.0 版本；全端（电脑控制台、手机 Web、Android APK 与公开 Lite 网页版）版本号全部统一步调为 `1.2.0`。
 - 全端重构为 Modern Clean 现代浅色视觉体系（`#F8FAFC` 浅灰画布、`#FFFFFF` 纯白圆角卡片、`#0F172A` 高对比文本、`#2563EB` 科技蔚蓝、`#DC2626` 纯红实体 STOP 急停）。
 - 桌面控制台重构为现代双栏高密度仪表盘（左侧硬件状态、SVG 圆弧 A/B 强度动态表盘与试电台；右侧分段向导与二维码）。
 - 全局去繁就简、精炼文案与去 Emoji：顶部胶囊精炼为“未连接 / 硬件 3.0 / 硬件 2.0”，急停按键精炼为大写“STOP”，网络徽章精炼为“--ms / 离线”；游戏正文与规则保留亲民易懂的详细中文解释。

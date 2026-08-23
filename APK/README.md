@@ -1,6 +1,6 @@
 # Android APK
 
-`GameBridgeForFun-Android15-v1.1.0-beta.3.apk` 是可直接安装的 Android 15+ 正式签名 Beta 包，不需要安装网页 HTTPS 根证书。
+`GameBridgeForFun-Android15-v1.2.0.apk` 是可直接安装的 Android 15+ 正式签名发布包，不需要安装网页 HTTPS 根证书。
 
 安装过旧调试签名包的手机必须先卸载旧包；Android 不允许不同签名直接覆盖，卸载会同步清除旧包内的本地游戏设置。
 
