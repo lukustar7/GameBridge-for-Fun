@@ -1261,7 +1261,7 @@
 
                         <div>
                             <label class="slider-label" style="margin-bottom: 5px;">用哪一路输出</label>
-                            <select id="global-output-mode" onchange="updateBChannelSettingsVisibility(); saveGlobalOutputSettings()">
+                            <select id="global-output-mode" onchange="saveGlobalOutputSettings()">
                                 <option value="a">只用 A</option>
                                 <option value="b">只用 B</option>
                                 <option value="ab">A+B 同时</option>
@@ -1269,36 +1269,11 @@
                             <p class="field-help">所有玩法共用。选择 B 或 A+B 前，请确认实际接线和可接受强度。</p>
                         </div>
 
-                        <div id="global-b-settings">
-                            <div style="margin-bottom: 15px;">
-                                <label class="slider-label" style="margin-bottom: 5px;">B 通道强度</label>
-                                <select id="global-b-strength-mode" onchange="updateBChannelSettingsVisibility(); saveGlobalOutputSettings()">
-                                    <option value="percent">按比例降低</option>
-                                    <option value="same">跟 A 一样</option>
-                                </select>
-                                <p class="field-help">按比例降低更稳；跟 A 一样时，两路使用相同请求强度。</p>
-                            </div>
-
-                            <div id="global-b-percent-settings" class="slider-container">
-                                <div class="slider-label">
-                                    <span>B 强度比例</span>
-                                    <span id="val-global-b-strength-percent">50%</span>
-                                </div>
-                                <div class="stepper-slider-wrap">
-                                    <button type="button" class="stepper-btn" onclick="stepSetting('global-b-strength-percent', -5)">-</button>
-                                    <div class="slider-track-relative">
-                                        <input type="range" id="global-b-strength-percent" min="10" max="100" step="5" value="50" oninput="updateSettingValue('global-b-strength-percent')">
-                                    </div>
-                                    <button type="button" class="stepper-btn" onclick="stepSetting('global-b-strength-percent', 5)">+</button>
-                                </div>
-                                <p class="field-help">例如 A 请求强度 40、比例 50%，B 请求强度就是 20；设备限幅仍会再次降低实际输出。</p>
-                            </div>
-                        </div>
                         <div class="tech-row">
                             <span>当前玩法强度硬上限</span>
                             <strong id="global-effective-strength-limit">等待 App 回传</strong>
                         </div>
-                        <p class="field-help">由设备 App 的 A/B 限幅、当前通道和 B 比例共同计算；所有玩法设置与实际输出都不能超过它。</p>
+                        <p class="field-help">由设备 App 的 A/B 限幅和当前所选通道共同决定；所有玩法设置与实际输出都不能超过它。</p>
                     </div>
                     <button id="global-output-confirm-button" type="button" class="full-width" onclick="confirmGlobalOutputSettings()" hidden>确认全局输出</button>
                     <p id="global-output-message" class="sub-text global-output-message" role="status" aria-live="polite">波形和通道会应用到所有玩法。</p>

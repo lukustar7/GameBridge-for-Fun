@@ -30,11 +30,6 @@
             </nav>
 
             <section id="page-setup" class="task-page" role="tabpanel" aria-labelledby="tab-setup">
-                <article class="notice-card" aria-label="测试版本提示">
-                    <strong>1.2.0 正式版</strong>
-                    <p>已完成全玩法与多重安全限幅验证。请从低强度、单通道开始，不要把软件保护当作唯一安全措施。</p>
-                </article>
-
                 <section class="panel" aria-labelledby="capability-title">
                     <div class="panel-heading">
                         <div>
@@ -104,30 +99,11 @@
                             </div>
                         </fieldset>
 
-                        <div id="b-channel-options" class="dependent-settings" hidden>
-                            <label class="field-label" for="b-strength-mode">B 通道强度</label>
-                            <select id="b-strength-mode" class="select-control">
-                                <option value="percent">按 A 通道比例</option>
-                                <option value="same">与 A 通道相同</option>
-                            </select>
-                            <p class="field-help">与第一版一致：可以让 B 跟随 A，或按 A 的一定比例输出；两个通道仍分别受网页上限约束。</p>
-                            <div id="b-strength-percent-block" class="range-block">
-                                <label for="b-strength-percent"><span>B 相对 A 的比例</span><output id="b-strength-percent-value" for="b-strength-percent">50%</output></label>
-                                <div class="stepper-slider-wrap">
-                                    <button type="button" class="stepper-btn" onclick="window.stepLiteRange('b-strength-percent', -5)">-</button>
-                                    <div class="slider-track-relative">
-                                        <input id="b-strength-percent" type="range" min="10" max="100" step="5" value="50">
-                                    </div>
-                                    <button type="button" class="stepper-btn" onclick="window.stepLiteRange('b-strength-percent', 5)">+</button>
-                                </div>
-                            </div>
-                        </div>
-
                         <label class="field-label" for="waveform-select">波形感觉</label>
                         <select id="waveform-select" class="select-control"></select>
                         <p class="field-help">“游戏默认”适合短输出；“随机”会按本次时长避开慢启动波形。</p>
 
-                        <div class="range-block">
+                        <div id="limit-a-block" class="range-block">
                             <label for="limit-a"><span>A 通道网页上限</span><output id="limit-a-value" for="limit-a">30</output></label>
                             <div class="stepper-slider-wrap">
                                 <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-a', -1)">-</button>
@@ -137,7 +113,7 @@
                                 <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-a', 1)">+</button>
                             </div>
                         </div>
-                        <div class="range-block">
+                        <div id="limit-b-block" class="range-block" hidden>
                             <label for="limit-b"><span>B 通道网页上限</span><output id="limit-b-value" for="limit-b">30</output></label>
                             <div class="stepper-slider-wrap">
                                 <button type="button" class="stepper-btn" onclick="window.stepLiteRange('limit-b', -1)">-</button>

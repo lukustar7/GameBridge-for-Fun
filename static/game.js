@@ -62,9 +62,7 @@ const WAVEFORM_LABELS = Object.freeze({
     rhythmic: "节奏步伐"
 });
 const DEFAULT_OUTPUT_SETTINGS = {
-    outputMode: "a",
-    bStrengthMode: "percent",
-    bStrengthPercent: 50
+    outputMode: "a"
 };
 const DEFAULT_SETTINGS = {
     shake: {
@@ -747,9 +745,7 @@ function getCurrentEffectiveStrengthLimit() {
     return getEffectiveBaseStrengthLimit(
         getConfiguredOutputMode(),
         latestTechState.limit_a,
-        latestTechState.limit_b,
-        globalOutputSettings.bStrengthMode,
-        globalOutputSettings.bStrengthPercent
+        latestTechState.limit_b
     );
 }
 
@@ -931,8 +927,6 @@ function sendMobileTestShock(outputMode) {
     sendGameMessage({
         type: "test_shock",
         outputMode,
-        bStrengthMode: "same",
-        bStrengthPercent: 100,
         waveform: DEFAULT_WAVEFORM,
         strength: MOBILE_TEST_STRENGTH,
         duration: MOBILE_TEST_DURATION_MS
@@ -1907,9 +1901,6 @@ function populateGlobalOutputForm() {
 
     $("global-output-mode").value = globalOutputSettings.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode;
     $("global-waveform").value = selectedWaveform;
-    $("global-b-strength-mode").value = globalOutputSettings.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
-    setRangeValue("global-b-strength-percent", globalOutputSettings.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent);
-    updateBChannelSettingsVisibility();
     refreshGlobalOutputPresentation();
 }
 
@@ -1938,20 +1929,6 @@ function showGlobalOutputSettings() {
     window.requestAnimationFrame(() => group.querySelector("summary")?.focus({ preventScroll: true }));
 }
 
-function updateBChannelSettingsVisibility() {
-    const mode = $("global-output-mode") ? $("global-output-mode").value : "a";
-    const strengthMode = $("global-b-strength-mode") ? $("global-b-strength-mode").value : "percent";
-    const bGroup = $("global-b-settings");
-    const percentGroup = $("global-b-percent-settings");
-    if (bGroup) {
-        bGroup.style.display = mode === "a" ? "none" : "block";
-    }
-    // 只有 B 通道按比例降低时才展示比例滑块；“跟 A 一样”不需要额外百分比。
-    if (percentGroup) {
-        percentGroup.style.display = mode === "a" || strengthMode === "same" ? "none" : "block";
-    }
-}
-
 function setRangeValue(id, value) {
     $(id).value = value;
     updateSettingValue(id, false);
@@ -1966,9 +1943,7 @@ function updateSettingValue(id, shouldSave = true) {
         control.setAttribute("aria-valuetext", formatSettingLabel(id, rawValue));
     }
 
-    if (shouldSave && id === "global-b-strength-percent") {
-        saveGlobalOutputSettings(true);
-    } else if (shouldSave) {
+    if (shouldSave) {
         saveSelectedSettings(true);
     }
 }
@@ -1997,14 +1972,9 @@ function collectGlobalOutputSettings() {
     const outputMode = ["a", "b", "ab"].includes($("global-output-mode").value)
         ? $("global-output-mode").value
         : DEFAULT_OUTPUT_SETTINGS.outputMode;
-    const bStrengthMode = ["same", "percent"].includes($("global-b-strength-mode").value)
-        ? $("global-b-strength-mode").value
-        : DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
 
     return {
-        outputMode,
-        bStrengthMode,
-        bStrengthPercent: clamp(readNumber("global-b-strength-percent", 50), 10, 100)
+        outputMode
     };
 }
 
@@ -2426,8 +2396,6 @@ function sendPulse(strength, duration = 100, restMs = 250) {
 function getOutputPayload() {
     return {
         outputMode: globalOutputSettings.outputMode || DEFAULT_OUTPUT_SETTINGS.outputMode,
-        bStrengthMode: globalOutputSettings.bStrengthMode || DEFAULT_OUTPUT_SETTINGS.bStrengthMode,
-        bStrengthPercent: globalOutputSettings.bStrengthPercent || DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
         waveform: selectedWaveform
     };
 }
@@ -2454,16 +2422,12 @@ function sendConfiguredShock(strength, duration, metadata = {}) {
 
 function formatOutputLabel(cfg) {
     const mode = cfg.outputMode || "a";
-    const bText = cfg.bStrengthMode === "same" ? "B 同强度" : `B ${cfg.bStrengthPercent}%`;
-
     if (mode === "b") {
-        return `只用 B | ${bText}`;
+        return "只用 B";
     }
-
     if (mode === "ab") {
-        return `A+B | ${bText}`;
+        return "A+B 同时";
     }
-
     return "只用 A";
 }
 

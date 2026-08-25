@@ -49,13 +49,10 @@
         capabilityWake: byId("capability-wake"),
         capabilityVibration: byId("capability-vibration"),
         waveformSelect: byId("waveform-select"),
-        bStrengthMode: byId("b-strength-mode"),
-        bStrengthPercent: byId("b-strength-percent"),
-        bStrengthPercentValue: byId("b-strength-percent-value"),
-        bChannelOptions: byId("b-channel-options"),
-        bStrengthPercentBlock: byId("b-strength-percent-block"),
         limitA: byId("limit-a"),
         limitB: byId("limit-b"),
+        limitABlock: byId("limit-a-block"),
+        limitBBlock: byId("limit-b-block"),
         limitAValue: byId("limit-a-value"),
         limitBValue: byId("limit-b-value"),
         outputSummary: byId("output-summary"),
@@ -164,17 +161,8 @@
     function loadGlobalSettings() {
         const candidate = readStoredObject().global || {};
         const outputMode = protocol.normalizeChannel(candidate.outputMode || candidate.channel);
-        const bStrengthMode = ["same", "percent"].includes(candidate.bStrengthMode)
-            ? candidate.bStrengthMode
-            : DEFAULT_OUTPUT_SETTINGS.bStrengthMode;
         return {
             outputMode,
-            bStrengthMode,
-            bStrengthPercent: Math.round(rules.clamp(
-                candidate.bStrengthPercent ?? DEFAULT_OUTPUT_SETTINGS.bStrengthPercent,
-                10,
-                100
-            )),
             waveform: waveforms.normalizeKey(candidate.waveform),
             limitA: Math.round(rules.clamp(candidate.limitA ?? DEFAULT_DEVICE_LIMITS.limitA, 0, 200)),
             limitB: Math.round(rules.clamp(candidate.limitB ?? DEFAULT_DEVICE_LIMITS.limitB, 0, 200)),
@@ -197,9 +185,7 @@
         return rules.getEffectiveBaseStrengthLimit(
             globalSettings.outputMode,
             globalSettings.limitA,
-            globalSettings.limitB,
-            globalSettings.bStrengthMode,
-            globalSettings.bStrengthPercent
+            globalSettings.limitB
         );
     }
 
@@ -434,13 +420,14 @@
     function configureOutput() {
         output.configure(globalSettings);
         const channelLabel = globalSettings.outputMode === "a" ? "只用 A" : (globalSettings.outputMode === "b" ? "只用 B" : "A + B");
-        const bLabel = globalSettings.bStrengthMode === "same"
-            ? "B 同强度"
-            : `B ${globalSettings.bStrengthPercent}%`;
         const waveform = waveforms.listOptions().find((item) => item.key === globalSettings.waveform);
-        elements.outputSummary.textContent = `${waveform ? waveform.label : "游戏默认"} · ${channelLabel}${globalSettings.outputMode === "a" ? "" : ` · ${bLabel}`}`;
-        elements.bChannelOptions.hidden = globalSettings.outputMode === "a";
-        elements.bStrengthPercentBlock.hidden = globalSettings.bStrengthMode !== "percent";
+        elements.outputSummary.textContent = `${waveform ? waveform.label : "游戏默认"} · ${channelLabel}`;
+        if (elements.limitABlock) {
+            elements.limitABlock.hidden = globalSettings.outputMode === "b";
+        }
+        if (elements.limitBBlock) {
+            elements.limitBBlock.hidden = globalSettings.outputMode === "a";
+        }
     }
 
     function invalidateOutputConfirmation(message, persist) {
@@ -457,8 +444,6 @@
     function getOutputSettingControls() {
         return [
             ...document.querySelectorAll("input[name='output-channel']"),
-            elements.bStrengthMode,
-            elements.bStrengthPercent,
             elements.waveformSelect,
             elements.limitA,
             elements.limitB
@@ -1625,17 +1610,6 @@
                 invalidateOutputConfirmation("通道已变化，需要重新确认接线。", true);
             });
         });
-        elements.bStrengthMode.addEventListener("change", () => {
-            globalSettings.bStrengthMode = elements.bStrengthMode.value === "same" ? "same" : "percent";
-            configureOutput();
-            invalidateOutputConfirmation("B 通道强度规则已变化，需要重新确认。", true);
-        });
-        elements.bStrengthPercent.addEventListener("input", () => {
-            globalSettings.bStrengthPercent = Number(elements.bStrengthPercent.value);
-            elements.bStrengthPercentValue.textContent = `${elements.bStrengthPercent.value}%`;
-            configureOutput();
-            invalidateOutputConfirmation("B 通道强度比例已变化，需要重新确认。", true);
-        });
         elements.waveformSelect.addEventListener("change", () => {
             globalSettings.waveform = waveforms.normalizeKey(elements.waveformSelect.value);
             configureOutput();
@@ -1696,8 +1670,6 @@
                 output.configure({
                     ...globalSettings,
                     outputMode: testMode,
-                    bStrengthMode: "same",
-                    bStrengthPercent: 100,
                     waveform: "game_default"
                 });
                 await output.playPulse(15, 1000, "低强度试电");

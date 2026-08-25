@@ -14,7 +14,6 @@
     // 字符串设置只接受页面明确支持的选项，防止损坏的本地缓存把游戏带入未定义分支。
     const ALLOWED_SETTING_VALUES = {
         outputMode: new Set(["a", "b", "ab"]),
-        bStrengthMode: new Set(["percent", "same"]),
         mode: new Set(["radius", "gap"]),
         opponentDifficulty: new Set(["easy", "normal", "hard"]),
         winRate: new Set(["loose", "normal", "brutal"]),
@@ -80,20 +79,13 @@
         }
 
         const outputMode = candidate.outputMode;
-        const bStrengthMode = candidate.bStrengthMode;
-        const bStrengthPercent = candidate.bStrengthPercent;
-        const valid = ALLOWED_SETTING_VALUES.outputMode.has(outputMode) &&
-            ALLOWED_SETTING_VALUES.bStrengthMode.has(bStrengthMode) &&
-            typeof bStrengthPercent === "number" && Number.isFinite(bStrengthPercent) &&
-            bStrengthPercent >= 10 && bStrengthPercent <= 100;
+        const valid = ALLOWED_SETTING_VALUES.outputMode.has(outputMode);
 
         if (!valid) {
             return { settings: normalized, valid: false };
         }
 
         normalized.outputMode = outputMode;
-        normalized.bStrengthMode = bStrengthMode;
-        normalized.bStrengthPercent = bStrengthPercent;
         return { settings: normalized, valid: true };
     }
 
@@ -101,7 +93,7 @@
         const normalized = normalizeOutputSettings(defaultSettings, savedSettings);
         return {
             settings: normalized.settings,
-            // 明确保存过 confirmed=true 且三个输出字段都合法，才允许正式输出。
+            // 明确保存过 confirmed=true 且通道字段合法，才允许正式输出。
             requiresConfirmation: !normalized.valid || savedSettings?.confirmed !== true
         };
     }
@@ -117,7 +109,7 @@
             };
         }
 
-        const outputKeys = ["outputMode", "bStrengthMode", "bStrengthPercent"];
+        const outputKeys = ["outputMode"];
         let foundLegacyOutput = false;
         let allCandidatesValid = true;
         const candidates = names.map((gameName) => {
@@ -543,22 +535,14 @@
         return false;
     }
 
-    function getEffectiveBaseStrengthLimit(mode, limitA, limitB, bStrengthMode, bStrengthPercent) {
-        // 游戏只设置一份“基础强度”。B 为比例模式时，需要先把 B 的硬件上限反推成基础强度上限。
+    function getEffectiveBaseStrengthLimit(mode, limitA, limitB) {
         if (!["a", "b", "ab"].includes(mode)) return 0;
         const safeA = Math.floor(clamp(limitA, 0, 200));
         const safeB = Math.floor(clamp(limitB, 0, 200));
-        let bBaseLimit = safeB;
-        if (mode !== "a") {
-            if (!["same", "percent"].includes(bStrengthMode)) return 0;
-            if (bStrengthMode === "percent") {
-                const percent = clamp(bStrengthPercent, 10, 100);
-                bBaseLimit = Math.min(200, Math.floor((safeB * 100) / percent));
-            }
-        }
         if (mode === "a") return safeA;
-        if (mode === "b") return bBaseLimit;
-        return Math.min(safeA, bBaseLimit);
+        if (mode === "b") return safeB;
+        if (safeA <= 0 || safeB <= 0) return 0;
+        return Math.min(safeA, safeB);
     }
 
     function clampGameStrengthSettings(settings, maximumStrength) {

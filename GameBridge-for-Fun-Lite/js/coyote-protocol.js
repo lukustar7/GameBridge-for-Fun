@@ -35,19 +35,14 @@
         return ["a", "b", "ab"].includes(value) ? value : "a";
     }
 
-    function channelStrengths(strength, channel, limitA, limitB, bStrengthMode, bStrengthPercent) {
+    function channelStrengths(strength, channel, limitA, limitB) {
         const safeStrength = Math.round(clampNumber(strength, 0, 200, 0));
         const safeA = Math.round(clampNumber(limitA, 0, 200, 0));
         const safeB = Math.round(clampNumber(limitB, 0, 200, 0));
         const selected = normalizeChannel(channel);
-        const bMode = bStrengthMode === "percent" ? "percent" : "same";
-        const bPercent = clampNumber(bStrengthPercent, 10, 100, 100);
-        const requestedB = bMode === "percent"
-            ? Math.round(safeStrength * bPercent / 100)
-            : safeStrength;
         return {
             a: selected === "b" ? 0 : Math.min(safeStrength, safeA),
-            b: selected === "a" ? 0 : Math.min(requestedB, safeB)
+            b: selected === "a" ? 0 : Math.min(safeStrength, safeB)
         };
     }
 

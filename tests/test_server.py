@@ -111,7 +111,7 @@ class ServerLogicTests(unittest.TestCase):
         server.state["limit_a"] = None
         server.state["limit_b"] = None
 
-        targets = server.build_channel_strengths(100, "ab", "same", 100)
+        targets = server.build_channel_strengths(100, "ab")
 
         self.assertEqual(targets, [])
 
@@ -120,7 +120,7 @@ class ServerLogicTests(unittest.TestCase):
         server.state["limit_a"] = 80
         server.state["limit_b"] = None
 
-        targets = server.build_channel_strengths(30, "ab", "same", 100)
+        targets = server.build_channel_strengths(30, "ab")
 
         self.assertEqual(targets, [])
 
@@ -139,11 +139,11 @@ class ServerLogicTests(unittest.TestCase):
         self.assertTrue(server.is_valid_game_token(server.GAME_ACCESS_TOKEN))
 
     def test_strengths_are_clamped_per_channel(self):
-        """A/B 两路分别受自己的 App 限幅控制，比例模式也要先计算再限幅。"""
+        """A/B 两路分别受自己的 App 限幅控制。"""
         server.state["limit_a"] = 40
         server.state["limit_b"] = 30
 
-        targets = server.build_channel_strengths(100, "ab", "percent", 50)
+        targets = server.build_channel_strengths(100, "ab")
 
         self.assertEqual(
             targets,
@@ -491,8 +491,8 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         server.state_lock = self.original_state_lock
 
     async def test_overlapping_output_is_rejected_without_queueing(self):
-        first = server.schedule_game_shock(20, 1000, "a", "same", 100, clear_after=True)
-        second = server.schedule_game_shock(20, 1000, "a", "same", 100, clear_after=True)
+        first = server.schedule_game_shock(20, 1000, "a", clear_after=True)
+        second = server.schedule_game_shock(20, 1000, "a", clear_after=True)
 
         self.assertTrue(first)
         self.assertFalse(second)
@@ -506,7 +506,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         """非零强度必须使用带期限的 V4 任务，并在波形下发前完成入队。"""
         fake_client = server.device_app_client
 
-        scheduled = server.schedule_game_shock(20, 100, "a", "same", 100, clear_after=True)
+        scheduled = server.schedule_game_shock(20, 100, "a", clear_after=True)
         self.assertTrue(scheduled)
         running_task = server.active_output_task
         await running_task
@@ -592,7 +592,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         owner = object()
 
         with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.03), patch("builtins.print"):
-            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            scheduled = server.schedule_game_shock(25, 1000, "a", clear_after=True)
             self.assertTrue(scheduled)
             server.arm_output_watchdog(owner)
             await asyncio.sleep(0.08)
@@ -610,7 +610,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         unrelated_page = object()
 
         with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
-            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            scheduled = server.schedule_game_shock(25, 1000, "a", clear_after=True)
             self.assertTrue(scheduled)
             server.arm_output_watchdog(owner)
             await asyncio.sleep(0.03)
@@ -627,7 +627,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         owner = object()
 
         with patch.object(server, "OUTPUT_HEARTBEAT_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
-            scheduled = server.schedule_game_shock(25, 1000, "a", "same", 100, clear_after=True)
+            scheduled = server.schedule_game_shock(25, 1000, "a", clear_after=True)
             self.assertTrue(scheduled)
             server.arm_output_watchdog(owner)
             await asyncio.sleep(0.03)
@@ -648,7 +648,7 @@ class OutputSchedulerTests(unittest.IsolatedAsyncioTestCase):
         owner = object()
 
         with patch.object(server, "CONTINUOUS_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.05), patch("builtins.print"):
-            scheduled = server.schedule_game_shock(25, 500, "a", "same", 100, clear_after=False)
+            scheduled = server.schedule_game_shock(25, 500, "a", clear_after=False)
             self.assertTrue(scheduled)
             server.arm_output_watchdog(owner, mode="continuous")
             await asyncio.sleep(0.03)

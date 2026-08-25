@@ -46,24 +46,24 @@ function testProtocolEncoding() {
         "最终出口必须同时受两个用户上限约束"
     );
     assert.deepEqual(
-        protocol.channelStrengths(80, "ab", 200, 200, "percent", 50),
-        { a: 80, b: 40 },
-        "A+B 按比例模式必须与原版一样降低 B 通道强度"
+        protocol.channelStrengths(80, "ab", 100, 50),
+        { a: 80, b: 50 },
+        "A+B 模式下 A 和 B 各自受各自上限约束"
     );
     assert.deepEqual(
-        protocol.channelStrengths(80, "b", 200, 200, "same", 10),
-        { a: 0, b: 80 },
-        "B 同强度模式不得错误套用比例"
+        protocol.channelStrengths(80, "b", 200, 70),
+        { a: 0, b: 70 },
+        "B 模式下 A 为 0 且 B 受 B 上限约束"
     );
     assert.deepEqual(
-        protocol.channelStrengths(36, "a", 35, 35, "same", 100),
+        protocol.channelStrengths(36, "a", 35, 35),
         { a: 35, b: 0 },
         "首页上限 35 必须在最终硬件出口截断游戏请求 36"
     );
     assert.equal(
-        gameLogic.getEffectiveBaseStrengthLimit("b", 35, 20, "percent", 50),
-        40,
-        "B 比例模式必须把硬件上限换算成游戏可设置的基础强度"
+        gameLogic.getEffectiveBaseStrengthLimit("b", 35, 20),
+        20,
+        "B 模式下有效基础上限为 B 上限"
     );
 }
 
@@ -399,8 +399,8 @@ function testDeploymentPathAndDirectControlConfirmation() {
 function testGlobalOutputControlsMatchOriginal() {
     const html = fs.readFileSync(path.join(liteRoot, "index.html"), "utf8");
     const mainSource = fs.readFileSync(path.join(liteRoot, "js/main.js"), "utf8");
-    assert.ok(html.includes('id="b-strength-mode"'), "Lite 必须提供原版的 B 通道同强度/按比例设置");
-    assert.ok(html.includes('id="b-strength-percent"'), "Lite 必须提供原版的 B 通道比例滑块");
+    assert.ok(html.includes('id="limit-a"'), "Lite 必须提供 A 通道上限设置");
+    assert.ok(html.includes('id="limit-b"'), "Lite 必须提供 B 通道上限设置");
     assert.ok(html.indexOf("./js/game-config.js") < html.indexOf("./js/main.js"), "玩法契约必须先于主程序加载");
     assert.ok(mainSource.includes("window.LiteGameConfig"), "主程序必须使用通过对照测试的独立玩法契约");
     assert.ok(html.includes('id="output-lock-badge"'), "Lite 保存后必须显示可读的锁定状态");

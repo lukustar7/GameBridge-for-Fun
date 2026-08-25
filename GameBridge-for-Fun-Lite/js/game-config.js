@@ -12,9 +12,7 @@
     "use strict";
 
     const DEFAULT_OUTPUT_SETTINGS = Object.freeze({
-        outputMode: "a",
-        bStrengthMode: "percent",
-        bStrengthPercent: 50
+        outputMode: "a"
     });
 
     const DEFAULT_DEVICE_LIMITS = Object.freeze({ limitA: 30, limitB: 30 });

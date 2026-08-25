@@ -21,9 +21,7 @@ const DEFAULTS = {
 };
 
 const DEFAULT_GLOBAL_OUTPUT = {
-    outputMode: "a",
-    bStrengthMode: "percent",
-    bStrengthPercent: 50
+    outputMode: "a"
 };
 
 function sequenceRandom(values) {
@@ -58,16 +56,12 @@ test("本地设置只恢复已知且类型正确的字段", () => {
 test("已确认且合法的全局输出设置可以恢复", () => {
     const restored = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
         outputMode: "ab",
-        bStrengthMode: "same",
-        bStrengthPercent: 80,
         confirmed: true
     });
 
     assert.deepEqual(restored, {
         settings: {
-            outputMode: "ab",
-            bStrengthMode: "same",
-            bStrengthPercent: 80
+            outputMode: "ab"
         },
         requiresConfirmation: false
     });
@@ -76,14 +70,10 @@ test("已确认且合法的全局输出设置可以恢复", () => {
 test("损坏或未确认的全局输出设置必须暂停正式输出", () => {
     const unconfirmed = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
         outputMode: "b",
-        bStrengthMode: "percent",
-        bStrengthPercent: 40,
         confirmed: false
     });
     const damaged = logic.resolveStoredGlobalOutputSettings(DEFAULT_GLOBAL_OUTPUT, {
         outputMode: "unknown",
-        bStrengthMode: "same",
-        bStrengthPercent: Number.POSITIVE_INFINITY,
         confirmed: true
     });
 
@@ -93,13 +83,13 @@ test("损坏或未确认的全局输出设置必须暂停正式输出", () => {
     assert.deepEqual(damaged.settings, DEFAULT_GLOBAL_OUTPUT);
 });
 
-test("所选通道的有效游戏强度上限会考虑 B 通道比例", () => {
-    assert.equal(logic.getEffectiveBaseStrengthLimit("a", 35, 20, "percent", 50), 35);
-    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 28, "same", 50), 28);
-    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 20, "percent", 50), 40);
-    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 20, "percent", 50), 35);
-    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 0, "same", 50), 0);
-    assert.equal(logic.getEffectiveBaseStrengthLimit("unknown", 35, 20, "same", 50), 0);
+test("所选通道的有效游戏强度上限由通道与 A/B 限幅决定", () => {
+    assert.equal(logic.getEffectiveBaseStrengthLimit("a", 35, 20), 35);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 28), 28);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("b", 35, 20), 20);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 20), 20);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("ab", 35, 0), 0);
+    assert.equal(logic.getEffectiveBaseStrengthLimit("unknown", 35, 20), 0);
 });
 
 test("所有保留玩法的强度设置都会被首页安全限额截断且不修改原对象", () => {
@@ -124,9 +114,7 @@ test("所有保留玩法的强度设置都会被首页安全限额截断且不�
 
 test("旧版四个游戏通道一致时自动迁移为一份全局设置", () => {
     const legacyOutput = {
-        outputMode: "ab",
-        bStrengthMode: "percent",
-        bStrengthPercent: 60
+        outputMode: "ab"
     };
     const migrated = logic.migrateLegacyOutputSettings(
         DEFAULT_GLOBAL_OUTPUT,

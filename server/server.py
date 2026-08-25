@@ -1153,18 +1153,7 @@ def parse_output_config(data):
     output_mode = data.get("outputMode", data.get("output_mode", "a"))
     if output_mode not in {"a", "b", "ab"}:
         output_mode = "a"
-
-    b_strength_mode = data.get("bStrengthMode", data.get("b_strength_mode", "percent"))
-    if b_strength_mode not in {"same", "percent"}:
-        b_strength_mode = "percent"
-
-    b_strength_percent = clamp_int(
-        data.get("bStrengthPercent", data.get("b_strength_percent", 50)),
-        10,
-        100,
-        fallback=50
-    )
-    return output_mode, b_strength_mode, b_strength_percent
+    return output_mode
 
 
 def parse_waveform_config(data):
@@ -1173,7 +1162,7 @@ def parse_waveform_config(data):
     return normalize_waveform_key(data.get("waveform", DEFAULT_WAVEFORM_KEY))
 
 
-def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_strength_percent):
+def build_channel_strengths(base_strength, output_mode):
     """把游戏强度换算成 A/B 两路最终强度，并分别套用设备限幅"""
     base = clamp_int(base_strength, 0, 200, fallback=0)
     if base <= 0:
@@ -1193,8 +1182,7 @@ def build_channel_strengths(base_strength, output_mode, b_strength_mode, b_stren
         targets.append((Channel.A, min(base, limit_a), "client_strength_a"))
 
     if output_mode in {"b", "ab"}:
-        b_base = base if b_strength_mode == "same" else round(base * b_strength_percent / 100)
-        targets.append((Channel.B, min(clamp_int(b_base, 0, 200, fallback=0), limit_b), "client_strength_b"))
+        targets.append((Channel.B, min(base, limit_b), "client_strength_b"))
 
     return [(channel, strength, state_key) for channel, strength, state_key in targets if strength > 0]
 
@@ -1332,8 +1320,6 @@ def schedule_game_shock(
     strength,
     duration_ms,
     output_mode="a",
-    b_strength_mode="percent",
-    b_strength_percent=50,
     clear_after=True,
     waveform_key=DEFAULT_WAVEFORM_KEY,
 ):
@@ -1341,7 +1327,7 @@ def schedule_game_shock(
     global active_output_task, active_output_clear_after
     if not state["device_connected"] or not device_app_client:
         return False
-    if not build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent):
+    if not build_channel_strengths(strength, output_mode):
         return False
     if active_output_task and not active_output_task.done():
         return False
@@ -1350,8 +1336,6 @@ def schedule_game_shock(
         strength,
         duration_ms,
         output_mode,
-        b_strength_mode,
-        b_strength_percent,
         clear_after,
         waveform_key,
     ))
@@ -1383,8 +1367,6 @@ async def handle_game_shock(
     strength,
     duration_ms,
     output_mode="a",
-    b_strength_mode="percent",
-    b_strength_percent=50,
     clear_after=True,
     waveform_key=DEFAULT_WAVEFORM_KEY,
 ):
@@ -1395,7 +1377,7 @@ async def handle_game_shock(
     
     try:
         # A/B 通道各自遵循 0-200，且不能超过 App/设备端软上限。
-        channel_targets = build_channel_strengths(strength, output_mode, b_strength_mode, b_strength_percent)
+        channel_targets = build_channel_strengths(strength, output_mode)
         safe_duration = clamp_int(
             duration_ms,
             MIN_SHOCK_DURATION_MS,
@@ -1544,13 +1526,11 @@ async def handle_test_shock_request(websocket, data):
         fallback=TEST_DEFAULT_STRENGTH,
     )
     duration = clamp_int(data.get("duration", 300), MIN_SHOCK_DURATION_MS, TEST_MAX_DURATION_MS, fallback=300)
-    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+    output_mode = parse_output_config(data)
     scheduled = schedule_game_shock(
         strength,
         duration,
         output_mode,
-        b_strength_mode,
-        b_strength_percent,
         clear_after=True,
         waveform_key=DEFAULT_WAVEFORM_KEY,
     )
@@ -1793,14 +1773,12 @@ async def web_ws_handler(websocket, path):
                     strength = clamp_int(data.get("strength", 0), 0, 200, fallback=0)
                     duration = clamp_int(data.get("duration", 120), 100, 500, fallback=120)
                     if strength > 0:
-                        output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                        output_mode = parse_output_config(data)
                         waveform_key = parse_waveform_config(data)
                         scheduled = schedule_game_shock(
                             strength,
                             duration,
                             output_mode,
-                            b_strength_mode,
-                            b_strength_percent,
                             clear_after=False,
                             waveform_key=waveform_key,
                         )
@@ -1886,14 +1864,12 @@ async def web_ws_handler(websocket, path):
                         await send_lightning_feedback(websocket, request_id, False, "请求强度为 0，未输出")
                         continue
 
-                    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                    output_mode = parse_output_config(data)
                     waveform_key = parse_waveform_config(data)
                     scheduled = schedule_game_shock(
                         strength,
                         duration,
                         output_mode,
-                        b_strength_mode,
-                        b_strength_percent,
                         clear_after=True,
                         waveform_key=waveform_key,
                     )
@@ -1969,15 +1945,13 @@ async def web_ws_handler(websocket, path):
                         await send_game_shock_feedback(websocket, request_id, False, "请求强度为 0，未输出")
                         continue
 
-                    output_mode, b_strength_mode, b_strength_percent = parse_output_config(data)
+                    output_mode = parse_output_config(data)
                     waveform_key = parse_waveform_config(data)
                     # 单任务调度器会拒绝重叠请求，避免把长时输出无限排队。
                     scheduled = schedule_game_shock(
                         strength,
                         duration,
                         output_mode,
-                        b_strength_mode,
-                        b_strength_percent,
                         clear_after=True,
                         waveform_key=waveform_key,
                     )
