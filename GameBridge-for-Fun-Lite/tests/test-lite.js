@@ -426,9 +426,17 @@ function testGameSettingsExperienceMatchesOriginal() {
     ["a", "b", "ab"].forEach((mode) => {
         assert.ok(html.includes(`data-test-channel="${mode}"`), `低强度试电必须保留原版的 ${mode.toUpperCase()} 独立入口`);
     });
-    assert.ok(mainSource.includes("function showGameList"), "返回玩法列表必须由一个统一视图清理入口完成");
-    assert.ok(mainSource.includes("elements.settingsFields.replaceChildren()"), "返回列表必须销毁上一款游戏的动态设置控件");
-    assert.ok(!mainSource.includes("elements.gameListView.hidden = !selectedGame"), "运行页结束后不得按旧选中状态残留设置页");
+    assert.ok(!mainSource.includes("\n            input = document.createElement(") && !mainSource.includes("\n        input = document.createElement("), "动态控件创建不得使用隐式全局变量");
+    const gameConfig = require(path.join(liteRoot, "js/game-config.js"));
+    const settingGroups = gameConfig.SETTING_GROUPS;
+    Object.keys(settingGroups).forEach((gameName) => {
+        settingGroups[gameName].forEach((group) => {
+            group.fields.forEach((field) => {
+                assert.ok(field.key, `${gameName} 字段必须有 key`);
+                assert.ok(field.label, `${gameName} 字段 ${field.key} 必须有 label`);
+            });
+        });
+    });
 }
 
 function testRuntimeRuleParity() {

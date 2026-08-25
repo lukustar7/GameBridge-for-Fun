@@ -523,7 +523,7 @@
         label.append(labelText);
 
         if (field.type === "select") {
-            input = document.createElement("select");
+            const input = document.createElement("select");
             input.className = "select-control";
             field.options.forEach(([value, text]) => {
                 const option = document.createElement("option");
@@ -542,7 +542,7 @@
         const outputValue = document.createElement("output");
         outputValue.textContent = `${gameSettings[gameName][field.key]}${field.unit}`;
         label.append(outputValue);
-        input = document.createElement("input");
+        const input = document.createElement("input");
         input.type = "range";
         input.min = String(field.min);
         const effectiveLimit = getEffectiveStrengthLimit();
