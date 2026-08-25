@@ -505,13 +505,13 @@ select:focus {
 }
 
 .stepper-btn {
-    width: 36px;
-    height: 36px;
-    min-height: 36px;
-    flex: 0 0 36px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
     padding: 0;
     border-radius: var(--radius-full);
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: var(--text-secondary);
     background: var(--bg-soft);

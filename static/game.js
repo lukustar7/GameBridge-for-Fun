@@ -2718,7 +2718,7 @@ function initDiceGame() {
     setDiceRoundFaces(["-", "-", "-"], ["-", "-", "-"]);
     setText("dice-scores", "玩家总分: - | 对手总分: -");
     setText("dice-instruction", "摇晃手机，或点击按钮开一局");
-    $("dice-instruction").style.color = "#888888";
+    $("dice-instruction").style.color = "var(--text-secondary, #64748B)";
     $("btn-roll").disabled = !gameSettings.dice.manualRoll;
 }
 
@@ -2733,7 +2733,7 @@ function triggerDiceShake(force) {
         diceShakeEnergy = 0;
         setText("dice-instruction", "正在摇号...");
         setGamePhase("drawing", "骰子正在滚动");
-        $("dice-instruction").style.color = "#888888";
+        $("dice-instruction").style.color = "var(--text-secondary, #64748B)";
         setDiceRoundFaces(["?", "?", "?"], ["?", "?", "?"], true);
         $("btn-roll").disabled = true;
     }
@@ -2828,7 +2828,7 @@ function settleDiceGame() {
 
     if (outcome.kind === "win") {
         setText("dice-instruction", outcome.reason);
-        $("dice-instruction").style.color = "#ffffff";
+        $("dice-instruction").style.color = "var(--success, #16A34A)";
         setGamePhase("ready", "本局无需输出");
         vibratePattern([28, 35, 28], 0);
         return;
@@ -2849,7 +2849,7 @@ function startDicePunishQueue(rawCount, reason) {
 
     if (cappedCount <= 0) {
         setText("dice-instruction", "没有惩罚");
-        $("dice-instruction").style.color = "#ffffff";
+        $("dice-instruction").style.color = "var(--text-secondary, #64748B)";
         setGamePhase("ready", "本局无需输出");
         return;
     }
@@ -2858,7 +2858,7 @@ function startDicePunishQueue(rawCount, reason) {
     if (outputBlockReason) {
         dicePunishRemaining = 0;
         setText("dice-instruction", `${reason} | ${outputBlockReason}，未输出`);
-        $("dice-instruction").style.color = "#ff3333";
+        $("dice-instruction").style.color = "var(--danger, #DC2626)";
         $("btn-roll").disabled = !gameSettings.dice.manualRoll;
         return;
     }
@@ -2907,7 +2907,7 @@ function runNextDicePunish(generation) {
             ? `正在电 | 剩余 ${currentIndex} 下，每下 ${cfg.singleSeconds.toFixed(1)}s，间隔 ${cfg.gapSeconds.toFixed(1)}s`
             : `${getOutputBlockReason() || "输出忙"} | 本局队列已停止，未输出`
     );
-    $("dice-instruction").style.color = "#ff3333";
+    $("dice-instruction").style.color = "var(--danger, #DC2626)";
 
     if (!sent) {
         // 网络断开或输出忙时立即终止本局，不能继续倒计数并伪装成硬件已经执行。
@@ -2932,7 +2932,7 @@ function runNextDicePunish(generation) {
 
         if (dicePunishRemaining <= 0) {
             setText("dice-instruction", "本局惩罚结束");
-            $("dice-instruction").style.color = "#888888";
+            $("dice-instruction").style.color = "var(--text-secondary, #64748B)";
             $("btn-roll").disabled = !gameSettings.dice.manualRoll;
             setGamePhase("ready", "本局惩罚结束");
             return;
