@@ -1577,9 +1577,6 @@
         elements.limitB.value = String(globalSettings.limitB);
         elements.limitAValue.textContent = String(globalSettings.limitA);
         elements.limitBValue.textContent = String(globalSettings.limitB);
-        elements.bStrengthMode.value = globalSettings.bStrengthMode;
-        elements.bStrengthPercent.value = String(globalSettings.bStrengthPercent);
-        elements.bStrengthPercentValue.textContent = `${globalSettings.bStrengthPercent}%`;
         const channel = document.querySelector(`input[name="output-channel"][value="${globalSettings.outputMode}"]`);
         if (channel) {
             channel.checked = true;

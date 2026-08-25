@@ -449,14 +449,24 @@ input[type="text"],
 input[type="number"],
 select {
     width: 100%;
-    min-height: 40px;
+    min-height: 42px;
     padding: 8px 12px;
+    font-size: 1rem;
+    font-weight: 500;
     border: 1px solid var(--border);
     border-radius: var(--radius-small);
     color: var(--text);
     background: var(--surface);
     outline: none;
     transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+select option {
+    font-size: 1rem;
+    font-weight: 500;
+    padding: 8px 12px;
+    color: var(--text);
+    background: var(--surface);
 }
 
 input[type="text"]:focus,
