@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "gamebridge-lite-1.2.0-r1";
+const CACHE_NAME = "gamebridge-lite-1.2.0-v2";
 const APP_SHELL = Object.freeze([
     "./",
     "./index.html",
@@ -19,7 +19,7 @@ const APP_SHELL = Object.freeze([
 ]);
 
 self.addEventListener("install", (event) => {
-    // 新版本只下载到 waiting；绝不在正在输出的页面背后强制接管。
+    self.skipWaiting();
     event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
 });
 
@@ -37,14 +37,18 @@ self.addEventListener("fetch", (event) => {
     if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) {
         return;
     }
-    if (event.request.mode === "navigate") {
-        event.respondWith(
-            fetch(event.request).catch(() => caches.match("./index.html"))
-        );
-        return;
-    }
     event.respondWith(
-        caches.match(event.request).then((cached) => cached || fetch(event.request))
+        fetch(event.request)
+            .then((response) => {
+                if (response && response.status === 200 && response.type === "basic") {
+                    const responseToCache = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => {
+                        cache.put(event.request, responseToCache);
+                    });
+                }
+                return response;
+            })
+            .catch(() => caches.match(event.request).then((cached) => cached || (event.request.mode === "navigate" ? caches.match("./index.html") : null)))
     );
 });
 
